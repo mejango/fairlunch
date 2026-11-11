@@ -49,6 +49,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -102,6 +103,7 @@ contract FairLunch is
 
     // A library that reads Uniswap V4 pool state.
     using StateLibrary for IPoolManager;
+    using TransientStateLibrary for IPoolManager;
 
     //*********************************************************************//
     // --------------------------- custom errors ------------------------- //
@@ -281,8 +283,8 @@ contract FairLunch is
 
     /// @notice Runs the buyback for a payment a served lunch just received.
     /// @dev Part of `IJBPayHook`. The payment itself stays in the project's balance; this only triggers `burn`. A
-    /// buyback that can't run right now (the price history is too short, or the pool manager is mid-swap) must never
-    /// block the payment, so its failure is swallowed and the ETH waits in the balance for the next attempt.
+    /// buyback that can't run right now (the price history is too short, or the pool manager is mid-swap) never blocks
+    /// the payment: the ETH waits in the balance for the next attempt.
     /// @param context The payment's context.
     function afterPayRecordedWith(JBAfterPayRecordedContext calldata context) external payable override {
         // Only a lunch's own terminal runs its buyback.
@@ -290,8 +292,15 @@ contract FairLunch is
             revert FairLunch_Unauthorized(msg.sender);
         }
 
+        // The price history is still too short, or the payment came from inside a swap: leave the ETH in the balance
+        // for the next call. Anything else runs the buyback now. It's deliberately not wrapped in a try: a wallet
+        // estimating a payment's gas would settle on an amount that starves a caught call, and every payment would
+        // quietly skip its buyback.
+        bool tooEarly = block.timestamp < uint256(_recordOf[context.projectId].servedAt) + TWAP_WINDOW;
+        if (tooEarly || POOL_MANAGER.isUnlocked()) return;
+
         // slither-disable-next-line unused-return
-        try this.burn(context.projectId) {} catch {}
+        this.burn(context.projectId);
     }
 
     /// @notice Use a served lunch's whole balance to buy its token from the pool and burn it.

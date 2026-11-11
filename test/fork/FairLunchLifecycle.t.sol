@@ -594,6 +594,27 @@ contract FairLunchLifecycle is Test {
         _assertHoldsNothing(id);
     }
 
+    /// @notice A payment sent with too little gas for its buyback fails, so wallets estimate enough for it.
+    function test_pay_revertsRatherThanStarveTheBuyback() public {
+        uint256 id = _served(0, 0, 0);
+        vm.warp(_servedAt() + 30 minutes);
+
+        // What a whole payment and buyback use.
+        uint256 snapshot = vm.snapshotState();
+        uint256 gasBefore = gasleft();
+        _pay(id, bob, 0.01 ether);
+        uint256 used = gasBefore - gasleft();
+        assertLt(_balance(id), 1e9, "the buyback ran");
+        vm.revertToState(snapshot);
+
+        // With enough for the payment alone, the payment doesn't quietly go through without it.
+        vm.prank(bob);
+        (bool ok,) = address(TERMINAL).call{value: 0.01 ether, gas: used * 6 / 10}(
+            abi.encodeCall(TERMINAL.pay, (id, JBConstants.NATIVE_TOKEN, 0.01 ether, bob, 0, "", ""))
+        );
+        assertFalse(ok, "starved payment reverts");
+    }
+
     function test_burn_anyoneCanCall() public {
         uint256 id = _served(0, 0, 0);
         _pay(id, bob, 0.01 ether);

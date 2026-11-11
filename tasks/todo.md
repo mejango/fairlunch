@@ -178,4 +178,8 @@ All five fixes from pass 1 held. New:
 | Medium: `sendHome` before the host's lunch exists strands WETH at the future sucker address | Confirmed, not fixable on chain without a cross-chain acknowledgement | Documented in RISKS. Only the creator can create copies, and the site creates the host first |
 | Low: a 1 wei raise over a hostile empty pool can't be served until another wei arrives | Dismissed: dust, recoverable | None |
 
+### Found by walking a local fork with wallet-estimated gas (2026-11-11)
+
+Payments after `serve` went through without buying: the buyback sat in a try/catch, and gas estimation settles on the least gas that lets the transaction succeed, which is the amount at which the caught call runs out. Forge tests never see this because they send ample gas. `afterPayRecordedWith` now skips the buyback only when it's too early or the pool manager is unlocked, and otherwise calls `burn` uncaught. Test: `test_pay_revertsRatherThanStarveTheBuyback`. Proof: four `cast send` payments on the fork left only what the price bound wouldn't take.
+
 Verdict from Codex was no merge until the two Mediums are addressed. One is fixed, one is documented with the site enforcing the order. This is the open call for jango at the PR.
