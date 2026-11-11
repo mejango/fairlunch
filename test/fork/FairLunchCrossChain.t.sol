@@ -160,6 +160,21 @@ contract FairLunchCrossChain is Test {
         }
     }
 
+    /// @notice A remote lunch with no bridge home, or one that can't carry ETH, would only trap what it's paid.
+    function test_createFor_remoteNeedsARouteHome() public {
+        vm.selectFork(optimismFork);
+        uint256 fee = PROJECTS.creationFee();
+
+        FairLunchConfig memory unmapped = _config(false);
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(unmapped);
+
+        FairLunchConfig memory bridgeless = _config(true);
+        bridgeless.suckerDeploymentConfiguration.deployerConfigurations = new JBSuckerDeployerConfig[](0);
+        vm.expectPartialRevert(FairLunch.FairLunch_NoHostSucker.selector);
+        lunch.createFor{value: fee}(bridgeless);
+    }
+
     /// @notice A chosen peer could be any project's sucker, minting this lunch's token from nothing.
     function test_createFor_revertsWithAChosenPeer() public {
         vm.selectFork(baseFork);

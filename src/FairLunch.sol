@@ -481,6 +481,15 @@ contract FairLunch is
 
         originalPayer = address(0);
 
+        // Everywhere but the host, payments only ever leave through the bridge home. Without one that's ready to carry
+        // ETH they'd be stuck, so there's no lunch.
+        if (
+            !isHost
+                && !_hostSuckerOf({
+                    projectId: projectId, hostChainId: config.hostChainId
+                }).isMapped(JBConstants.NATIVE_TOKEN)
+        ) revert FairLunch_InvalidConfig();
+
         // Deploy the token up front so payers hold a real ERC-20 from their first payment.
         // slither-disable-next-line unused-return
         CONTROLLER.deployERC20For({projectId: projectId, name: config.name, symbol: config.symbol, salt: salt});
@@ -529,18 +538,7 @@ contract FairLunch is
         // Anything this contract holds beyond `msg.value` was sent to it by mistake and isn't the caller's.
         uint256 ethBefore = address(this).balance - msg.value;
 
-        // Find the sucker that leads home.
-        IJBSucker sucker;
-        address[] memory suckers = SUCKER_REGISTRY.suckersOf(projectId);
-        for (uint256 i; i < suckers.length; i++) {
-            if (IJBSucker(suckers[i]).peerChainId() == hostChainId) {
-                sucker = IJBSucker(suckers[i]);
-                break;
-            }
-        }
-        if (address(sucker) == address(0)) {
-            revert FairLunch_NoHostSucker({projectId: projectId, hostChainId: hostChainId});
-        }
+        IJBSucker sucker = _hostSuckerOf({projectId: projectId, hostChainId: hostChainId});
 
         // Mint the tokens that will carry the balance.
         uint256 supply = TOKENS.totalSupplyOf(projectId);
@@ -1070,6 +1068,19 @@ contract FairLunch is
     //*********************************************************************//
     // ----------------------- internal views ---------------------------- //
     //*********************************************************************//
+
+    /// @notice The sucker that bridges a lunch to its host chain.
+    /// @dev Reverts if there isn't one.
+    /// @param projectId The ID of the lunch's project on this chain.
+    /// @param hostChainId The ID of the lunch's host chain.
+    /// @return sucker The sucker.
+    function _hostSuckerOf(uint256 projectId, uint256 hostChainId) internal view returns (IJBSucker sucker) {
+        address[] memory suckers = SUCKER_REGISTRY.suckersOf(projectId);
+        for (uint256 i; i < suckers.length; i++) {
+            if (IJBSucker(suckers[i]).peerChainId() == hostChainId) return IJBSucker(suckers[i]);
+        }
+        revert FairLunch_NoHostSucker({projectId: projectId, hostChainId: hostChainId});
+    }
 
     /// @notice The tick a buyback's price bound is measured from: the pool's average tick over the last `TWAP_WINDOW`,
     /// or its tick a second ago if that's higher (cheaper tokens).

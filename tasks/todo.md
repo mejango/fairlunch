@@ -105,7 +105,7 @@ File: `test/fork/FairLunchSpikes.t.sol`. Each test uses a throwaway harness cont
 ### Task 8: deploy script and contract gates
 - [x] `script/Deploy.s.sol` in the Sticky and Homerun Sphinx shape, constructor arguments from the packages' deployment records; a rehearsal test that runs it on a fork. No proposal is sent.
 - [x] `forge fmt --check`, warnings-denied build, `forge build --sizes` under 24,576 bytes, STYLE_GUIDE pass over every declaration, `README.md`, `RISKS.md` (singleton custody, 7-day bridge, TWAP limit behaviour).
-- [ ] (pass 1 done, seven findings fixed or documented, see Review) Two adversarial Codex passes (`gpt-6.1-sol`, read-only, stdin closed); fix; rerun affected tests. Commit.
+- [x] Two adversarial Codex passes (`gpt-6.1-sol`, read-only, stdin closed); fix; rerun affected tests. Commit.
 - [ ] Check-in with jango: repo creation and PR.
 
 ## Phase B: website
@@ -167,3 +167,15 @@ Base fork at block 56,216,000, `test/fork/FairLunchSpikes.t.sol`, 7 passing (202
 | Weak tests | Confirmed | Spikes deleted (the lifecycle suite asserts what they logged), `collect` earns fees on both sides and checks liquidity |
 
 Not done: a claim through real bridge delivery (listed in RISKS).
+
+### Phase A, Codex pass 2 (2026-11-11)
+
+All five fixes from pass 1 held. New:
+
+| Finding | Verdict | What changed |
+|---|---|---|
+| Medium: a remote lunch with no sucker or no ETH mapping traps what it's paid | Confirmed (creator mistake) | `createFor` on a remote requires a sucker to the host with ETH mapped. Test: `test_createFor_remoteNeedsARouteHome` |
+| Medium: `sendHome` before the host's lunch exists strands WETH at the future sucker address | Confirmed, not fixable on chain without a cross-chain acknowledgement | Documented in RISKS. Only the creator can create copies, and the site creates the host first |
+| Low: a 1 wei raise over a hostile empty pool can't be served until another wei arrives | Dismissed: dust, recoverable | None |
+
+Verdict from Codex was no merge until the two Mediums are addressed. One is fixed, one is documented with the site enforcing the order. This is the open call for jango at the PR.
