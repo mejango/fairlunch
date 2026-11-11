@@ -52,34 +52,15 @@ Each line names the task whose tests pin it.
 
 ## Interfaces fixed by this plan
 
-```solidity
-struct FairLunchConfig {
-    string name; string symbol; string projectUri;
-    bool isHost;            // true on exactly one chain
-    uint48 deadline;        // absolute timestamp, same on every chain
-    address creator;        // receives ETH keep, JBP6, and the vesting wallet
-    uint32 keepPercent;     // of JBConstants.SPLITS_TOTAL_PERCENT, at most half
-    uint104 keepCap;        // wei
-    uint32 tokenPercent;    // of JBConstants.SPLITS_TOTAL_PERCENT, at most half
-    uint32 vestingDuration; // seconds
-    bytes32 salt;           // ERC-20 and sucker salt, scoped by msg.sender
-    JBSuckerDeploymentConfig suckerDeploymentConfiguration;
-}
-struct FairLunchRecord {
-    bool isHost; uint48 deadline; uint48 servedAt; address creator;
-    uint32 keepPercent; uint104 keepCap; uint32 tokenPercent; uint32 vestingDuration;
-    uint256 positionId; address vestingWallet;
-}
-function createFor(FairLunchConfig calldata config) external returns (uint256 projectId);
-function serve(uint256 projectId) external;
-function burn(uint256 projectId) external returns (uint256 spent, uint256 burned);
-function collect(uint256 projectId) external returns (uint256 tokensBurned, uint256 ethPaid);
-function sendHome(uint256 projectId) external payable;
-function recordOf(uint256 projectId) external view returns (FairLunchRecord memory);
-function poolKeyOf(uint256 projectId) external view returns (PoolKey memory);
-```
+The code is the record: `src/structs/FairLunchConfig.sol`, `src/structs/FairLunchRecord.sol`, `src/interfaces/IFairLunch.sol`.
 
-Events: `Create(projectId, config, caller)`, `Serve(projectId, raised, creatorEth, poolEth, poolTokens, creatorTokens, vestingWallet, positionId, caller)`, `Burn(projectId, spent, burned, caller)`, `Collect(projectId, tokensBurned, ethPaid, caller)`, `SendHome(projectId, amount, caller)`.
+Changes made while building, each forced by a test or a limit:
+
+- `hostChainId` (uint64) replaces `isHost`, so a remote chain knows which sucker leads home.
+- `createFor` is payable, to carry the project creation fee.
+- `setChainSpecificConstants(positionManager, oracleHook)` sets the Uniswap V4 addresses once after deployment, since they differ per chain and constructor arguments must not (same address everywhere).
+- `FairLunchVestingDeployer` creates the `VestingWallet`, and `Create` carries only `(projectId, hostChainId, creator, deadline, caller)`, both to fit the 24,576 byte limit.
+- `sendHome` returns the bridge payment it doesn't use to the caller.
 
 ---
 
@@ -98,32 +79,32 @@ File: `test/fork/FairLunchSpikes.t.sol`. Each test uses a throwaway harness cont
 - [x] Record results under "Spike results" below. If the whole-balance cash out fails, switch Task 6 to the fallback (forward pays through the pay hook, hold per-project pending ETH) and rerun the plan gate. Commit.
 
 ### Task 3: Structs, interface, constants
-- [ ] Create the two structs and `IFairLunch` exactly as in "Interfaces fixed by this plan". Constructor immutables: `CONTROLLER`, `DIRECTORY`, `TOKENS`, `OMNICHAIN_DEPLOYER`, `SUCKER_REGISTRY`, `POOL_MANAGER`, `POSITION_MANAGER`, `PERMIT2`, `ORACLE_HOOK`, `FEE_PROJECT_ID = 1`. `forge build`. Commit.
+- [x] Create the two structs and `IFairLunch` exactly as in "Interfaces fixed by this plan". Constructor immutables: `CONTROLLER`, `DIRECTORY`, `TOKENS`, `OMNICHAIN_DEPLOYER`, `SUCKER_REGISTRY`, `POOL_MANAGER`, `POSITION_MANAGER`, `PERMIT2`, `ORACLE_HOOK`, `FEE_PROJECT_ID = 1`. `forge build`. Commit.
 
 ### Task 4: `createFor` and Cooking
-- [ ] Tests (`test/FairLunch.t.sol`, fork-backed where core is needed): `test_createFor_storesRecordOnce`; `test_createFor_revertsAboveHalfKeep` and `...AboveHalfTokens`; `test_createFor_revertsPastDeadline`; `test_pay_mintsOneMillionPerEth`; `test_pay_revertsAfterDeadline`; `test_cashOut_reclaimsNothing` (holder cashes out, receives 0 ETH); `test_remote_payMintsNothing`.
-- [ ] Implement `createFor`: launch through `OMNICHAIN_DEPLOYER` with owner and extra data hook = this, native ETH accounting context, `deployERC20For` with `keccak256(abi.encode(msg.sender, salt))`. Host ruleset: duration 0, weight `1_000_000e18`, reserved 0, cash out tax MAX, `scopeCashOutsToLocalBalances`, data hook for pay and cash out, `allowOwnerMinting`. Remote ruleset: same but weight 0, and map the native token on its suckers. Host suckers get no token mapping.
-- [ ] Implement `beforePayRecordedWith` (host and not served: revert `FairLunch_Closed` after `deadline`; otherwise pass weight through), `beforeCashOutRecordedWith` (holder == this: tax 0, count = total supply; else pass the ruleset's values), `hasMintPermissionFor` (false), `supportsInterface`, `onERC721Received`.
-- [ ] Tests pass. Commit.
+- [x] Tests (`test/FairLunch.t.sol`, fork-backed where core is needed): `test_createFor_storesRecordOnce`; `test_createFor_revertsAboveHalfKeep` and `...AboveHalfTokens`; `test_createFor_revertsPastDeadline`; `test_pay_mintsOneMillionPerEth`; `test_pay_revertsAfterDeadline`; `test_cashOut_reclaimsNothing` (holder cashes out, receives 0 ETH); `test_remote_payMintsNothing`.
+- [x] Implement `createFor`: launch through `OMNICHAIN_DEPLOYER` with owner and extra data hook = this, native ETH accounting context, `deployERC20For` with `keccak256(abi.encode(msg.sender, salt))`. Host ruleset: duration 0, weight `1_000_000e18`, reserved 0, cash out tax MAX, `scopeCashOutsToLocalBalances`, data hook for pay and cash out, `allowOwnerMinting`. Remote ruleset: same but weight 0, and map the native token on its suckers. Host suckers get no token mapping.
+- [x] Implement `beforePayRecordedWith` (host and not served: revert `FairLunch_Closed` after `deadline`; otherwise pass weight through), `beforeCashOutRecordedWith` (holder == this: tax 0, count = total supply; else pass the ruleset's values), `hasMintPermissionFor` (false), `supportsInterface`, `onERC721Received`.
+- [x] Tests pass. Commit.
 
 ### Task 5: `serve`
-- [ ] Tests (`test/fork/FairLunchLifecycle.t.sol`): `test_serve_revertsBeforeDeadline`; `test_serve_revertsWithNothingRaised` (focus 1); `test_serve_revertsTwice`; `test_serve_revertsOnRemote`; `test_serve_keepBelowCap` (raised 10 ETH, keep 20%, cap 5 ETH: creator receives 2 ETH less 2.5%); `test_serve_keepAboveCap` (cap 1 ETH: creator receives 1 ETH less 2.5%); `test_serve_poolOpensAtRaisePrice` (pool `sqrtPriceX96` within one tick spacing of 1,000,000 tokens per ETH; pool tokens = pool ETH x 1,000,000); `test_serve_creatorTokensVest` (vesting wallet holds t/(1-t) x (sold + pool tokens), releases linearly, beneficiary is creator); `test_serve_creatorReceivesJbp6`; `test_serve_leavesNothingBehind` (FairLunch holds 0 ETH and 0 project tokens after); `test_serve_creatorRejectsEth` (focus 2); `test_serve_hostilePoolLow`, `test_serve_hostilePoolHigh`, `test_serve_strangerLiquidity` (focus 3: stranger pre-initializes at 100x and 0.01x the raise price, with and without liquidity; serve completes, and ETH spent per token acquired or received is never worse than the raise price).
-- [ ] Implement `serve(projectId)`: checks; queue the forever ruleset through `OMNICHAIN_DEPLOYER.queueRulesetsOf` (weight 0, tax MAX, payout limit = balance, one split to creator sized min(keepPercent x raised, keepCap), remainder to owner); `sendPayoutsOf`; forward JBP6 received to creator; mint creator tokens to a new `VestingWallet(creator, block.timestamp, vestingDuration)`; mint pool tokens; `_openPool` (initialize if needed, swap toward the raise price with that price as the limit, mint the full-range position with the LP split hook's action encoding, burn leftover tokens, `addToBalanceOf` leftover ETH); map the native token on the host suckers; write `servedAt`, `positionId`, `vestingWallet`; emit `Serve`.
-- [ ] Tests pass. Commit.
+- [x] Tests (`test/fork/FairLunchLifecycle.t.sol`): `test_serve_revertsBeforeDeadline`; `test_serve_revertsWithNothingRaised` (focus 1); `test_serve_revertsTwice`; `test_serve_revertsOnRemote`; `test_serve_keepBelowCap` (raised 10 ETH, keep 20%, cap 5 ETH: creator receives 2 ETH less 2.5%); `test_serve_keepAboveCap` (cap 1 ETH: creator receives 1 ETH less 2.5%); `test_serve_poolOpensAtRaisePrice` (pool `sqrtPriceX96` within one tick spacing of 1,000,000 tokens per ETH; pool tokens = pool ETH x 1,000,000); `test_serve_creatorTokensVest` (vesting wallet holds t/(1-t) x (sold + pool tokens), releases linearly, beneficiary is creator); `test_serve_creatorReceivesJbp6`; `test_serve_leavesNothingBehind` (FairLunch holds 0 ETH and 0 project tokens after); `test_serve_creatorRejectsEth` (focus 2); `test_serve_hostilePoolLow`, `test_serve_hostilePoolHigh`, `test_serve_strangerLiquidity` (focus 3: stranger pre-initializes at 100x and 0.01x the raise price, with and without liquidity; serve completes, and ETH spent per token acquired or received is never worse than the raise price).
+- [x] Implement `serve(projectId)`: checks; queue the forever ruleset through `OMNICHAIN_DEPLOYER.queueRulesetsOf` (weight 0, tax MAX, payout limit = balance, one split to creator sized min(keepPercent x raised, keepCap), remainder to owner); `sendPayoutsOf`; forward JBP6 received to creator; mint creator tokens to a new `VestingWallet(creator, block.timestamp, vestingDuration)`; mint pool tokens; `_openPool` (initialize if needed, swap toward the raise price with that price as the limit, mint the full-range position with the LP split hook's action encoding, burn leftover tokens, `addToBalanceOf` leftover ETH); map the native token on the host suckers; write `servedAt`, `positionId`, `vestingWallet`; emit `Serve`.
+- [x] Tests pass. Commit.
 
 ### Task 6: buyback on pay, `burn`, `collect`
-- [ ] Tests: `test_pay_afterServe_holdsFor30Minutes` (pay succeeds, nothing bought, ETH in balance); `test_pay_buysAndBurnsSameTx` (after 30 minutes and some swaps: total supply drops, payer gets 0 tokens, balance 0 after); `test_pay_oversized_stopsAtLimit` (focus 4: pay 100x pool ETH; pool tick ends at most TWAP tick + 200, remainder in balance, later `burn` calls spend more as the TWAP follows); `test_pay_succeedsWhenManagerUnlocked`; `test_burn_revertsBefore30Minutes`; `test_burn_burnsHeldTokens`; `test_burn_neverTradesAboveLimit` (fuzz the pre-trade pool price); `test_collect_burnsTokenSidePaysEthToJbp6` (creator's JBP6 balance rises, FairLunch holds nothing); `test_noLiquidityRemovalSelector` (interface has no decrease path with nonzero liquidity).
-- [ ] Implement: post-serve `beforePayRecordedWith` returns weight 0 and one zero-amount spec to this; `afterPayRecordedWith` (caller must be a terminal of the project) calls `this.burn` in try/catch; `burn` (require host, served, `block.timestamp >= servedAt + 30 minutes`; cash out the whole balance to this; price limit from the oracle's 30-minute mean tick + 200 via `TickMath`; exact-input swap inside `unlock`; burn all tokens held; `addToBalanceOf` unspent ETH); `collect` (DECREASE_LIQUIDITY 0 + TAKE_PAIR, burn tokens, `pay` project 1 with beneficiary creator).
-- [ ] Tests pass. Commit.
+- [x] Tests: `test_pay_afterServe_holdsFor30Minutes` (pay succeeds, nothing bought, ETH in balance); `test_pay_buysAndBurnsSameTx` (after 30 minutes and some swaps: total supply drops, payer gets 0 tokens, balance 0 after); `test_pay_oversized_stopsAtLimit` (focus 4: pay 100x pool ETH; pool tick ends at most TWAP tick + 200, remainder in balance, later `burn` calls spend more as the TWAP follows); `test_pay_succeedsWhenManagerUnlocked`; `test_burn_revertsBefore30Minutes`; `test_burn_burnsHeldTokens`; `test_burn_neverTradesAboveLimit` (fuzz the pre-trade pool price); `test_collect_burnsTokenSidePaysEthToJbp6` (creator's JBP6 balance rises, FairLunch holds nothing); `test_noLiquidityRemovalSelector` (interface has no decrease path with nonzero liquidity).
+- [x] Implement: post-serve `beforePayRecordedWith` returns weight 0 and one zero-amount spec to this; `afterPayRecordedWith` (caller must be a terminal of the project) calls `this.burn` in try/catch; `burn` (require host, served, `block.timestamp >= servedAt + 30 minutes`; cash out the whole balance to this; price limit from the oracle's 30-minute mean tick + 200 via `TickMath`; exact-input swap inside `unlock`; burn all tokens held; `addToBalanceOf` unspent ETH); `collect` (DECREASE_LIQUIDITY 0 + TAKE_PAIR, burn tokens, `pay` project 1 with beneficiary creator).
+- [x] Tests pass. Commit.
 
 ### Task 7: cross-chain
-- [ ] Tests (`test/fork/FairLunchCrossChain.t.sol`, Base and Optimism forks): `test_hostPrepare_revertsBeforeServe`; `test_sendHome_mintsOneWeiWhenRemoteSupplyZero`; `test_sendHome_thenClaim_beforeServe_countsAsRaised` (focus 5: holders' token share unchanged beyond 1 wei, host balance up by the bridged amount); `test_sendHome_thenClaim_afterServe_feedsBurn` (FairLunch's claimed tokens burned, ETH bought and burned); `test_sendHome_revertsOnHost`.
-- [ ] Implement `sendHome`: require remote; mint 1 wei if remote supply is 0, else 1,000,000 x supply; approve and `prepare` to the host FairLunch as beneficiary on each sucker of the project, then `toRemote{value: msg.value}`; emit.
-- [ ] Tests pass. Commit.
+- [x] Tests (`test/fork/FairLunchCrossChain.t.sol`, Base and Optimism forks): `test_hostPrepare_revertsBeforeServe`; `test_sendHome_mintsOneWeiWhenRemoteSupplyZero`; `test_sendHome_thenClaim_beforeServe_countsAsRaised` (focus 5: holders' token share unchanged beyond 1 wei, host balance up by the bridged amount); `test_sendHome_thenClaim_afterServe_feedsBurn` (FairLunch's claimed tokens burned, ETH bought and burned); `test_sendHome_revertsOnHost`.
+- [x] Implement `sendHome`: require remote; mint 1 wei if remote supply is 0, else 1,000,000 x supply; approve and `prepare` to the host FairLunch as beneficiary on each sucker of the project, then `toRemote{value: msg.value}`; emit.
+- [x] Tests pass. Commit.
 
 ### Task 8: deploy script and contract gates
-- [ ] `script/Deploy.s.sol` in the Sticky and Homerun Sphinx shape, constructor arguments from the packages' deployment records; a rehearsal test that runs it on a fork. No proposal is sent.
-- [ ] `forge fmt --check`, warnings-denied build, `forge build --sizes` under 24,576 bytes, STYLE_GUIDE pass over every declaration, `README.md`, `RISKS.md` (singleton custody, 7-day bridge, TWAP limit behaviour).
+- [x] `script/Deploy.s.sol` in the Sticky and Homerun Sphinx shape, constructor arguments from the packages' deployment records; a rehearsal test that runs it on a fork. No proposal is sent.
+- [x] `forge fmt --check`, warnings-denied build, `forge build --sizes` under 24,576 bytes, STYLE_GUIDE pass over every declaration, `README.md`, `RISKS.md` (singleton custody, 7-day bridge, TWAP limit behaviour).
 - [ ] Two adversarial Codex passes (`gpt-6.1-sol`, read-only, stdin closed); fix; rerun affected tests. Commit.
 - [ ] Check-in with jango: repo creation and PR.
 
