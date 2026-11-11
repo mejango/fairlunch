@@ -24,6 +24,7 @@ import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmo
 import {Test} from "forge-std/Test.sol";
 
 import {FairLunch} from "../../src/FairLunch.sol";
+import {FairLunchVestingDeployer} from "../../src/FairLunchVestingDeployer.sol";
 import {IFairLunch} from "../../src/interfaces/IFairLunch.sol";
 import {FairLunchConfig} from "../../src/structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "../../src/structs/FairLunchRecord.sol";
@@ -74,6 +75,7 @@ contract FairLunchLifecycle is Test {
     uint32 internal constant TENTH = JBConstants.SPLITS_TOTAL_PERCENT / 10;
 
     FairLunch internal lunch;
+    FairLunchVestingDeployer internal vestingDeployer;
     address internal creator = address(0xC0FFEE0001);
     address internal alice = address(0xA11CE0001);
     address internal bob = address(0xB0B0001);
@@ -81,11 +83,13 @@ contract FairLunchLifecycle is Test {
 
     function setUp() public {
         vm.createSelectFork("https://mainnet.base.org", 56_216_000);
+        vestingDeployer = new FairLunchVestingDeployer();
         lunch = new FairLunch({
             omnichainDeployer: OMNI,
             terminal: TERMINAL,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
+            vestingDeployer: vestingDeployer,
             deployer: address(this)
         });
         lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
@@ -360,8 +364,7 @@ contract FairLunchLifecycle is Test {
 
     function test_serve_creatorRejectsEth() public {
         Picky picky = new Picky();
-        uint256 id =
-            lunch.createFor{value: PROJECTS.creationFee()}(_config(address(picky), FIFTH, 5 ether, 0));
+        uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_config(address(picky), FIFTH, 5 ether, 0));
         _pay(id, alice, 10 ether);
         vm.warp(deadline + 1);
         lunch.serve(id);
@@ -374,11 +377,15 @@ contract FairLunchLifecycle is Test {
     }
 
     function test_serve_hostilePoolTooHigh() public {
-        _serveOverHostilePool(TickMath.getSqrtPriceAtTick(TickMath.getTickAtSqrtPrice(uint160(RAISE_SQRT_PRICE_X96)) + 46_000));
+        _serveOverHostilePool(
+            TickMath.getSqrtPriceAtTick(TickMath.getTickAtSqrtPrice(uint160(RAISE_SQRT_PRICE_X96)) + 46_000)
+        );
     }
 
     function test_serve_hostilePoolTooLow() public {
-        _serveOverHostilePool(TickMath.getSqrtPriceAtTick(TickMath.getTickAtSqrtPrice(uint160(RAISE_SQRT_PRICE_X96)) - 46_000));
+        _serveOverHostilePool(
+            TickMath.getSqrtPriceAtTick(TickMath.getTickAtSqrtPrice(uint160(RAISE_SQRT_PRICE_X96)) - 46_000)
+        );
     }
 
     /// @notice A stranger creates the pool at a price about 100x off before the lunch is served.
@@ -413,7 +420,8 @@ contract FairLunchLifecycle is Test {
         bytes memory actions =
             abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP));
         bytes[] memory params = new bytes[](3);
-        params[0] = abi.encode(key, int24(130_000), int24(136_000), uint256(liquidity), uint128(1 ether), uint128(0), bob, "");
+        params[0] =
+            abi.encode(key, int24(130_000), int24(136_000), uint256(liquidity), uint128(1 ether), uint128(0), bob, "");
         params[1] = abi.encode(key.currency0, key.currency1);
         params[2] = abi.encode(key.currency0, bob);
         POSITION_MANAGER.modifyLiquidities{value: 1 ether}(abi.encode(actions, params), block.timestamp);
@@ -597,8 +605,14 @@ contract FairLunchLifecycle is Test {
         vm.expectRevert(FairLunch.FairLunch_AlreadyConfigured.selector);
         lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
 
-        FairLunch fresh =
-            new FairLunch({omnichainDeployer: OMNI, terminal: TERMINAL, suckerRegistry: REGISTRY, permit2: PERMIT2, deployer: bob});
+        FairLunch fresh = new FairLunch({
+            omnichainDeployer: OMNI,
+            terminal: TERMINAL,
+            suckerRegistry: REGISTRY,
+            permit2: PERMIT2,
+            vestingDeployer: vestingDeployer,
+            deployer: bob
+        });
         vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));
         fresh.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
 
@@ -621,11 +635,7 @@ contract FairLunchLifecycle is Test {
         lunch.onERC721Received(address(0), address(0), 0, "");
     }
 
-    function _emptyContext(uint256 id)
-        internal
-        pure
-        returns (JBAfterPayRecordedContext memory context)
-    {
+    function _emptyContext(uint256 id) internal pure returns (JBAfterPayRecordedContext memory context) {
         context.projectId = id;
     }
 }

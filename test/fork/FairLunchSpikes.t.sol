@@ -58,7 +58,8 @@ contract SpikeHarness is IJBRulesetDataHook, IJBPayHook {
             token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: JBConstants.NATIVE_TOKEN_CURRENCY
         });
         JBTerminalConfig[] memory terminals = new JBTerminalConfig[](1);
-        terminals[0] = JBTerminalConfig({terminal: IJBTerminal(address(TERMINAL)), accountingContextsToAccept: contexts});
+        terminals[0] =
+            JBTerminalConfig({terminal: IJBTerminal(address(TERMINAL)), accountingContextsToAccept: contexts});
 
         JBSuckerDeploymentConfig memory suckers;
         (projectId,,) = OMNI.launchProjectFor{value: msg.value}({
@@ -83,7 +84,9 @@ contract SpikeHarness is IJBRulesetDataHook, IJBPayHook {
         ids[0] = JBPermissionIds.QUEUE_RULESETS;
         permissions.setPermissionsFor({
             account: address(this),
-            permissionsData: JBPermissionsData({operator: address(OMNI), projectId: uint64(projectId), permissionIds: ids})
+            permissionsData: JBPermissionsData({
+                operator: address(OMNI), projectId: uint64(projectId), permissionIds: ids
+            })
         });
     }
 
@@ -215,8 +218,7 @@ contract SpikeHarness is IJBRulesetDataHook, IJBPayHook {
                 hook: IJBSplitHook(address(0))
             });
             config.splitGroups = new JBSplitGroup[](1);
-            config.splitGroups[0] =
-                JBSplitGroup({groupId: uint256(uint160(JBConstants.NATIVE_TOKEN)), splits: splits});
+            config.splitGroups[0] = JBSplitGroup({groupId: uint256(uint160(JBConstants.NATIVE_TOKEN)), splits: splits});
         }
     }
 }

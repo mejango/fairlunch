@@ -13,6 +13,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
+import {FairLunchVestingDeployer} from "../FairLunchVestingDeployer.sol";
 import {FairLunchConfig} from "../structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "../structs/FairLunchRecord.sol";
 
@@ -35,9 +36,17 @@ interface IFairLunch {
 
     /// @notice Emitted when a lunch is created on this chain.
     /// @param projectId The ID of the lunch's project on this chain.
-    /// @param config The lunch's configuration.
+    /// @param hostChainId The ID of the chain the lunch takes place on.
+    /// @param creator The address that receives the kept ETH, the JBP6 minted by fees, and the vested tokens.
+    /// @param deadline The timestamp after which the fundraise stops and the lunch can be served.
     /// @param caller The address that called the function.
-    event Create(uint256 indexed projectId, FairLunchConfig config, address caller);
+    event Create(
+        uint256 indexed projectId,
+        uint256 indexed hostChainId,
+        address indexed creator,
+        uint256 deadline,
+        address caller
+    );
 
     /// @notice Emitted when a chain's revenue is sent to the lunch's host chain.
     /// @param projectId The ID of the lunch's project on this chain.
@@ -125,6 +134,9 @@ interface IFairLunch {
     /// @param projectId The ID of the lunch's project.
     /// @return record The lunch's record.
     function recordOf(uint256 projectId) external view returns (FairLunchRecord memory record);
+
+    /// @notice The deployer of the wallets that vest creators' tokens.
+    function VESTING_DEPLOYER() external view returns (FairLunchVestingDeployer);
 
     /// @notice Use a served lunch's whole balance to buy its token from the pool and burn it.
     /// @param projectId The ID of the lunch's project.
