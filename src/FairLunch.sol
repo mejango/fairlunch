@@ -297,7 +297,7 @@ contract FairLunch is
         // estimating a payment's gas would settle on an amount that starves a caught call, and every payment would
         // quietly skip its buyback.
         bool tooEarly = block.timestamp < uint256(_recordOf[context.projectId].servedAt) + TWAP_WINDOW;
-        if (tooEarly || POOL_MANAGER.isUnlocked()) return;
+        if (tooEarly || POOL_MANAGER.isUnlocked() || _reentrancyGuardEntered()) return;
 
         // slither-disable-next-line unused-return
         this.burn(context.projectId);
@@ -1033,20 +1033,32 @@ contract FairLunch is
 
     /// @notice Send all the JBP6 this contract holds to an address.
     /// @dev This contract never holds JBP6 between calls, so everything it holds came from the current call's fee.
+    /// Credits are claimed into the ERC-20 before sending: a transfer of credits reverts while JBP6 pauses them, and
+    /// that revert would block every payment into a served lunch.
     /// @param beneficiary The address to send the JBP6 to.
     function _sendFeeTokensTo(address beneficiary) internal {
         IERC20 token = IERC20(address(TOKENS.tokenOf(_FEE_PROJECT_ID)));
+        uint256 credits = TOKENS.creditBalanceOf({holder: address(this), projectId: _FEE_PROJECT_ID});
+
+        if (credits != 0) {
+            IJBController controller = IJBController(address(DIRECTORY.controllerOf(_FEE_PROJECT_ID)));
+
+            // Without an ERC-20 there's nothing to claim into, so the credits themselves are sent.
+            if (address(token) == address(0)) {
+                controller.transferCreditsFrom({
+                    holder: address(this), projectId: _FEE_PROJECT_ID, recipient: beneficiary, creditCount: credits
+                });
+                return;
+            }
+
+            controller.claimTokensFor({
+                holder: address(this), projectId: _FEE_PROJECT_ID, tokenCount: credits, beneficiary: beneficiary
+            });
+        }
+
         if (address(token) != address(0)) {
             uint256 balance = token.balanceOf(address(this));
             if (balance != 0) token.safeTransfer({to: beneficiary, value: balance});
-        }
-
-        uint256 credits = TOKENS.creditBalanceOf({holder: address(this), projectId: _FEE_PROJECT_ID});
-        if (credits != 0) {
-            IJBController(address(DIRECTORY.controllerOf(_FEE_PROJECT_ID)))
-                .transferCreditsFrom({
-                holder: address(this), projectId: _FEE_PROJECT_ID, recipient: beneficiary, creditCount: credits
-            });
         }
     }
 

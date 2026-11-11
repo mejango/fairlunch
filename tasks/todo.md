@@ -187,6 +187,18 @@ Payments after `serve` went through without buying: the buyback sat in a try/cat
 
 Verdict from Codex was no merge until the two Mediums are addressed. One is fixed, one is documented with the site enforcing the order. This is the open call for jango at the PR.
 
+### Phase A, Codex pass 3 on the uncaught buyback (2026-11-11)
+
+No way found for a stranger to make payments revert, to skip buybacks for anyone but themselves, or to lock host claims (those use `addToBalanceOf`, which runs no pay hook).
+
+| Finding | Verdict | What changed |
+|---|---|---|
+| Low: a payment made from inside another Fair Lunch call (a creator contract spending its payout on another lunch) reverts on the shared reentrancy guard | Confirmed | The hook also waits when the guard is entered. Test: `test_pay_fromInsideAnotherLunchsCallWaits` |
+| Conditional Medium: JBP6 credits parked on the contract plus a JBP6 pause of credit transfers reverts every payment into every served lunch | Needs project 1's own ruleset to pause, but cheap to remove | Credits are claimed into the ERC-20 before sending; credits are only sent as credits when JBP6 has no ERC-20. Test: `test_pay_goesThroughWhileJbp6CreditTransfersArePaused` |
+| Extreme ticks could make the price bound invalid | Dismissed: needs unrealistic capital against the locked full-range position | None |
+
+`FairLunch` is now 24,480 bytes, 96 under the limit.
+
 ### Phase B, website (2026-11-11)
 
 Checked against a local Base fork (`script/Rehearse.s.sol`, anvil, an RPC shim standing in for Center), not a live deployment.

@@ -24,6 +24,7 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
+import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
 
 import {FairLunch} from "../../src/FairLunch.sol";
@@ -53,6 +54,24 @@ contract LockedPayer is IUnlockCallback {
         (uint256 projectId, uint256 amount) = abi.decode(data, (uint256, uint256));
         TERMINAL.pay{value: amount}(projectId, JBConstants.NATIVE_TOKEN, amount, address(this), 0, "", "");
         return "";
+    }
+}
+
+/// @notice A creator that spends what it's paid on another lunch.
+contract ForwardingCreator {
+    IJBMultiTerminal internal immutable TERMINAL;
+    uint256 public payInto;
+
+    constructor(IJBMultiTerminal terminal) {
+        TERMINAL = terminal;
+    }
+
+    function setPayInto(uint256 projectId) external {
+        payInto = projectId;
+    }
+
+    receive() external payable {
+        TERMINAL.pay{value: msg.value}(payInto, JBConstants.NATIVE_TOKEN, msg.value, address(this), 0, "", "");
     }
 }
 
@@ -97,6 +116,8 @@ contract Trader is IUnlockCallback {
 
 /// @notice The whole life of a lunch on its host chain, against live V6 and Uniswap V4 on Base.
 contract FairLunchLifecycle is Test {
+    using stdStorage for StdStorage;
+
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
 
@@ -613,6 +634,50 @@ contract FairLunchLifecycle is Test {
             abi.encodeCall(TERMINAL.pay, (id, JBConstants.NATIVE_TOKEN, 0.01 ether, bob, 0, "", ""))
         );
         assertFalse(ok, "starved payment reverts");
+    }
+
+    function test_pay_fromInsideAnotherLunchsCallWaits() public {
+        ForwardingCreator forwarder = new ForwardingCreator(TERMINAL);
+        uint256 a = _create(0, 0, 0);
+        uint256 b = lunch.createFor{value: PROJECTS.creationFee()}(_config(address(forwarder), 200_000_000, 5 ether, 0));
+        forwarder.setPayInto(a);
+        _pay(a, alice, 10 ether);
+        _pay(b, alice, 10 ether);
+        vm.warp(_servedAt());
+        lunch.serve(a);
+        vm.warp(_servedAt() + 30 minutes);
+
+        // Serving B pays its creator, who pays A while this contract is mid-call. The payment lands and waits.
+        lunch.serve(b);
+
+        assertEq(address(forwarder).balance, 0, "the creator's payment went through");
+        assertGt(_balance(a), 1 ether, "it waits in A's balance");
+        (uint256 spent,) = lunch.burn(a);
+        assertGt(spent, 0, "the next burn uses it");
+    }
+
+    function test_pay_goesThroughWhileJbp6CreditTransfersArePaused() public {
+        uint256 id = _served(0, 0, 0);
+        vm.warp(_servedAt() + 30 minutes);
+
+        // Someone parks JBP6 credits on the contract, then JBP6 pauses credit transfers.
+        uint256 credits = 5e18;
+        stdstore.target(address(TOKENS)).sig("creditBalanceOf(address,uint256)").with_key(address(lunch))
+            .with_key(uint256(1)).checked_write(credits);
+        stdstore.target(address(TOKENS)).sig("totalCreditSupplyOf(uint256)").with_key(uint256(1))
+            .checked_write(TOKENS.totalCreditSupplyOf(1) + credits);
+        vm.mockCallRevert(
+            address(lunch.DIRECTORY().controllerOf(1)),
+            abi.encodeWithSignature("transferCreditsFrom(address,uint256,address,uint256)"),
+            "paused"
+        );
+
+        IERC20 jbp6 = _token(1);
+        uint256 before = jbp6.balanceOf(creator);
+        _pay(id, bob, 0.01 ether);
+
+        assertGe(jbp6.balanceOf(creator) - before, credits, "the credits reached the creator as JBP6");
+        assertEq(TOKENS.totalBalanceOf(address(lunch), 1), 0, "lunch holds JBP6");
     }
 
     function test_burn_anyoneCanCall() public {
