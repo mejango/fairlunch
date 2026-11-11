@@ -5,12 +5,14 @@ import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
 import {IJBPayHook} from "@bananapus/core-v6/src/interfaces/IJBPayHook.sol";
+import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBRulesetDataHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetDataHook.sol";
 import {IJBSplitHook} from "@bananapus/core-v6/src/interfaces/IJBSplitHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBPayerTrackerLib} from "@bananapus/core-v6/src/libraries/JBPayerTrackerLib.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBAfterPayRecordedContext} from "@bananapus/core-v6/src/structs/JBAfterPayRecordedContext.sol";
 import {JBBeforeCashOutRecordedContext} from "@bananapus/core-v6/src/structs/JBBeforeCashOutRecordedContext.sol";
@@ -32,6 +34,7 @@ import {IJBSuckerRegistry} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerR
 import {JBTokenMapping} from "@bananapus/suckers-v6/src/structs/JBTokenMapping.sol";
 import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
 import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
@@ -75,7 +78,16 @@ import {FairLunchRecord} from "./structs/FairLunchRecord.sol";
 ///
 /// This contract is each lunch's owner, its data hook (wrapped by `JBOmnichainDeployer`), its pay hook, and the holder
 /// of its liquidity. It holds no ETH or tokens between calls.
-contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallback, IERC721Receiver, ReentrancyGuardTransient {
+contract FairLunch is
+    ERC2771Context,
+    ReentrancyGuardTransient,
+    IFairLunch,
+    IJBRulesetDataHook,
+    IJBPayHook,
+    IJBPayerTracker,
+    IUnlockCallback,
+    IERC721Receiver
+{
     // A library that adds default safety checks to ERC-20 functionality.
     using SafeERC20 for IERC20;
 
@@ -89,12 +101,14 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
 
+    error FairLunch_AlreadyConfigured();
     error FairLunch_AlreadyServed(uint256 projectId);
     error FairLunch_Closed(uint256 projectId, uint256 deadline);
     error FairLunch_HostMapsNoTokens();
     error FairLunch_InvalidConfig();
     error FairLunch_NoHostSucker(uint256 projectId, uint256 hostChainId);
     error FairLunch_NoLiquidity(uint256 projectId);
+    error FairLunch_NotConfigured();
     error FairLunch_NotHost(uint256 projectId, uint256 hostChainId);
     error FairLunch_NotRemote(uint256 projectId);
     error FairLunch_NotServed(uint256 projectId);
@@ -157,17 +171,8 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
     /// @notice The deployer every lunch is launched through, which wires up its suckers.
     IJBOmnichainDeployer public immutable override OMNICHAIN_DEPLOYER;
 
-    /// @notice The Uniswap V4 hook every lunch's pool uses, which records the price history buybacks are bounded by.
-    IGeomeanOracle public immutable override ORACLE_HOOK;
-
     /// @notice The Permit2 contract the position manager pulls tokens through.
     IAllowanceTransfer public immutable override PERMIT2;
-
-    /// @notice The Uniswap V4 pool manager.
-    IPoolManager public immutable override POOL_MANAGER;
-
-    /// @notice The Uniswap V4 position manager.
-    IPositionManager public immutable override POSITION_MANAGER;
 
     /// @notice The registry of every lunch's suckers.
     IJBSuckerRegistry public immutable override SUCKER_REGISTRY;
@@ -179,6 +184,32 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
     IJBTokens public immutable override TOKENS;
 
     //*********************************************************************//
+    // -------------- internal immutable stored properties -------------- //
+    //*********************************************************************//
+
+    /// @notice The address allowed to set the chain-specific constants, once.
+    /// @dev Every constructor argument is the same on every chain, so this contract's address is too. Lunches rely on
+    /// that: a chain's revenue is bridged to this same address on the host chain. The Uniswap addresses differ per
+    /// chain, so this deployer sets them afterwards through `setChainSpecificConstants`.
+    address internal immutable _DEPLOYER;
+
+    //*********************************************************************//
+    // --------------------- public stored properties -------------------- //
+    //*********************************************************************//
+
+    /// @notice The Uniswap V4 hook every lunch's pool uses, which records the price history buybacks are bounded by.
+    /// @dev Set once by `_DEPLOYER` through `setChainSpecificConstants`. Zero until then.
+    IGeomeanOracle public override ORACLE_HOOK;
+
+    /// @notice The Uniswap V4 pool manager.
+    /// @dev Set once by `_DEPLOYER` through `setChainSpecificConstants`. Zero until then.
+    IPoolManager public override POOL_MANAGER;
+
+    /// @notice The Uniswap V4 position manager.
+    /// @dev Set once by `_DEPLOYER` through `setChainSpecificConstants`. Zero until then.
+    IPositionManager public override POSITION_MANAGER;
+
+    //*********************************************************************//
     // -------------------- internal stored properties ------------------- //
     //*********************************************************************//
 
@@ -187,33 +218,42 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
     mapping(uint256 projectId => FairLunchRecord) internal _recordOf;
 
     //*********************************************************************//
+    // ------------------- transient stored properties ------------------- //
+    //*********************************************************************//
+
+    /// @notice The account that paid the creation fee for the lunch currently being created.
+    /// @dev Part of `IJBPayerTracker`. Exposed while the launch runs so `JBProjects` credits the fee to the creator's
+    /// transaction instead of this contract. Cleared once the launch returns.
+    address public transient override originalPayer;
+
+    //*********************************************************************//
     // -------------------------- constructor ---------------------------- //
     //*********************************************************************//
 
+    /// @dev Every argument is the same address on every supported chain. The trusted forwarder is the one the
+    /// omnichain deployer trusts, so relayed creations resolve the signer instead of the forwarder.
     /// @param omnichainDeployer The deployer every lunch is launched through.
     /// @param terminal The terminal every lunch accepts ETH through.
     /// @param suckerRegistry The registry of every lunch's suckers.
-    /// @param positionManager The Uniswap V4 position manager.
     /// @param permit2 The Permit2 contract the position manager pulls tokens through.
-    /// @param oracleHook The Uniswap V4 hook every lunch's pool uses.
+    /// @param deployer The address allowed to set the chain-specific constants, once.
     constructor(
         IJBOmnichainDeployer omnichainDeployer,
         IJBMultiTerminal terminal,
         IJBSuckerRegistry suckerRegistry,
-        IPositionManager positionManager,
         IAllowanceTransfer permit2,
-        IGeomeanOracle oracleHook
-    ) {
+        address deployer
+    )
+        ERC2771Context(ERC2771Context(address(omnichainDeployer)).trustedForwarder())
+    {
         OMNICHAIN_DEPLOYER = omnichainDeployer;
         CONTROLLER = omnichainDeployer.CONTROLLER();
         DIRECTORY = terminal.DIRECTORY();
         TERMINAL = terminal;
         TOKENS = terminal.TOKENS();
         SUCKER_REGISTRY = suckerRegistry;
-        POSITION_MANAGER = positionManager;
-        POOL_MANAGER = positionManager.poolManager();
         PERMIT2 = permit2;
-        ORACLE_HOOK = oracleHook;
+        _DEPLOYER = deployer;
     }
 
     //*********************************************************************//
@@ -292,7 +332,7 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
         // Burn everything bought, along with any tokens that arrived carrying revenue from other chains.
         burned = _burnTokensOf(projectId);
 
-        emit Burn({projectId: projectId, spent: spent, burned: burned, caller: msg.sender});
+        emit Burn({projectId: projectId, spent: spent, burned: burned, caller: _msgSender()});
     }
 
     /// @notice Collect a served lunch's liquidity fees, burning the token side and paying the ETH side into JBP6 with
@@ -342,7 +382,7 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
             });
         }
 
-        emit Collect({projectId: projectId, tokensBurned: tokensBurned, ethPaid: ethPaid, caller: msg.sender});
+        emit Collect({projectId: projectId, tokensBurned: tokensBurned, ethPaid: ethPaid, caller: _msgSender()});
     }
 
     /// @notice Make a lunch on this chain.
@@ -356,10 +396,13 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
                 || config.keepPercent > MAX_CREATOR_PERCENT || config.tokenPercent > MAX_CREATOR_PERCENT
         ) revert FairLunch_InvalidConfig();
 
+        // A lunch needs this chain's Uniswap addresses.
+        if (address(POSITION_MANAGER) == address(0)) revert FairLunch_NotConfigured();
+
         bool isHost = config.hostChainId == block.chainid;
 
         // Scope the salt to the caller so nobody else can take a lunch's addresses on another chain.
-        bytes32 salt = keccak256(abi.encode(msg.sender, config.salt));
+        bytes32 salt = keccak256(abi.encode(_msgSender(), config.salt));
 
         JBSuckerDeploymentConfig memory suckerDeploymentConfiguration = config.suckerDeploymentConfiguration;
         if (suckerDeploymentConfiguration.deployerConfigurations.length != 0) {
@@ -393,6 +436,9 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
         terminalConfigurations[0] =
             JBTerminalConfig({terminal: IJBTerminal(address(TERMINAL)), accountingContextsToAccept: accountingContexts});
 
+        // Expose who is paying the creation fee so its credit goes to them, not to this contract.
+        originalPayer = JBPayerTrackerLib.resolve(_msgSender());
+
         // Launch the project with this contract as its owner, forever.
         // slither-disable-next-line unused-return
         (projectId,,) = OMNICHAIN_DEPLOYER.launchProjectFor{value: msg.value}({
@@ -403,6 +449,8 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
             memo: "",
             suckerDeploymentConfiguration: suckerDeploymentConfiguration
         });
+
+        originalPayer = address(0);
 
         // Deploy the token up front so payers hold a real ERC-20 from their first payment.
         // slither-disable-next-line unused-return
@@ -417,7 +465,7 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
         record.tokenPercent = config.tokenPercent;
         record.vestingDuration = config.vestingDuration;
 
-        emit Create({projectId: projectId, config: config, caller: msg.sender});
+        emit Create({projectId: projectId, config: config, caller: _msgSender()});
     }
 
     /// @notice Accept only a lunch's project NFT and its liquidity position.
@@ -474,7 +522,7 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
         });
         sucker.toRemote{value: msg.value}(JBConstants.NATIVE_TOKEN);
 
-        emit SendHome({projectId: projectId, sucker: address(sucker), tokenCount: tokenCount, caller: msg.sender});
+        emit SendHome({projectId: projectId, sucker: address(sucker), tokenCount: tokenCount, caller: _msgSender()});
     }
 
     /// @notice Serve a lunch once its deadline has passed.
@@ -574,8 +622,25 @@ contract FairLunch is IFairLunch, IJBRulesetDataHook, IJBPayHook, IUnlockCallbac
             creatorTokens: creatorTokens,
             vestingWallet: record.vestingWallet,
             positionId: record.positionId,
-            caller: msg.sender
+            caller: _msgSender()
         });
+    }
+
+    /// @notice One-shot setter for this chain's Uniswap V4 addresses.
+    /// @dev Callable only by `_DEPLOYER` and only once. After this call the values are effectively immutable. Keeping
+    /// them out of the constructor keeps this contract's address the same on every chain.
+    /// @param positionManager The Uniswap V4 position manager. The pool manager is read from it.
+    /// @param oracleHook The Uniswap V4 hook every lunch's pool uses.
+    function setChainSpecificConstants(IPositionManager positionManager, IGeomeanOracle oracleHook) external override {
+        if (msg.sender != _DEPLOYER) revert FairLunch_Unauthorized(msg.sender);
+        if (address(POSITION_MANAGER) != address(0)) revert FairLunch_AlreadyConfigured();
+        if (address(positionManager) == address(0) || address(oracleHook) == address(0)) {
+            revert FairLunch_InvalidConfig();
+        }
+
+        POSITION_MANAGER = positionManager;
+        POOL_MANAGER = positionManager.poolManager();
+        ORACLE_HOOK = oracleHook;
     }
 
     /// @notice Swaps inside the pool manager's lock.

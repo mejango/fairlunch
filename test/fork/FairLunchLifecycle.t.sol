@@ -85,10 +85,10 @@ contract FairLunchLifecycle is Test {
             omnichainDeployer: OMNI,
             terminal: TERMINAL,
             suckerRegistry: REGISTRY,
-            positionManager: POSITION_MANAGER,
             permit2: PERMIT2,
-            oracleHook: ORACLE
+            deployer: address(this)
         });
+        lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
         deadline = uint48(block.timestamp + 7 days);
         vm.deal(alice, 10_000 ether);
         vm.deal(bob, 10_000 ether);
@@ -589,6 +589,31 @@ contract FairLunchLifecycle is Test {
         uint256 id = _create(0, 0, 0);
         vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_NotRemote.selector, id));
         lunch.sendHome(id);
+    }
+
+    function test_setChainSpecificConstants_onlyDeployerOnce() public {
+        assertEq(address(lunch.POOL_MANAGER()), address(POOL_MANAGER), "pool manager read from the position manager");
+
+        vm.expectRevert(FairLunch.FairLunch_AlreadyConfigured.selector);
+        lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
+
+        FairLunch fresh =
+            new FairLunch({omnichainDeployer: OMNI, terminal: TERMINAL, suckerRegistry: REGISTRY, permit2: PERMIT2, deployer: bob});
+        vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));
+        fresh.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
+
+        // No lunches until this chain is configured.
+        FairLunchConfig memory config = _config(creator, 0, 0, 0);
+        uint256 fee = PROJECTS.creationFee();
+        vm.expectRevert(FairLunch.FairLunch_NotConfigured.selector);
+        fresh.createFor{value: fee}(config);
+    }
+
+    function test_createFor_creditsTheCreationFeeToThePayer() public {
+        uint256 before = TOKENS.totalBalanceOf(address(lunch), 1);
+        _create(0, 0, 0);
+        assertEq(TOKENS.totalBalanceOf(address(lunch), 1), before, "no JBP6 stranded on the lunch contract");
+        assertEq(lunch.originalPayer(), address(0), "cleared");
     }
 
     function test_onlyLunchNftsAccepted() public {

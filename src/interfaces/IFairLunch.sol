@@ -148,6 +148,11 @@ interface IFairLunch {
     /// @param projectId The ID of the lunch's project on this chain.
     function sendHome(uint256 projectId) external payable;
 
+    /// @notice One-shot setter for this chain's Uniswap V4 addresses.
+    /// @param positionManager The Uniswap V4 position manager.
+    /// @param oracleHook The Uniswap V4 hook every lunch's pool uses.
+    function setChainSpecificConstants(IPositionManager positionManager, IGeomeanOracle oracleHook) external;
+
     /// @notice Serve a lunch once its deadline has passed.
     /// @param projectId The ID of the lunch's project.
     function serve(uint256 projectId) external;
