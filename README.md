@@ -7,10 +7,10 @@ A token launcher on Juicebox V6 and Uniswap V4. Someone raises ETH at a fixed pr
 | Phase | What happens |
 | --- | --- |
 | 🧑‍🍳 Cooking | Anyone pays ETH and gets 1,000,000 tokens per ETH until the deadline. No goal, no refunds, no cash outs. |
-| 🍽️ Served | After the deadline anyone calls `serve` once. The creator gets their share of the ETH (a percent, up to a cap). The rest, minus Juicebox's 2.5% fee on the creator's payout, is paired with freshly minted tokens at the raise price in a full-range Uniswap V4 pool. The position stays in the contract for good. The creator's token share goes into a vesting wallet. |
+| 🍽️ Served | After the deadline anyone calls `serve` once. Juicebox's 2.5% fee comes off the raise. The creator gets their share of the rest (a percent, up to a cap), and what remains is paired with freshly minted tokens at the raise price in a full-range Uniswap V4 pool. The position stays in the contract for good. The creator's token share goes into a vesting wallet. |
 | 🔥 Eating | Every payment into the project buys the token from the pool and burns it in the same transaction. Anyone can call `burn` for money that arrived another way, and `collect` to burn the pool's token fees and pay its ETH fees into JBP6 with the creator as beneficiary. |
 
-Buys never pay more than 200 ticks (about 2%) above the pool's 30 minute average price. What can't be spent inside that bound waits in the project for the next `burn`.
+A buy never pushes the price more than 200 ticks (about 2%) above the pool's 30 minute average, or above where it stood before the current block. What can't be spent inside that bound waits in the project for the next `burn`.
 
 ## Chains
 

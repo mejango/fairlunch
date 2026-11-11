@@ -152,6 +152,41 @@ contract FairLunchCrossChain is Test {
         assertEq(address(lunch).balance, 0, "no ETH stranded on the lunch contract");
         assertGt(caller.balance, 0.9 ether + 0.05 ether, "unused bridge payment refunded to the caller");
         assertEq(TOKENS.totalBalanceOf(address(lunch), id), 0, "no tokens stranded on the lunch contract");
+
+        // The sucker's fee bought JBP6. It went to the caller who paid it, not to the lunch contract.
+        assertEq(TOKENS.totalBalanceOf(address(lunch), 1), 0, "no JBP6 stranded on the lunch contract");
+        if (REGISTRY.toRemoteFee() != 0) {
+            assertGt(TOKENS.totalBalanceOf(caller, 1), 0, "the caller got the fee's JBP6");
+        }
+    }
+
+    /// @notice A chosen peer could be any project's sucker, minting this lunch's token from nothing.
+    function test_createFor_revertsWithAChosenPeer() public {
+        vm.selectFork(baseFork);
+        FairLunchConfig memory config = _config(false);
+        config.suckerDeploymentConfiguration.deployerConfigurations[0].peer = bytes32(uint256(1));
+        uint256 fee = PROJECTS.creationFee();
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(config);
+    }
+
+    /// @notice A copy with other terms on another chain gets a sucker at another address, so the two never pair.
+    function test_copyWithOtherTerms_isNotAPeer() public {
+        uint256 fee = PROJECTS.creationFee();
+        vm.selectFork(baseFork);
+        address hostSucker = REGISTRY.suckersOf(lunch.createFor{value: fee}(_config(false)))[0];
+
+        // The same caller and salt, with the creator taking half the tokens at once.
+        vm.selectFork(optimismFork);
+        FairLunchConfig memory other = _config(true);
+        other.tokenPercent = 500_000_000;
+        other.vestingDuration = 0;
+        assertNotEq(REGISTRY.suckersOf(lunch.createFor{value: fee}(other))[0], hostSucker, "other terms, other sucker");
+
+        // The same terms pair.
+        assertEq(
+            REGISTRY.suckersOf(lunch.createFor{value: fee}(_config(true)))[0], hostSucker, "same terms, same sucker"
+        );
     }
 
     //*********************************************************************//

@@ -30,6 +30,7 @@ import {JBTerminalConfig} from "@bananapus/core-v6/src/structs/JBTerminalConfig.
 import {IJBOmnichainDeployer} from "@bananapus/omnichain-deployers-v6/src/interfaces/IJBOmnichainDeployer.sol";
 import {JBSuckerDeploymentConfig} from "@bananapus/omnichain-deployers-v6/src/structs/JBSuckerDeploymentConfig.sol";
 import {IJBSucker} from "@bananapus/suckers-v6/src/interfaces/IJBSucker.sol";
+import {IJBSuckerExtended} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerExtended.sol";
 import {IJBSuckerRegistry} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerRegistry.sol";
 import {JBTokenMapping} from "@bananapus/suckers-v6/src/structs/JBTokenMapping.sol";
 import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
@@ -324,10 +325,14 @@ contract FairLunch is
         });
 
         if (amount != 0) {
+            // Revenue that reached the lunch as another project's payout pays its Juicebox fee here. The JBP6 that buys
+            // belongs to the creator.
+            _sendFeeTokensTo(record.creator);
+
             PoolKey memory key = poolKeyOf(projectId);
 
-            // Buying the token lowers the pool's tokens-per-ETH price, so the bound sits below the average.
-            uint160 sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(_meanTickOf(key) - TWAP_MAX_DEVIATION);
+            // Buying the token lowers the pool's tokens-per-ETH price, so the bound sits below the reference.
+            uint160 sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(_boundTickOf(key) - TWAP_MAX_DEVIATION);
 
             // Buy as much as the bound allows.
             // slither-disable-next-line unused-return
@@ -407,21 +412,38 @@ contract FairLunch is
 
         bool isHost = config.hostChainId == block.chainid;
 
-        // Scope the salt to the caller so nobody else can take a lunch's addresses on another chain.
-        bytes32 salt = keccak256(abi.encode(_msgSender(), config.salt));
+        // Scope the salt to the caller so nobody else can take a lunch's addresses on another chain, and to the
+        // lunch's terms so only copies with the very same terms are bridged to each other. A copy with another host,
+        // deadline or creator share would otherwise be a second mint of the same token.
+        bytes32 salt = keccak256(
+            abi.encode(
+                _msgSender(),
+                config.salt,
+                config.hostChainId,
+                config.deadline,
+                config.creator,
+                config.keepPercent,
+                config.keepCap,
+                config.tokenPercent,
+                config.vestingDuration
+            )
+        );
 
         JBSuckerDeploymentConfig memory suckerDeploymentConfiguration = config.suckerDeploymentConfiguration;
         if (suckerDeploymentConfiguration.deployerConfigurations.length != 0) {
             suckerDeploymentConfiguration.salt = salt;
         }
 
-        // The host's suckers start with nothing mapped, so the raise can't be bridged away. `serve` maps the native
-        // token.
-        if (isHost) {
-            for (uint256 i; i < suckerDeploymentConfiguration.deployerConfigurations.length; i++) {
-                if (suckerDeploymentConfiguration.deployerConfigurations[i].mappings.length != 0) {
-                    revert FairLunch_HostMapsNoTokens();
-                }
+        for (uint256 i; i < suckerDeploymentConfiguration.deployerConfigurations.length; i++) {
+            // A lunch's suckers only ever pair with the same lunch's suckers on other chains, never a chosen peer.
+            if (suckerDeploymentConfiguration.deployerConfigurations[i].peer != bytes32(0)) {
+                revert FairLunch_InvalidConfig();
+            }
+
+            // The host's suckers start with nothing mapped, so the raise can't be bridged away. `serve` maps the
+            // native token.
+            if (isHost && suckerDeploymentConfiguration.deployerConfigurations[i].mappings.length != 0) {
+                revert FairLunch_HostMapsNoTokens();
             }
         }
 
@@ -543,6 +565,11 @@ contract FairLunch is
         });
         sucker.toRemote{value: msg.value}(JBConstants.NATIVE_TOKEN);
 
+        // The sucker's fee bought JBP6 for this contract. It belongs to the caller who paid it. If the fee couldn't be
+        // paid, the sucker kept it for this contract to take back.
+        _sendFeeTokensTo(_msgSender());
+        try IJBSuckerExtended(address(sucker)).claimRetainedToRemoteFee(payable(address(this))) {} catch {}
+
         // The sucker refunds whatever the bridge didn't need. Pass it on to the caller who paid.
         uint256 refund = address(this).balance - ethBefore;
         if (refund != 0) Address.sendValue({recipient: payable(_msgSender()), amount: refund});
@@ -599,21 +626,6 @@ contract FairLunch is
         // so the pool opens at the price payers paid.
         uint256 poolTokens = poolEth * TOKENS_PER_ETH;
 
-        // Mint the creator's share of the total supply into a wallet that vests it linearly from now.
-        uint256 creatorTokens = mulDiv(
-            TOKENS.totalSupplyOf(projectId) + poolTokens,
-            record.tokenPercent,
-            JBConstants.SPLITS_TOTAL_PERCENT - record.tokenPercent
-        );
-        if (creatorTokens != 0) {
-            record.vestingWallet = VESTING_DEPLOYER.deployFor({
-                beneficiary: record.creator,
-                startTimestamp: uint64(block.timestamp),
-                durationSeconds: record.vestingDuration
-            });
-            _mintTokensOf({projectId: projectId, tokenCount: creatorTokens, beneficiary: record.vestingWallet});
-        }
-
         _mintTokensOf({projectId: projectId, tokenCount: poolTokens, beneficiary: address(this)});
 
         // Put the ETH and the tokens in the pool, forever.
@@ -624,6 +636,20 @@ contract FairLunch is
         _burnTokensOf(projectId);
         uint256 ethLeft = address(this).balance - ethBefore;
         if (ethLeft != 0) _addToBalanceOf({projectId: projectId, amount: ethLeft});
+
+        // Mint the creator's share of the total supply, now that it's settled, into a wallet that vests it linearly
+        // from now.
+        uint256 creatorTokens = mulDiv(
+            TOKENS.totalSupplyOf(projectId), record.tokenPercent, JBConstants.SPLITS_TOTAL_PERCENT - record.tokenPercent
+        );
+        if (creatorTokens != 0) {
+            record.vestingWallet = VESTING_DEPLOYER.deployFor({
+                beneficiary: record.creator,
+                startTimestamp: uint64(block.timestamp),
+                durationSeconds: record.vestingDuration
+            });
+            _mintTokensOf({projectId: projectId, tokenCount: creatorTokens, beneficiary: record.vestingWallet});
+        }
 
         // Open the bridges now that there is no raise left to bridge away.
         address[] memory suckers = SUCKER_REGISTRY.suckersOf(projectId);
@@ -887,15 +913,16 @@ contract FairLunch is
             // slither-disable-next-line unused-return
             POOL_MANAGER.initialize({key: key, sqrtPriceX96: _RAISE_SQRT_PRICE_X96});
         } else if (sqrtPriceX96 > _RAISE_SQRT_PRICE_X96) {
-            // Tokens are cheaper than the fundraise's price. Buy them down to it.
+            // Tokens are cheaper than the fundraise's price. Buy them down to it, with at most half the ETH so there's
+            // always a position left to make however much liquidity is in the way.
             (uint256 spent, uint256 received) =
-                _swap({key: key, zeroForOne: true, amountIn: eth, sqrtPriceLimitX96: _RAISE_SQRT_PRICE_X96});
+                _swap({key: key, zeroForOne: true, amountIn: eth / 2, sqrtPriceLimitX96: _RAISE_SQRT_PRICE_X96});
             eth -= spent;
             tokens += received;
         } else if (sqrtPriceX96 < _RAISE_SQRT_PRICE_X96) {
-            // Tokens are dearer than the fundraise's price. Sell them up to it.
+            // Tokens are dearer than the fundraise's price. Sell them up to it, with at most half the tokens.
             (uint256 spent, uint256 received) =
-                _swap({key: key, zeroForOne: false, amountIn: tokens, sqrtPriceLimitX96: _RAISE_SQRT_PRICE_X96});
+                _swap({key: key, zeroForOne: false, amountIn: tokens / 2, sqrtPriceLimitX96: _RAISE_SQRT_PRICE_X96});
             tokens -= spent;
             eth += received;
         }
@@ -1044,20 +1071,28 @@ contract FairLunch is
     // ----------------------- internal views ---------------------------- //
     //*********************************************************************//
 
-    /// @notice The pool's time-weighted average tick over the last `TWAP_WINDOW`.
-    /// @dev Reverts if the pool's history doesn't reach that far back.
+    /// @notice The tick a buyback's price bound is measured from: the pool's average tick over the last `TWAP_WINDOW`,
+    /// or its tick a second ago if that's higher (cheaper tokens).
+    /// @dev The average keeps a buyback from chasing a price that was pushed up over several blocks. The tick a second
+    /// ago is the price before anything traded in this block, which keeps a buyback from chasing a price that was
+    /// pushed up just ahead of it. Reverts if the pool's history doesn't reach `TWAP_WINDOW` back.
     /// @param key The pool's key.
-    /// @return tick The average tick, rounded toward negative infinity.
-    function _meanTickOf(PoolKey memory key) internal view returns (int24 tick) {
-        uint32[] memory secondsAgos = new uint32[](2);
+    /// @return tick The reference tick, rounded toward negative infinity.
+    function _boundTickOf(PoolKey memory key) internal view returns (int24 tick) {
+        uint32[] memory secondsAgos = new uint32[](3);
         secondsAgos[0] = TWAP_WINDOW;
+        secondsAgos[1] = 1;
 
         // slither-disable-next-line unused-return
         (int56[] memory tickCumulatives,) = ORACLE_HOOK.observe({key: key, secondsAgos: secondsAgos});
 
-        int56 delta = tickCumulatives[1] - tickCumulatives[0];
+        int56 delta = tickCumulatives[2] - tickCumulatives[0];
         tick = int24(delta / int56(uint56(TWAP_WINDOW)));
         if (delta < 0 && delta % int56(uint56(TWAP_WINDOW)) != 0) tick--;
+
+        // Over one second the cumulative's change is the tick itself.
+        int24 lastTick = int24(tickCumulatives[2] - tickCumulatives[1]);
+        if (lastTick > tick) tick = lastTick;
     }
 
     /// @notice The smaller of two numbers.

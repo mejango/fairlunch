@@ -16,8 +16,11 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
+import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
@@ -50,6 +53,45 @@ contract LockedPayer is IUnlockCallback {
         (uint256 projectId, uint256 amount) = abi.decode(data, (uint256, uint256));
         TERMINAL.pay{value: amount}(projectId, JBConstants.NATIVE_TOKEN, amount, address(this), 0, "", "");
         return "";
+    }
+}
+
+/// @notice Anyone trading in a lunch's pool.
+contract Trader is IUnlockCallback {
+    IPoolManager internal immutable POOL_MANAGER;
+
+    constructor(IPoolManager poolManager) {
+        POOL_MANAGER = poolManager;
+    }
+
+    receive() external payable {}
+
+    /// @notice Sell an exact amount of ETH (`zeroForOne`) or of the token into the pool, at any price.
+    function swap(PoolKey memory key, bool zeroForOne, uint256 amountIn) external returns (uint256 received) {
+        received = abi.decode(POOL_MANAGER.unlock(abi.encode(key, zeroForOne, amountIn)), (uint256));
+    }
+
+    function unlockCallback(bytes calldata data) external override returns (bytes memory) {
+        (PoolKey memory key, bool zeroForOne, uint256 amountIn) = abi.decode(data, (PoolKey, bool, uint256));
+        BalanceDelta delta = POOL_MANAGER.swap(
+            key,
+            SwapParams({
+                zeroForOne: zeroForOne,
+                amountSpecified: -int256(amountIn),
+                sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+            }),
+            ""
+        );
+        if (zeroForOne) {
+            POOL_MANAGER.settle{value: uint128(-delta.amount0())}();
+            POOL_MANAGER.take(key.currency1, address(this), uint128(delta.amount1()));
+            return abi.encode(uint256(uint128(delta.amount1())));
+        }
+        POOL_MANAGER.sync(key.currency1);
+        IERC20(Currency.unwrap(key.currency1)).transfer(address(POOL_MANAGER), uint128(-delta.amount1()));
+        POOL_MANAGER.settle();
+        POOL_MANAGER.take(key.currency0, address(this), uint128(delta.amount0()));
+        return abi.encode(uint256(uint128(delta.amount0())));
     }
 }
 
@@ -574,23 +616,150 @@ contract FairLunchLifecycle is Test {
 
     function test_collect_burnsTokensAndPaysJbp6() public {
         uint256 id = _served(0, 0, 0);
+        PoolKey memory key = lunch.poolKeyOf(id);
+        uint128 liquidity = POSITION_MANAGER.getPositionLiquidity(lunch.recordOf(id).positionId);
         vm.warp(_servedAt() + 30 minutes);
 
-        // Trade both ways through the pool to earn fees on both sides: buybacks pay ETH fees.
+        // Trade both ways through the pool so it earns fees on both sides: a buyback pays ETH, a holder's sale pays
+        // tokens.
         _pay(id, bob, 0.05 ether);
+        Trader trader = new Trader(POOL_MANAGER);
+        IERC20 token = _token(id);
+        vm.prank(alice);
+        token.transfer(address(trader), 100_000e18);
+        trader.swap(key, false, 100_000e18);
 
         uint256 jbp6Before = TOKENS.totalBalanceOf(creator, 1);
         uint256 supply = TOKENS.totalSupplyOf(id);
         (uint256 tokensBurned, uint256 ethPaid) = lunch.collect(id);
 
-        // 1% of 0.05 ETH, to the wei of rounding.
+        // 1% of each trade, to the wei of rounding.
         assertApproxEqAbs(ethPaid, 0.0005 ether, 1e9, "ETH fees");
+        assertApproxEqAbs(tokensBurned, 1000e18, 1e12, "token fees");
         assertGt(TOKENS.totalBalanceOf(creator, 1), jbp6Before, "creator earned JBP6");
-        assertEq(supply - TOKENS.totalSupplyOf(id), tokensBurned);
+        assertEq(supply - TOKENS.totalSupplyOf(id), tokensBurned, "token fees were burned");
+        assertEq(POSITION_MANAGER.getPositionLiquidity(lunch.recordOf(id).positionId), liquidity, "liquidity untouched");
         _assertHoldsNothing(id);
 
         vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_NotServed.selector, 1));
         lunch.collect(1);
+    }
+
+    //*********************************************************************//
+    // --------------------------- adversaries --------------------------- //
+    //*********************************************************************//
+
+    /// @notice A copy of a lunch with any other terms gets other bridges, so it can't mint into this one.
+    function test_createFor_bindsTermsIntoAddresses() public {
+        FairLunchConfig memory config = _config(creator, FIFTH, 1 ether, TENTH);
+        config.salt = "same";
+        uint256 fee = PROJECTS.creationFee();
+        address token = address(TOKENS.tokenOf(lunch.createFor{value: fee}(config)));
+
+        // The token's address stands in for every address derived from the salt, the suckers' included.
+        uint256 snapshot = vm.snapshotState();
+        config.deadline += 1;
+        assertNotEq(address(TOKENS.tokenOf(lunch.createFor{value: fee}(config))), token, "deadline");
+        vm.revertToState(snapshot);
+        config.deadline -= 1;
+        config.tokenPercent = HALF;
+        assertNotEq(address(TOKENS.tokenOf(lunch.createFor{value: fee}(config))), token, "token percent");
+        vm.revertToState(snapshot);
+        config.tokenPercent = TENTH;
+        config.vestingDuration = 0;
+        assertNotEq(address(TOKENS.tokenOf(lunch.createFor{value: fee}(config))), token, "vesting");
+        vm.revertToState(snapshot);
+        config.vestingDuration = 52 weeks;
+        config.creator = bob;
+        assertNotEq(address(TOKENS.tokenOf(lunch.createFor{value: fee}(config))), token, "creator");
+
+        // The same terms again collide, as the same lunch would.
+        vm.revertToState(snapshot);
+        config.creator = creator;
+        vm.expectRevert();
+        lunch.createFor{value: fee}(config);
+    }
+
+    /// @notice Deep liquidity parked just short of the fundraise's price can't keep a lunch from being served.
+    function test_serve_deepStrangerLiquidityCantBlockIt() public {
+        uint256 id = _create(0, 0, 0);
+        _pay(id, alice, 10 ether);
+        PoolKey memory key = lunch.poolKeyOf(id);
+
+        // 15 ETH between ticks 138,000 and 138,200, with the price under the fundraise's 138,162: more than the
+        // lunch's 9.75M tokens can sell through.
+        vm.deal(bob, 100 ether);
+        vm.startPrank(bob);
+        POOL_MANAGER.initialize(key, TickMath.getSqrtPriceAtTick(138_000));
+        uint128 liquidity = LiquidityAmounts.getLiquidityForAmount0(
+            TickMath.getSqrtPriceAtTick(138_000), TickMath.getSqrtPriceAtTick(138_200), 15 ether
+        );
+        bytes memory actions =
+            abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR), uint8(Actions.SWEEP));
+        bytes[] memory params = new bytes[](3);
+        params[0] =
+            abi.encode(key, int24(138_000), int24(138_200), uint256(liquidity), uint128(16 ether), uint128(0), bob, "");
+        params[1] = abi.encode(key.currency0, key.currency1);
+        params[2] = abi.encode(key.currency0, bob);
+        POSITION_MANAGER.modifyLiquidities{value: 16 ether}(abi.encode(actions, params), block.timestamp);
+        vm.stopPrank();
+
+        vm.warp(deadline + 1);
+        lunch.serve(id);
+
+        // Served short of the fundraise's price, with a position, and the ETH it didn't use waiting for buybacks.
+        assertLt(_sqrtPrice(id), RAISE_SQRT_PRICE_X96, "couldn't reach the price");
+        assertGt(POSITION_MANAGER.getPositionLiquidity(lunch.recordOf(id).positionId), 0, "has a position");
+        assertGt(_balance(id), 1 ether, "unused ETH waits");
+        _assertHoldsNothing(id);
+    }
+
+    /// @notice Whatever happens in the pool before serving, the creator ends with exactly their share of the supply.
+    function test_serve_creatorShareHoldsOverHostilePool() public {
+        uint256 id = _create(0, 0, HALF);
+        _pay(id, alice, 10 ether);
+        vm.prank(bob);
+        POOL_MANAGER.initialize(lunch.poolKeyOf(id), TickMath.getSqrtPriceAtTick(150_000));
+
+        vm.warp(deadline + 1);
+        lunch.serve(id);
+
+        uint256 vested = _token(id).balanceOf(lunch.recordOf(id).vestingWallet);
+        assertApproxEqAbs(vested * 2, TOKENS.totalSupplyOf(id), 2, "half the supply");
+    }
+
+    /// @notice A buy slipped in ahead of a buyback in the same block gets nothing out of it.
+    function test_burn_ignoresPriceMovedInItsOwnBlock() public {
+        uint256 id = _served(0, 0, 0);
+        PoolKey memory key = lunch.poolKeyOf(id);
+        Trader trader = new Trader(POOL_MANAGER);
+        vm.deal(address(trader), 10 ether);
+
+        // A holder sells hard, and time passes with the price low: far under the average, a buyback has room.
+        IERC20 token = _token(id);
+        vm.prank(alice);
+        token.transfer(address(trader), 4_000_000e18);
+        vm.warp(_servedAt() + 30 minutes);
+        trader.swap(key, false, 4_000_000e18);
+        vm.warp(_servedAt() + 31 minutes);
+        int24 lowTick = _tick(id);
+
+        // Front-run: push the price up 5% just ahead of a 1 ETH payment.
+        trader.swap(key, true, 0.15 ether);
+        assertLt(_tick(id), lowTick - 400, "front-run moved the price");
+        int24 frontRunTick = _tick(id);
+
+        _pay(id, bob, 1 ether);
+        assertEq(_tick(id), frontRunTick, "the buyback didn't chase it");
+        assertApproxEqAbs(_balance(id), 1 ether, 1e9, "the payment waits");
+
+        // A block later that price is the pool's last close, and a buyback moves it by the bound and no more: less
+        // than the two swap fees a round trip costs.
+        vm.warp(_servedAt() + 32 minutes);
+        (uint256 spent,) = lunch.burn(id);
+        assertGt(spent, 0, "buys the next block");
+        assertApproxEqAbs(_tick(id), frontRunTick - 200, 1, "by the bound");
+        _assertHoldsNothing(id);
     }
 
     function test_sendHome_revertsOnHost() public {

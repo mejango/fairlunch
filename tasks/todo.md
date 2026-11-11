@@ -105,7 +105,7 @@ File: `test/fork/FairLunchSpikes.t.sol`. Each test uses a throwaway harness cont
 ### Task 8: deploy script and contract gates
 - [x] `script/Deploy.s.sol` in the Sticky and Homerun Sphinx shape, constructor arguments from the packages' deployment records; a rehearsal test that runs it on a fork. No proposal is sent.
 - [x] `forge fmt --check`, warnings-denied build, `forge build --sizes` under 24,576 bytes, STYLE_GUIDE pass over every declaration, `README.md`, `RISKS.md` (singleton custody, 7-day bridge, TWAP limit behaviour).
-- [ ] Two adversarial Codex passes (`gpt-6.1-sol`, read-only, stdin closed); fix; rerun affected tests. Commit.
+- [ ] (pass 1 done, seven findings fixed or documented, see Review) Two adversarial Codex passes (`gpt-6.1-sol`, read-only, stdin closed); fix; rerun affected tests. Commit.
 - [ ] Check-in with jango: repo creation and PR.
 
 ## Phase B: website
@@ -152,4 +152,18 @@ Base fork at block 56,216,000, `test/fork/FairLunchSpikes.t.sol`, 7 passing (202
 
 ## Review
 
-(filled at the end of each phase)
+### Phase A, Codex pass 1 (2026-11-11)
+
+| Finding | Verdict | What changed |
+|---|---|---|
+| High: a copy of a lunch with other terms, or a chosen peer, bridges unbacked tokens into the host | Confirmed | The salt binds caller, host chain, deadline, creator, keep, token share and vesting. A chosen peer reverts. Tests: `test_createFor_bindsTermsIntoAddresses`, `test_copyWithOtherTerms_isNotAPeer`, `test_createFor_revertsWithAChosenPeer` |
+| Medium: deep stranger liquidity makes every `serve` revert | Confirmed | Normalization spends at most half of either side. Test: `test_serve_deepStrangerLiquidityCantBlockIt` |
+| Medium: normalization pays the pool's 1% fee | Accepted, documented in RISKS | None: bounded at 1% of what's swapped, paid to the stranger's liquidity |
+| Medium: a same-block front-run profits from a buyback when spot is far under the average | Confirmed | The bound also holds 200 ticks from the price a second ago. Test: `test_burn_ignoresPriceMovedInItsOwnBlock`. A position held across blocks is documented |
+| Medium: creator share computed before the pool settles | Confirmed | Minted after the pool opens and leftovers burn. Test: `test_serve_creatorShareHoldsOverHostilePool` |
+| Medium: JBP6 from the sucker's fee or a deferred payout fee stays in the contract | Confirmed | `sendHome` forwards it to the caller, `burn` to the creator |
+| Low: a failed sucker fee stays in the sucker | Confirmed | `sendHome` claims it back into the caller's refund |
+| Info: bridging moves backing, unsolicited assets are lost | Documented in RISKS | None |
+| Weak tests | Confirmed | Spikes deleted (the lifecycle suite asserts what they logged), `collect` earns fees on both sides and checks liquidity |
+
+Not done: a claim through real bridge delivery (listed in RISKS).
