@@ -111,26 +111,29 @@ File: `test/fork/FairLunchSpikes.t.sol`. Each test uses a throwaway harness cont
 ## Phase B: website
 
 ### Task 10: scaffold `web/` from `extensions/sticky/web`
-- [ ] Copy scaffolding and shared infrastructure listed in the web recon (providers, wallet files, transaction review set, Center RPC, Bendystraw proxy), omitting every Signa file, the `CENTER_WALLET_ENABLED` branch, `nana-sdk-connect`, and Sticky product code. `web/COPIED.md` records provenance.
-- [ ] `npm run check` passes on an empty home page; connect dialog lists only the four wallet kinds. Commit.
+- [x] Copied scaffolding and shared infrastructure (providers, wallet files, transaction review set, Center RPC), with every Signa file and branch and all Sticky product code removed. `nana-sdk-connect` stayed: its dialog is the one that lists the user's own wallets. No `COPIED.md`; `web/README.md` says where things come from.
+- [x] `npm run check` passes (audit, lint, types, tests, build).
 
 ### Task 11: domain modules (one home per rule)
-- [ ] `web/src/lib/fair-lunch/abi.ts` and `deployments.json` (synced by script), `phase.ts` (`phaseOf(record, now, balance): 'cooking' | 'ready' | 'served'`, plus `dueCalls`), `split.ts` (`splitOf(raised, keepPercent, keepCap)` returning creator and pool amounts, mirroring the contract), `launch-plan.ts` (builds `createFor` per chain with one `isHost`), `indexed.ts` (Bendystraw projects where owner = FairLunch).
-- [ ] Vitest for `phase.ts` and `split.ts` against the contract test vectors from Task 5. Commit.
+- [x] `abi.ts` (synced by `scripts/sync-abi.mjs`), `deployments.json`, `phase.ts`, `split.ts`, `reads.ts`, `writes.ts` (holds the per-chain `createFor`), `indexed.ts`.
+- [x] Vitest for `phase.ts` and `split.ts`.
 
 ### Task 12: home and create
-- [ ] Home: list with logo, name, phase, raised; one "Make lunch" button.
-- [ ] Create: nine fields from the spec, native inputs, logo and metadata pinned through Center, one review, multi-chain launch through the Relayr launch adapter pattern. Playwright: form validation at both widths. Commit.
+- [x] Home: list with logo, name, phase, raised; one "Make lunch" button.
+- [x] Create: native inputs, logo and metadata pinned through Center, one review per chain. Several chains are one `createFor` each, host first, not a Relayr bundle. No Playwright spec; `scripts/shots.mjs` checks both widths for overflow and console errors.
 
 ### Task 13: project page
-- [ ] Phase and countdown (large), raised split with `FundingProgress` toward the cap, one card: Pay while cooking, Swap after serve (SDK V4 quote and swap builders, Permit2 for sells), due-call buttons (Serve lunch, Burn, Collect, Send home), facts row (burned, liquidity, vesting progress).
-- [ ] Vitest for card state per phase; Playwright at 390px and 1280px. Commit.
+- [x] Phase and countdown, what was raised and how it splits, one card: Pay while cooking, Swap after serve (buy and sell, Permit2 approvals for sells), Serve, Burn and Collect buttons.
+- [ ] Send home button and a page for a lunch's other-chain copies. Left to the keeper job: it needs the bridge's fee quoted.
+- [ ] Component tests for card state per phase.
 
 ### Task 14: chart
-- [ ] Port revnet's `TokenPriceChart` and `getV4AmmPriceHistory`; add volume bars, burn markers and the raise-price line; data from Bendystraw `swapEvents` if Task 2 follow-up shows the pool is indexed, else `Swap` logs over Center RPC. Vitest for bucketing; visual check at both widths. Commit.
+- [x] Price from the pool's own oracle in one call (no indexer, no log scan), range buttons, crosshair, raise-price line, burn marks from Bendystraw.
+- [ ] Volume bars.
 
 ### Task 15: web gates
-- [ ] `npm run check`, render against live data on a testnet deployment (needs the deployment go-ahead), copy pass (no middots, sentence case, as few words as possible). Check-in with jango.
+- [x] `npm run check`; copy pass.
+- [ ] Render against a testnet deployment (needs the deployment go-ahead). Check-in with jango.
 
 ## Phase C: automation
 
@@ -183,3 +186,22 @@ All five fixes from pass 1 held. New:
 Payments after `serve` went through without buying: the buyback sat in a try/catch, and gas estimation settles on the least gas that lets the transaction succeed, which is the amount at which the caught call runs out. Forge tests never see this because they send ample gas. `afterPayRecordedWith` now skips the buyback only when it's too early or the pool manager is unlocked, and otherwise calls `burn` uncaught. Test: `test_pay_revertsRatherThanStarveTheBuyback`. Proof: four `cast send` payments on the fork left only what the price bound wouldn't take.
 
 Verdict from Codex was no merge until the two Mediums are addressed. One is fixed, one is documented with the site enforcing the order. This is the open call for jango at the PR.
+
+### Phase B, website (2026-11-11)
+
+Checked against a local Base fork (`script/Rehearse.s.sol`, anvil, an RPC shim standing in for Center), not a live deployment.
+
+| Check | Result |
+|---|---|
+| `npm run check` | Passes: audit clean, lint, types, 5 tests, production build |
+| Pages at 1280 and 390 wide (`/`, `/create`, a cooking lunch, a served lunch) | No overflow, no console errors |
+| Chart | Draws the oracle's price: raise price, then a step per buyback |
+| Sell through the SDK's Permit2 and router builders (`web/scripts/sell-check.mjs`) | ETH received equals the quote, from a clean account |
+| Wallet-driven flows (connect, pay, create, swap) in a real browser wallet | Not run: needs a wallet session |
+
+Found on the way:
+
+- The copied lockfile pinned Next 16.3.8, which has critical advisories. Now 16.4.6, with `follow-redirects` and `zod` overridden to patched versions. Sticky and juicebox-money are still on 16.3.8.
+- The fork's default test account has a 7702 delegation on Base that forwards incoming ETH, so a sale from it looks like it paid nothing. Use a fresh funded account for sell checks.
+- Bendystraw doesn't index a fork, so the home list and burn marks are empty locally. Whether it indexes FairLunch's projects on a live chain is unchecked.
+
