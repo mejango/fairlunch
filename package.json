@@ -1,0 +1,32 @@
+{
+  "name": "fair-lunch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tasty token launcher on Juicebox V6 and Uniswap V4.",
+  "license": "MIT",
+  "scripts": {
+    "test": "forge test",
+    "test:fork": "forge test --match-path 'test/fork/*'",
+    "build": "forge build --deny warnings",
+    "sizes": "forge build --sizes",
+    "fmt": "forge fmt --check"
+  },
+  "dependencies": {
+    "@bananapus/721-hook-v6": "^1.0.0",
+    "@bananapus/buyback-hook-v6": "2.0.1",
+    "@bananapus/core-v6": "1.2.2",
+    "@bananapus/omnichain-deployers-v6": "1.1.0",
+    "@bananapus/permission-ids-v6": "^1.0.0",
+    "@bananapus/suckers-v6": "1.1.3",
+    "@bananapus/univ4-router-v6": "2.0.1",
+    "@openzeppelin/contracts": "5.6.1",
+    "@prb/math": "4.1.2",
+    "@uniswap/permit2": "github:Uniswap/permit2#cc56ad0f3439c502c246fc5cfcc3db92bb8b7219",
+    "@uniswap/v4-core": "1.0.2",
+    "@uniswap/v4-periphery": "1.0.3"
+  },
+  "devDependencies": {
+    "@sphinx-labs/plugins": "0.33.3",
+    "forge-std": "github:foundry-rs/forge-std#v1.9.7"
+  }
+}

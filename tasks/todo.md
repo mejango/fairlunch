@@ -1,0 +1,174 @@
+# Fair Lunch implementation plan
+
+> **For agentic workers:** execute task by task (superpowers:executing-plans, native, in the main session). Steps use checkbox syntax. Read the spec first; this plan argues from it.
+
+**Goal:** A token launcher on Juicebox V6 and Uniswap V4: fixed-price fundraise, one permissionless launch into locked liquidity, then every inflow buys and burns, with a small site.
+
+**Architecture:** One singleton contract, `FairLunch`, is project owner, extra data hook (through `JBOmnichainDeployer`), pay hook and holder of every LP position. The host project's terminal balance is the single sink for all revenue. The site is Sticky's web scaffolding without Signa.
+
+**Tech stack:** Solidity 0.8.28, Foundry (via_ir, cancun), npm-installed V6 packages, Sphinx deploy script. Next 16, wagmi 3, viem 2, Tailwind 4, `@bananapus/nana-sdk-core`, Center RPC and pinning, Bendystraw.
+
+**Spec:** `/Users/jango/Documents/jb/v6/evm/docs/superpowers/specs/2026-11-11-fair-lunch-design.md`
+
+**Workspace resources (carry into any delegated work):** `/Users/jango/Documents/jb/v6/evm/AGENTS.md`, `/Users/jango/Documents/jb/v6/evm/workflow/ponytail/SKILL.md`, `/Users/jango/Documents/jb/v6/evm/docs/PLAN_REFINEMENT.md`, `/Users/jango/Documents/jb/v6/evm/tasks/lessons.md`, `/Users/jango/Documents/jb/v6/evm/STYLE_GUIDE.md`.
+
+## Plan refinement
+
+- **Objective:** Deliver the approved Fair Lunch spec (contracts, site, keeper job) in `extensions/fair-lunch`; success is the lifecycle fork tests green on Base, the site passing its full check at phone and desktop widths against a testnet deployment, and a reviewable PR; jango's decisions in the spec are facts, my marked calls stay open to correction.
+- **System fit:** Outcome (launch a token with no duties) → capability (`FairLunch` over V6 core, omnichain deployer, suckers, JB V4 hook oracle) → evidence (fork tests against live V6, Bendystraw rows) → prepared action (SDK-built transactions in one review) → authority (user wallet signs; every later call permissionless) → verified result (receipts and indexed state on the project page) → learning (lessons and invariants as tests); owners reused are core, the omnichain deployer, the SDK and Center, and no existing consumer changes.
+- **Reuse and simplicity:** Reused as is: `JBOmnichainDeployer`, suckers, `JBSwapLib`, `IGeomeanOracle`, OpenZeppelin `VestingWallet`, PositionManager action encoding copied from the LP split hook, Sticky's web scaffolding, revnet's SVG price chart, Homerun's `FundingProgress`; new is one contract because no existing piece burns on buyback or launches on a deadline, and three roles share one per-project record.
+- **Evidence and unknowns:** Upstream `origin/main` of the hook repos (buyback 2.0.1, V4 router hook 2.0.1, LP split hook 1.5.2) and published npm versions are the source, local hook checkouts are stale; four unknowns in the spec are settled by Task 2 fork tests before dependent code; everything here is proposed, nothing is deployed, and no deploy, repo creation or merge is authorized by this plan.
+- **Verification:** One test per spec invariant plus the Review focus cases, Base fork lifecycle test at a pinned block, two-fork `sendHome` test, forge fmt and warnings-denied build and sizes, STYLE_GUIDE check, two adversarial Codex passes before any push, web `npm run check` with Playwright at 390px and 1280px, and a render against live data.
+- **Resource budget:** Contracts first because the site depends on the ABI; Task 2 spikes are the replanning trigger (a failed whole-balance cash out switches `burn` to the pay-hook-forward fallback named in the spec); one writer for this file, edits in the main session, subagents only for read-only research and review, fork tests bounded to one pinned block per chain.
+
+## Global constraints
+
+- Fee project and its token are called JBP6. No middots anywhere. Sentence case in UI.
+- Fixed values: 1,000,000 tokens per ETH (weight `1_000_000e18`), pool fee `10_000`, tick spacing `200`, TWAP window `30 minutes`, price limit TWAP + `200` ticks, keep percent and token percent each at most 50%, vesting presets 26, 52, 104, 208 weeks (site offers these; contract stores the duration it is given).
+- No cash outs for anyone but FairLunch in any phase. No admin function. No function removes liquidity.
+- No tokens or ETH stranded by our own execution.
+- User wallets only: injected, Coinbase Wallet, WalletConnect, Safe. No Signa, no Para.
+- V6 STYLE_GUIDE: pragma 0.8.28 (interfaces and structs `^0.8.0`), named imports, banner sections in order, `FairLunch_ErrorName` errors in the contract, full NatSpec, named arguments for calls with two or more arguments.
+- Contract PRs stay unmerged and undeployed until jango approves the final PR. Creating the GitHub repo, proposing a deployment and publishing the site each need a go-ahead.
+
+## Review focus
+
+Each line names the task whose tests pin it.
+
+1. Deadline passes with nothing raised: `serve` reverts cleanly and pays stay rejected (Task 5).
+2. Creator address is a contract that rejects ETH: `serve` still completes and the creator's ETH is not stranded in FairLunch (Task 5).
+3. Pool initialized or funded by a stranger before launch at a wrong price: `serve` completes and never trades worse than the raise price (Task 5).
+4. A pay far larger than pool liquidity after launch: pay succeeds, price moves at most to the limit, remainder waits in the balance (Task 6).
+5. `sendHome` and host `claim` before `serve`: bridged ETH counts as raised and no token holder is diluted beyond 1 wei (Task 7).
+
+## File map
+
+- `src/FairLunch.sol`: the contract.
+- `src/interfaces/IFairLunch.sol`: events, views, transactions.
+- `src/structs/FairLunchConfig.sol`: creation input. `src/structs/FairLunchRecord.sol`: per-project record.
+- `script/Deploy.s.sol`: Sphinx deploy, per-chain constants.
+- `test/FairLunch.t.sol` (unit, mocks), `test/fork/FairLunchLifecycle.t.sol`, `test/fork/FairLunchSpikes.t.sol`, `test/fork/FairLunchCrossChain.t.sol`.
+- `web/`: Next app (see Tasks 10 to 15).
+
+## Interfaces fixed by this plan
+
+```solidity
+struct FairLunchConfig {
+    string name; string symbol; string projectUri;
+    bool isHost;            // true on exactly one chain
+    uint48 deadline;        // absolute timestamp, same on every chain
+    address creator;        // receives ETH keep, JBP6, and the vesting wallet
+    uint32 keepPercent;     // of JBConstants.SPLITS_TOTAL_PERCENT, at most half
+    uint104 keepCap;        // wei
+    uint32 tokenPercent;    // of JBConstants.SPLITS_TOTAL_PERCENT, at most half
+    uint32 vestingDuration; // seconds
+    bytes32 salt;           // ERC-20 and sucker salt, scoped by msg.sender
+    JBSuckerDeploymentConfig suckerDeploymentConfiguration;
+}
+struct FairLunchRecord {
+    bool isHost; uint48 deadline; uint48 servedAt; address creator;
+    uint32 keepPercent; uint104 keepCap; uint32 tokenPercent; uint32 vestingDuration;
+    uint256 positionId; address vestingWallet;
+}
+function createFor(FairLunchConfig calldata config) external returns (uint256 projectId);
+function serve(uint256 projectId) external;
+function burn(uint256 projectId) external returns (uint256 spent, uint256 burned);
+function collect(uint256 projectId) external returns (uint256 tokensBurned, uint256 ethPaid);
+function sendHome(uint256 projectId) external payable;
+function recordOf(uint256 projectId) external view returns (FairLunchRecord memory);
+function poolKeyOf(uint256 projectId) external view returns (PoolKey memory);
+```
+
+Events: `Create(projectId, config, caller)`, `Serve(projectId, raised, creatorEth, poolEth, poolTokens, creatorTokens, vestingWallet, positionId, caller)`, `Burn(projectId, spent, burned, caller)`, `Collect(projectId, tokensBurned, ethPaid, caller)`, `SendHome(projectId, amount, caller)`.
+
+---
+
+## Phase A: contracts
+
+### Task 1: Scaffold the repo
+- [x] `git init` in `extensions/fair-lunch`; `.gitignore`, `foundry.toml` (Homerun's settings, `libs = ["node_modules", "lib"]`), `package.json` with npm deps at published versions (`@bananapus/core-v6`, `buyback-hook-v6@2.0.1`, `univ4-router-v6@2.0.1`, `suckers-v6`, `omnichain-deployers-v6`, `721-hook-v6`, `permission-ids-v6`, `@openzeppelin/contracts`, `@uniswap/v4-core`, `v4-periphery`, `permit2`, forge-std, `@sphinx-labs/plugins`), `AGENTS.md` and `CLAUDE.md` pointing at the workspace resources, `STYLE_GUIDE.md` pointer.
+- [x] `forge build` succeeds on an empty `FairLunch` stub. Commit.
+
+### Task 2: Spikes that settle the spec's unknowns (fork, Base, pinned block)
+File: `test/fork/FairLunchSpikes.t.sol`. Each test uses a throwaway harness contract in the test file.
+- [x] `test_wholeBalanceCashOut`: a project launched through the live `JBOmnichainDeployer` with the harness as owner and extra data hook; the harness's `beforeCashOutRecordedWith` returns tax 0 and count = total supply for itself; assert the harness reclaims the entire balance with no fee, burning 1 wei of token (try 0 first), and that a stranger reclaims 0.
+- [x] `test_wholeBalanceCashOutInsidePayHook`: same call made from `afterPayRecordedWith` during a pay; assert whether it succeeds.
+- [x] `test_payoutFeeBeneficiary`: `sendPayoutsOf` with one split and a remainder; assert who receives the remainder and who receives the JBP6 from the fee.
+- [x] `test_liveAddresses`: assert code exists at the V4 hook 2.0.x, PoolManager, PositionManager, Permit2, omnichain deployer and sucker registry addresses read from the packages' `deployments/` for Base, and that `IGeomeanOracle.hasObservationCoverage` exists on the hook.
+- [x] Record results under "Spike results" below. If the whole-balance cash out fails, switch Task 6 to the fallback (forward pays through the pay hook, hold per-project pending ETH) and rerun the plan gate. Commit.
+
+### Task 3: Structs, interface, constants
+- [ ] Create the two structs and `IFairLunch` exactly as in "Interfaces fixed by this plan". Constructor immutables: `CONTROLLER`, `DIRECTORY`, `TOKENS`, `OMNICHAIN_DEPLOYER`, `SUCKER_REGISTRY`, `POOL_MANAGER`, `POSITION_MANAGER`, `PERMIT2`, `ORACLE_HOOK`, `FEE_PROJECT_ID = 1`. `forge build`. Commit.
+
+### Task 4: `createFor` and Cooking
+- [ ] Tests (`test/FairLunch.t.sol`, fork-backed where core is needed): `test_createFor_storesRecordOnce`; `test_createFor_revertsAboveHalfKeep` and `...AboveHalfTokens`; `test_createFor_revertsPastDeadline`; `test_pay_mintsOneMillionPerEth`; `test_pay_revertsAfterDeadline`; `test_cashOut_reclaimsNothing` (holder cashes out, receives 0 ETH); `test_remote_payMintsNothing`.
+- [ ] Implement `createFor`: launch through `OMNICHAIN_DEPLOYER` with owner and extra data hook = this, native ETH accounting context, `deployERC20For` with `keccak256(abi.encode(msg.sender, salt))`. Host ruleset: duration 0, weight `1_000_000e18`, reserved 0, cash out tax MAX, `scopeCashOutsToLocalBalances`, data hook for pay and cash out, `allowOwnerMinting`. Remote ruleset: same but weight 0, and map the native token on its suckers. Host suckers get no token mapping.
+- [ ] Implement `beforePayRecordedWith` (host and not served: revert `FairLunch_Closed` after `deadline`; otherwise pass weight through), `beforeCashOutRecordedWith` (holder == this: tax 0, count = total supply; else pass the ruleset's values), `hasMintPermissionFor` (false), `supportsInterface`, `onERC721Received`.
+- [ ] Tests pass. Commit.
+
+### Task 5: `serve`
+- [ ] Tests (`test/fork/FairLunchLifecycle.t.sol`): `test_serve_revertsBeforeDeadline`; `test_serve_revertsWithNothingRaised` (focus 1); `test_serve_revertsTwice`; `test_serve_revertsOnRemote`; `test_serve_keepBelowCap` (raised 10 ETH, keep 20%, cap 5 ETH: creator receives 2 ETH less 2.5%); `test_serve_keepAboveCap` (cap 1 ETH: creator receives 1 ETH less 2.5%); `test_serve_poolOpensAtRaisePrice` (pool `sqrtPriceX96` within one tick spacing of 1,000,000 tokens per ETH; pool tokens = pool ETH x 1,000,000); `test_serve_creatorTokensVest` (vesting wallet holds t/(1-t) x (sold + pool tokens), releases linearly, beneficiary is creator); `test_serve_creatorReceivesJbp6`; `test_serve_leavesNothingBehind` (FairLunch holds 0 ETH and 0 project tokens after); `test_serve_creatorRejectsEth` (focus 2); `test_serve_hostilePoolLow`, `test_serve_hostilePoolHigh`, `test_serve_strangerLiquidity` (focus 3: stranger pre-initializes at 100x and 0.01x the raise price, with and without liquidity; serve completes, and ETH spent per token acquired or received is never worse than the raise price).
+- [ ] Implement `serve(projectId)`: checks; queue the forever ruleset through `OMNICHAIN_DEPLOYER.queueRulesetsOf` (weight 0, tax MAX, payout limit = balance, one split to creator sized min(keepPercent x raised, keepCap), remainder to owner); `sendPayoutsOf`; forward JBP6 received to creator; mint creator tokens to a new `VestingWallet(creator, block.timestamp, vestingDuration)`; mint pool tokens; `_openPool` (initialize if needed, swap toward the raise price with that price as the limit, mint the full-range position with the LP split hook's action encoding, burn leftover tokens, `addToBalanceOf` leftover ETH); map the native token on the host suckers; write `servedAt`, `positionId`, `vestingWallet`; emit `Serve`.
+- [ ] Tests pass. Commit.
+
+### Task 6: buyback on pay, `burn`, `collect`
+- [ ] Tests: `test_pay_afterServe_holdsFor30Minutes` (pay succeeds, nothing bought, ETH in balance); `test_pay_buysAndBurnsSameTx` (after 30 minutes and some swaps: total supply drops, payer gets 0 tokens, balance 0 after); `test_pay_oversized_stopsAtLimit` (focus 4: pay 100x pool ETH; pool tick ends at most TWAP tick + 200, remainder in balance, later `burn` calls spend more as the TWAP follows); `test_pay_succeedsWhenManagerUnlocked`; `test_burn_revertsBefore30Minutes`; `test_burn_burnsHeldTokens`; `test_burn_neverTradesAboveLimit` (fuzz the pre-trade pool price); `test_collect_burnsTokenSidePaysEthToJbp6` (creator's JBP6 balance rises, FairLunch holds nothing); `test_noLiquidityRemovalSelector` (interface has no decrease path with nonzero liquidity).
+- [ ] Implement: post-serve `beforePayRecordedWith` returns weight 0 and one zero-amount spec to this; `afterPayRecordedWith` (caller must be a terminal of the project) calls `this.burn` in try/catch; `burn` (require host, served, `block.timestamp >= servedAt + 30 minutes`; cash out the whole balance to this; price limit from the oracle's 30-minute mean tick + 200 via `TickMath`; exact-input swap inside `unlock`; burn all tokens held; `addToBalanceOf` unspent ETH); `collect` (DECREASE_LIQUIDITY 0 + TAKE_PAIR, burn tokens, `pay` project 1 with beneficiary creator).
+- [ ] Tests pass. Commit.
+
+### Task 7: cross-chain
+- [ ] Tests (`test/fork/FairLunchCrossChain.t.sol`, Base and Optimism forks): `test_hostPrepare_revertsBeforeServe`; `test_sendHome_mintsOneWeiWhenRemoteSupplyZero`; `test_sendHome_thenClaim_beforeServe_countsAsRaised` (focus 5: holders' token share unchanged beyond 1 wei, host balance up by the bridged amount); `test_sendHome_thenClaim_afterServe_feedsBurn` (FairLunch's claimed tokens burned, ETH bought and burned); `test_sendHome_revertsOnHost`.
+- [ ] Implement `sendHome`: require remote; mint 1 wei if remote supply is 0, else 1,000,000 x supply; approve and `prepare` to the host FairLunch as beneficiary on each sucker of the project, then `toRemote{value: msg.value}`; emit.
+- [ ] Tests pass. Commit.
+
+### Task 8: deploy script and contract gates
+- [ ] `script/Deploy.s.sol` in the Sticky and Homerun Sphinx shape, constructor arguments from the packages' deployment records; a rehearsal test that runs it on a fork. No proposal is sent.
+- [ ] `forge fmt --check`, warnings-denied build, `forge build --sizes` under 24,576 bytes, STYLE_GUIDE pass over every declaration, `README.md`, `RISKS.md` (singleton custody, 7-day bridge, TWAP limit behaviour).
+- [ ] Two adversarial Codex passes (`gpt-6.1-sol`, read-only, stdin closed); fix; rerun affected tests. Commit.
+- [ ] Check-in with jango: repo creation and PR.
+
+## Phase B: website
+
+### Task 10: scaffold `web/` from `extensions/sticky/web`
+- [ ] Copy scaffolding and shared infrastructure listed in the web recon (providers, wallet files, transaction review set, Center RPC, Bendystraw proxy), omitting every Signa file, the `CENTER_WALLET_ENABLED` branch, `nana-sdk-connect`, and Sticky product code. `web/COPIED.md` records provenance.
+- [ ] `npm run check` passes on an empty home page; connect dialog lists only the four wallet kinds. Commit.
+
+### Task 11: domain modules (one home per rule)
+- [ ] `web/src/lib/fair-lunch/abi.ts` and `deployments.json` (synced by script), `phase.ts` (`phaseOf(record, now, balance): 'cooking' | 'ready' | 'served'`, plus `dueCalls`), `split.ts` (`splitOf(raised, keepPercent, keepCap)` returning creator and pool amounts, mirroring the contract), `launch-plan.ts` (builds `createFor` per chain with one `isHost`), `indexed.ts` (Bendystraw projects where owner = FairLunch).
+- [ ] Vitest for `phase.ts` and `split.ts` against the contract test vectors from Task 5. Commit.
+
+### Task 12: home and create
+- [ ] Home: list with logo, name, phase, raised; one "Make lunch" button.
+- [ ] Create: nine fields from the spec, native inputs, logo and metadata pinned through Center, one review, multi-chain launch through the Relayr launch adapter pattern. Playwright: form validation at both widths. Commit.
+
+### Task 13: project page
+- [ ] Phase and countdown (large), raised split with `FundingProgress` toward the cap, one card: Pay while cooking, Swap after serve (SDK V4 quote and swap builders, Permit2 for sells), due-call buttons (Serve lunch, Burn, Collect, Send home), facts row (burned, liquidity, vesting progress).
+- [ ] Vitest for card state per phase; Playwright at 390px and 1280px. Commit.
+
+### Task 14: chart
+- [ ] Port revnet's `TokenPriceChart` and `getV4AmmPriceHistory`; add volume bars, burn markers and the raise-price line; data from Bendystraw `swapEvents` if Task 2 follow-up shows the pool is indexed, else `Swap` logs over Center RPC. Vitest for bucketing; visual check at both widths. Commit.
+
+### Task 15: web gates
+- [ ] `npm run check`, render against live data on a testnet deployment (needs the deployment go-ahead), copy pass (no middots, sentence case, as few words as possible). Check-in with jango.
+
+## Phase C: automation
+
+### Task 16: keeper job
+- [ ] Read `extensions/keeper/DESIGN.md`; add the smallest job that calls `serve`, `burn`, `collect`, `sendHome` and sucker `claim` when `dueCalls` says so, through its existing Relayr execution. Tests with a mocked chain. Check-in with jango.
+
+## Spike results
+
+Base fork at block 56,216,000, `test/fork/FairLunchSpikes.t.sol`, 7 passing (2026-11-11):
+
+- Whole-balance cash out works: with the extra data hook returning tax 0 and count = total supply for itself, FairLunch reclaims the entire balance fee-free while burning 0 tokens. No mint needed.
+- It also works from inside `afterPayRecordedWith` during a pay, so the buyback can run in the pay's own transaction. No fallback needed.
+- A stranger's cash out reclaims 0 at tax MAX and does not revert.
+- Payout: the split beneficiary receives its share less 2.5%; the remainder goes to the project owner (FairLunch) less 2.5%; the fee's JBP6 is minted to the project owner. `serve` forwards FairLunch's JBP6 (ERC-20 and credits) to the creator.
+- `OMNICHAIN_DEPLOYER.queueRulesetsOf` works from the owner with no extra permission grant, and the queued ruleset is current in the same transaction after a 1 second warp from launch.
+- Project creation charges `PROJECTS.creationFee()`; `createFor` is payable and forwards it.
+- A weight-0 pay mints nothing and lands in the balance.
+- Still open: whether Bendystraw indexes this pool's swaps (checked in Task 14).
+
+## Review
+
+(filled at the end of each phase)
