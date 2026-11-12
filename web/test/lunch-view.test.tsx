@@ -99,7 +99,7 @@ describe('LunchView', () => {
       copy({ chainId: 42161, claims: [claim] }),
     ])
     expect(text).toContain('0.5 ETH waiting, 0.2 ETH on the way')
-    expect(buttons()).toEqual(['Pay', 'Send home', 'Bring in 0.1 ETH'])
+    expect(buttons()).toEqual(['Fund', 'Send home', 'Bring in 0.1 ETH'])
   })
 
   it('points a copy at its lunch, and says so when there is none', async () => {

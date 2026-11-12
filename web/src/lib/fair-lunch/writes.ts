@@ -65,7 +65,7 @@ export async function createTx(terms: LunchTerms, chainId: number): Promise<TxRe
 export async function payTx(lunch: Pick<Lunch, 'chainId' | 'projectId'>, amount: bigint, payer: Address): Promise<TxRequest> {
   const { terminal } = await wiringOn(lunch.chainId)
   return { chainId: lunch.chainId, address: terminal, abi: jbMultiTerminalAbi as Abi, functionName: 'pay',
-    args: [BigInt(lunch.projectId), NATIVE_TOKEN, amount, payer, amount * TOKENS_PER_ETH, '', '0x'], value: amount, label: 'Pay' }
+    args: [BigInt(lunch.projectId), NATIVE_TOKEN, amount, payer, amount * TOKENS_PER_ETH, '', '0x'], value: amount, label: 'Fund' }
 }
 
 /** One of the calls anyone can make for a lunch on its host chain. One that would do nothing is refused: a collect
