@@ -34,7 +34,7 @@ for (const side of sides) {
   const fee = await side.client.readContract({ address: projects, abi: jbProjectsAbi, functionName: 'creationFee' })
   const { deployerConfigurations } = parseSuckerDeployerConfig(side.chain.id, chainIds, [MappableAsset.NATIVE], { version: 6, bridge: 'ccip' })
   const config = {
-    name: 'Burrito', symbol: 'BRTO', projectUri: '', hostChainId: BigInt(chainIds[0]), deadline: terms.deadline, creator: account,
+    name: 'Burrito', symbol: 'BRTO', projectUri: '', hostChainId: BigInt(chainIds[0]), token: '0x000000000000000000000000000000000000EEEe', deadline: terms.deadline, creator: account,
     keepPercent: 200_000_000, keepCap: parseEther('0.5'), tokenPercent: 100_000_000, vestingDuration: 52 * 604800, salt: terms.salt,
     suckerDeploymentConfiguration: { salt: zeroHash, deployerConfigurations: deployerConfigurations.map(({ deployer }) => ({
       deployer, peer: zeroHash, mappings: isHost ? [] : [{ localToken: NATIVE_TOKEN, minGas: 200_000, remoteToken: pad(NATIVE_TOKEN, { size: 32 }) }],
