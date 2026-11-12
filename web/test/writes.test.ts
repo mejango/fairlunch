@@ -42,7 +42,7 @@ describe('tokenAddressOf', () => {
   // Lunch 46 on the Base fork: the terms its create sent, and the token it deployed.
   it('finds the token a create deployed, from its terms', () => {
     expect(tokenAddressOf({
-      salt: '0x000000000000000000000000000000000000000000000000000001a1cdcd5516', hostChainId: 8453, deadline: 1794457718,
+      sender: '0x1234567890123456789012345678901234567890', salt: '0x000000000000000000000000000000000000000000000000000001a1cdcd5516', hostChainId: 8453, deadline: 1794457718,
       creator: '0x1234567890123456789012345678901234567890', keepPercent: 200_000_000n, keepCap: ETH / 2n, tokenPercent: 100_000_000n, vestingDuration: 31_449_600,
     }, {
       lunch: '0x14bc17f526613fc1fd7f89e9d2ae4d37ef8010fd', controller: '0x3Fcec3572e84b624477BcfF4E2CF1f7dEAb648F1',

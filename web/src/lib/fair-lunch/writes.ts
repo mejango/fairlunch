@@ -14,7 +14,8 @@ import { TOKENS_PER_ETH } from './split'
 export type LunchTerms = {
   name: string; symbol: string; projectUri: string
   hostChainId: number; otherChainIds: number[]
-  deadline: number; creator: Address
+  /** `sender` signs every chain's create. `creator` is paid the share and the tokens. */
+  deadline: number; sender: Address; creator: Address
   keepPercent: number; keepCapWei: bigint; tokenPercent: number; vestingSeconds: number
   salt: Hex
 }
@@ -25,7 +26,7 @@ const PERCENT = 10_000_000 // 1% of JBConstants.SPLITS_TOTAL_PERCENT
 
 /** The project these terms already made on a chain, or null: what a create that finished out of sight left behind. */
 export function madeOn(terms: LunchTerms, chainId: number, signal?: AbortSignal): Promise<number | null> {
-  return findMade({ salt: terms.salt, hostChainId: terms.hostChainId, deadline: terms.deadline, creator: terms.creator,
+  return findMade({ sender: terms.sender, salt: terms.salt, hostChainId: terms.hostChainId, deadline: terms.deadline, creator: terms.creator,
     keepPercent: BigInt(terms.keepPercent * PERCENT), keepCap: terms.keepCapWei, tokenPercent: BigInt(terms.tokenPercent * PERCENT), vestingDuration: terms.vestingSeconds }, chainId, signal)
 }
 

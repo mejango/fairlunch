@@ -132,14 +132,14 @@ export async function readPriceHistory(lunch: Pick<Lunch, 'chainId' | 'poolKey' 
   })) }
 }
 
-export type MadeTerms = { salt: Hex; hostChainId: number; deadline: number; creator: Address; keepPercent: bigint; keepCap: bigint; tokenPercent: bigint; vestingDuration: number }
+export type MadeTerms = { /** The wallet that sends the create. */ sender: Address; salt: Hex; hostChainId: number; deadline: number; creator: Address; keepPercent: bigint; keepCap: bigint; tokenPercent: bigint; vestingDuration: number }
 
-/** Where `createFor` deploys a lunch's token: fixed by the terms and the wallet that sent them (the creator). */
+/** Where `createFor` deploys a lunch's token: fixed by the terms and the wallet that sent them. */
 export function tokenAddressOf(terms: MadeTerms, on: { lunch: Address; controller: Address; tokens: Address; implementation: Address }): Address {
   // FairLunch's salt, then the controller's, then the token store's: each scopes the one before to its caller.
   const lunchSalt = keccak256(encodeAbiParameters(
     [{ type: 'address' }, { type: 'bytes32' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
-    [terms.creator, terms.salt, BigInt(terms.hostChainId), BigInt(terms.deadline), terms.creator, terms.keepPercent, terms.keepCap, terms.tokenPercent, BigInt(terms.vestingDuration)]))
+    [terms.sender, terms.salt, BigInt(terms.hostChainId), BigInt(terms.deadline), terms.creator, terms.keepPercent, terms.keepCap, terms.tokenPercent, BigInt(terms.vestingDuration)]))
   const controllerSalt = keccak256(encodePacked(['address', 'bytes32'], [on.lunch, lunchSalt]))
   const salt = keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'bytes32' }], [on.controller, controllerSalt]))
   // An ERC-1167 clone's creation code.

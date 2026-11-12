@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTerminalStore} from "@bananapus/core-v6/src/interfaces/IJBTerminalStore.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
@@ -27,6 +28,11 @@ import {FairLunchConfig} from "../../src/structs/FairLunchConfig.sol";
 /// @dev The bridge's delivery isn't simulated. The remote half is tested through `toRemote` on Optimism, and the host
 /// half is tested by doing on Base exactly what a sucker's `claim` does: add the ETH to the balance and mint the
 /// bridged tokens to the beneficiary, as the sucker.
+/// @notice The fee a sucker kept for an account whose fee it couldn't pay.
+interface IJBSuckerFees {
+    function retainedToRemoteFeeOf(address account) external view returns (uint256);
+}
+
 contract FairLunchCrossChain is Test {
     IJBOmnichainDeployer internal constant OMNI = IJBOmnichainDeployer(0xB853758A70a6b4216c09f1d071eA2344AbA0a34f);
     IJBController internal constant CONTROLLER = IJBController(0x3Fcec3572e84b624477BcfF4E2CF1f7dEAb648F1);
@@ -160,6 +166,33 @@ contract FairLunchCrossChain is Test {
         }
     }
 
+    /// @notice When the sucker can't pay its fee to JBP6 it keeps the fee for whoever called it. That's the lunch
+    /// contract, which takes it back and returns it to the caller who paid.
+    function test_sendHome_returnsAFeeTheSuckerCouldntPay() public {
+        vm.selectFork(optimismFork);
+        uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_config(true));
+        _pay(id, 1 ether);
+        address sucker = REGISTRY.suckersOf(id)[0];
+
+        // A fee is due, and JBP6 won't take it.
+        vm.mockCall(
+            address(REGISTRY), abi.encodeWithSelector(IJBSuckerRegistry.toRemoteFee.selector), abi.encode(0.01 ether)
+        );
+        vm.mockCallRevert(address(TERMINAL), abi.encodeWithSelector(IJBTerminal.pay.selector, uint256(1)), "");
+
+        address caller = address(0xCA11E40002);
+        vm.deal(caller, 1 ether);
+        vm.prank(caller);
+        lunch.sendHome{value: 0.1 ether}(id);
+
+        assertEq(_balance(id), 0, "the balance still left");
+        assertEq(IJBSuckerFees(sucker).retainedToRemoteFeeOf(address(lunch)), 0, "nothing left in the sucker");
+        assertEq(address(lunch).balance, 0, "nothing left on the lunch contract");
+        // Without the fee coming back, at most 0.99 ETH could.
+        assertGt(caller.balance, 0.99 ether - 0.05 ether, "the caller keeps the fee");
+        assertEq(TOKENS.totalBalanceOf(caller, 1), 0, "no JBP6 was bought");
+    }
+
     /// @notice Holders can bridge their tokens to a copy's chain. Sending home then carries all but a millionth of the
     /// balance, and leaves their tokens alone.
     function test_sendHome_withHoldersOnTheRemote() public {
@@ -199,6 +232,12 @@ contract FairLunchCrossChain is Test {
         disabled.suckerDeploymentConfiguration.deployerConfigurations[0].mappings = mappings;
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(disabled);
+
+        // More gas than any bridge message can carry.
+        FairLunchConfig memory greedy = _config(true);
+        greedy.suckerDeploymentConfiguration.deployerConfigurations[0].mappings[0].minGas = type(uint32).max;
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(greedy);
 
         FairLunchConfig memory bridgeless = _config(true);
         bridgeless.suckerDeploymentConfiguration.deployerConfigurations = new JBSuckerDeployerConfig[](0);
@@ -305,6 +344,13 @@ contract FairLunchCrossChain is Test {
         assertApproxEqAbs(TOKENS.totalSupplyOf(id), 10_000_000e18 + 10_725_000e18, 1e12);
         assertEq(TOKENS.totalBalanceOf(address(lunch), id), 0);
         assertEq(address(lunch).balance, 0);
+
+        // To the wei: payers hold what they bought, and every other token is in the pool. The carrier diluted nobody.
+        IERC20 token = IERC20(address(TOKENS.tokenOf(id)));
+        assertEq(token.balanceOf(alice), 10_000_000e18, "the payer's tokens");
+        assertEq(
+            TOKENS.totalSupplyOf(id), 10_000_000e18 + token.balanceOf(address(lunch.POOL_MANAGER())), "payer plus pool"
+        );
     }
 
     function test_host_claimAfterServe_feedsTheBurn() public {

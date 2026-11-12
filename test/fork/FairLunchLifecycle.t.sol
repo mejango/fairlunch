@@ -324,7 +324,7 @@ contract FairLunchLifecycle is Test {
         assertEq(reclaimed, 0, "served");
         assertApproxEqAbs(_balance(id), 1 ether, 1e9);
 
-        // Once buybacks run, what waits for the next one is still nobody's to cash out.
+        // Once buybacks can run, what waits for the next one is still nobody's to cash out.
         vm.warp(_servedAt() + 31 minutes);
         uint256 waiting = _balance(id);
         vm.prank(alice);
@@ -782,6 +782,32 @@ contract FairLunchLifecycle is Test {
         config.creator = creator;
         vm.expectRevert();
         lunch.createFor{value: fee}(config);
+    }
+
+    /// @notice A stranger opens the pool long before the lunch is served, at a price where the token costs a hundred
+    /// times the fundraise's. That history must not reach the buyback: it would let the buyback pay that price.
+    function test_burn_ignoresPriceHistoryFromBeforeServing() public {
+        uint256 id = _create(0, 0, 0);
+        _pay(id, alice, 10 ether);
+        vm.prank(bob);
+        POOL_MANAGER.initialize(lunch.poolKeyOf(id), TickMath.getSqrtPriceAtTick(92_000));
+
+        vm.warp(deadline + 1);
+        lunch.serve(id);
+        int24 servedTick = _tick(id);
+
+        // Inside the first half hour the average still holds the stranger's price. Nothing is bought.
+        vm.warp(_servedAt() + 30 minutes - 1);
+        _pay(id, bob, 5 ether);
+        assertEq(_tick(id), servedTick, "no buyback yet");
+        assertApproxEqAbs(_balance(id), 5 ether, 1e9, "the payment waits");
+
+        // After it, the average is the served price alone, and a buyback stops 200 ticks past it.
+        vm.warp(_servedAt() + 30 minutes);
+        (uint256 spent,) = lunch.burn(id);
+        assertGt(spent, 0, "buys");
+        assertApproxEqAbs(_tick(id), servedTick - 200, 1, "bounded by the served price, not the stranger's");
+        _assertHoldsNothing(id);
     }
 
     /// @notice Deep liquidity parked just short of the fundraise's price can't keep a lunch from being served.

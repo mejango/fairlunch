@@ -494,12 +494,14 @@ contract FairLunch is
         originalPayer = address(0);
 
         // Everywhere but the host, payments only ever leave through the bridge home. Without one that's ready to carry
-        // ETH they'd be stuck, so there's no lunch. A mapping that was set and then switched off doesn't count.
-        if (
-            !isHost
-                && !ISuckerRoute(address(_hostSuckerOf({projectId: projectId, hostChainId: config.hostChainId})))
-                    .remoteTokenFor(JBConstants.NATIVE_TOKEN)
-        ) revert FairLunch_InvalidConfig();
+        // ETH they'd be stuck, so there's no lunch. A mapping that was set and then switched off doesn't count, nor
+        // does one with any gas but the gas `serve` gives the host's: set too high, it could never send.
+        if (!isHost) {
+            (uint256 enabled,, uint256 minGas) = ISuckerRoute(
+                    address(_hostSuckerOf({projectId: projectId, hostChainId: config.hostChainId}))
+                ).remoteTokenFor(JBConstants.NATIVE_TOKEN);
+            if (enabled == 0 || minGas != _SUCKER_MIN_GAS) revert FairLunch_InvalidConfig();
+        }
 
         // Deploy the token up front so payers hold a real ERC-20 from their first payment.
         // slither-disable-next-line unused-return

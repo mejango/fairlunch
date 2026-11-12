@@ -4,7 +4,7 @@ import { JBCenterClient } from '@bananapus/nana-sdk-core/jbcenter'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type FormEvent } from 'react'
-import { parseEther, parseEventLogs, toHex, type Hex } from 'viem'
+import { getAddress, isAddress, isAddressEqual, parseEther, parseEventLogs, toHex, zeroAddress, type Hex } from 'viem'
 import { TxAction } from '@/components/TxAction'
 import { TxError } from '@/components/ui/TxError'
 import { useWallet } from '@/hooks/useWallet'
@@ -30,7 +30,7 @@ const whole = (text: string, min: number, max: number): number | null => {
   return Number.isInteger(value) && value >= min && value <= max ? value : null
 }
 
-/** Nine plain fields, then one transaction per chain. The terms are fixed the moment the form is submitted, so every
+/** Ten plain fields, then one transaction per chain. The terms are fixed the moment the form is submitted, so every
  * chain gets the same ones. */
 export function CreateForm() {
   const router = useRouter()
@@ -85,6 +85,9 @@ export function CreateForm() {
     if (!text('name') || !text('symbol')) return setError('Give it a name and a ticker.')
     if (days === null) return setError('Raise for 1 to 365 days.')
     if (keep === null || share === null) return setError('Keep 0 to 50 percent.')
+    // Strict: all lowercase or a right checksum, so a mistyped address is caught here, not paid.
+    const payout = text('payout')
+    if (!isAddress(payout) || isAddressEqual(payout, zeroAddress)) return setError('Enter the address to pay as 0x and 40 characters.')
     setError(null)
     setBusy(true)
     try {
@@ -95,7 +98,7 @@ export function CreateForm() {
       setTerms({
         name: text('name'), symbol: text('symbol').toUpperCase(), projectUri: uri,
         hostChainId: hostId, otherChainIds: others.filter(chain => form.get(`also-${chain.id}`)).map(chain => chain.id),
-        deadline: Math.floor(Date.now() / 1000) + days * 86_400, creator: address,
+        deadline: Math.floor(Date.now() / 1000) + days * 86_400, sender: address, creator: getAddress(payout),
         keepPercent: keep, keepCapWei: cap, tokenPercent: share, vestingSeconds: Number(text('vesting')) * WEEK,
         salt: toHex(crypto.getRandomValues(new Uint8Array(32))),
       })
@@ -120,12 +123,13 @@ export function CreateForm() {
                   label={index === 0 ? `Make lunch on ${chainName(chainId)}` : `Also collect on ${chainName(chainId)}`}
                   title={`Make ${terms.name}`} doneTitle="Lunch is cooking"
                   prepare={async account => {
-                    if (account !== terms.creator) throw new Error('Use the wallet you started with.')
+                    if (account !== terms.sender) throw new Error('Use the wallet you started with.')
                     return { request: await createTx(terms, chainId), rows: [
                       { label: 'Token', value: `${terms.name} (${terms.symbol})` },
                       { label: 'Raise ends', value: new Date(terms.deadline * 1000).toLocaleString() },
                       { label: 'You keep', value: `${terms.keepPercent}% of the raise, up to ${text18(terms.keepCapWei)} ETH, before the 2.5% fee` },
                       { label: 'Your tokens', value: `${terms.tokenPercent}% over ${terms.vestingSeconds / WEEK} weeks` },
+                      { label: 'Paid to', value: isAddressEqual(terms.creator, account) ? 'This wallet' : terms.creator },
                       { label: 'Can change later', value: 'Nothing', strong: true },
                     ] }
                   }}
@@ -184,6 +188,9 @@ export function CreateForm() {
           </select>
         </label>
       </div>
+      <label className="field">Pay your share to
+        <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
+      </label>
       <p className="text-sm text-muted">🔒 Everything else goes into a pool nobody can pull. Nothing can be changed after.</p>
       <TxError error={error} />
       <button type="submit" className="btn-primary min-h-[48px] w-full px-5 text-lg" disabled={busy}>{busy ? 'Saving…' : isConnected ? 'Review' : 'Connect wallet'}</button>
@@ -206,6 +213,6 @@ function saveAttempt(attempt: Attempt | null) {
 function loadAttempt(): Attempt | null {
   try {
     const attempt = JSON.parse(localStorage.getItem(ATTEMPT_KEY) ?? 'null') as Attempt | null
-    return attempt ? { ...attempt, terms: { ...attempt.terms, keepCapWei: BigInt(attempt.terms.keepCapWei) } } : null
+    return attempt ? { ...attempt, terms: { ...attempt.terms, sender: attempt.terms.sender ?? attempt.terms.creator, keepCapWei: BigInt(attempt.terms.keepCapWei) } } : null
   } catch { return null }
 }
