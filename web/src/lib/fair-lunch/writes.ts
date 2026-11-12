@@ -150,7 +150,7 @@ export async function sendHomeTx(copy: Pick<Copy, 'chainId' | 'projectId' | 'mon
   if (sending === 0n) throw new Error('Nothing is waiting there now.')
   const value = await findSuckerTransportValue(CCIP_SUCKER_TRANSPORT_VALUES, amount => client.simulateContract({ ...call, account, value: amount }))
   if (value === null) throw new Error("This can't be sent right now. Check you have ETH for the bridge.")
-  return { chainId: copy.chainId, ...call, abi: fairLunchAbi as Abi, value, sending, label: 'Send home' }
+  return { chainId: copy.chainId, ...call, abi: fairLunchAbi as Abi, value, sending, label: 'Deliver' }
 }
 
 /** Bringing delivered money into the host lunch. Anyone can; it goes to the lunch whoever calls. */
