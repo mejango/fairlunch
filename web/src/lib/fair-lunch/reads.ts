@@ -152,6 +152,9 @@ export const releaseCall = (lunch: Pick<Lunch, 'chainId' | 'vestingWallet' | 'to
   ({ chainId: lunch.chainId, address: lunch.vestingWallet, abi: vestingAbi, functionName: 'release', args: [lunch.token] }) as const
 
 /** What an address can claim of a lunch's airdrop, with the call that sends it. Null if it isn't on the list. */
+/** Chains like Arbitrum mine several blocks in one second: `serve` is in one of the first few with its time. */
+const SAME_SECOND_BLOCKS = 50n
+
 /** The tokens each side got when lunch was served, or null if the chain no longer hands over that block's events. */
 export type Served = { funders: bigint; poolTokens: bigint; creatorTokens: bigint; claimsTokens: bigint }
 export async function readServed(lunch: Pick<Lunch, 'chainId' | 'projectId' | 'servedAt' | 'money' | 'claimsTokens'>, signal?: AbortSignal): Promise<Served | null> {
@@ -164,7 +167,7 @@ export async function readServed(lunch: Pick<Lunch, 'chainId' | 'projectId' | 's
     if ((await client.getBlock({ blockNumber: middle })).timestamp < BigInt(lunch.servedAt)) low = middle + 1n
     else high = middle
   }
-  const [log] = await client.getContractEvents({ address, abi: fairLunchAbi, eventName: 'Serve', args: { projectId: BigInt(lunch.projectId) }, fromBlock: low, toBlock: low })
+  const [log] = await client.getContractEvents({ address, abi: fairLunchAbi, eventName: 'Serve', args: { projectId: BigInt(lunch.projectId) }, fromBlock: low, toBlock: low + SAME_SECOND_BLOCKS })
   if (!log) return null
   const { raised, poolTokens, creatorTokens } = log.args as { raised: bigint; poolTokens: bigint; creatorTokens: bigint }
   return { funders: tokensFor(raised, lunch.money.decimals), poolTokens, creatorTokens, claimsTokens: lunch.claimsTokens }
