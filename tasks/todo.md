@@ -457,10 +457,20 @@ Decisions taken, open to jango's correction:
 
 Tasks:
 
-- [ ] Refactor, no behavior change: move pool code to `FairLunchPool`, 59 tests green.
-- [ ] Add the registry as the second terminal on hosts and copies; test a USDC payment into an ETH lunch while cooking and a quoted one after serve.
-- [ ] `token` in the config and record; accounting context, base currency, payouts, balance reads, add to balance, sucker mappings and `sendHome` use it.
-- [ ] Pool: sorted currencies, raise price and serve limits from decimals and ordering, both-direction settle, burn bound on the right side.
-- [ ] Tests: the lifecycle suite parameterized over ETH, USDC and an 18-decimal token ground to each ordering; cross-chain USDC; fuzz the sandwich and early-pool cases in each.
-- [ ] Site: token choice on create, amounts in the token's decimals and symbol, approvals for ERC-20 pays, "pay with another token" through the registry with a router quote.
+- [x] Refactor, no behavior change: move pool code to `FairLunchPool`, 59 tests green.
+- [x] Add the registry as the second terminal on hosts and copies; test a USDC payment into an ETH lunch while cooking and a quoted one after serve.
+- [x] `token` in the config and record; accounting context, base currency, payouts, balance reads, add to balance, sucker mappings and `sendHome` use it.
+- [x] Pool: sorted currencies, raise price and serve limits from decimals and ordering, both-direction settle, burn bound on the right side.
+- [x] Tests: the lifecycle suite parameterized over ETH, USDC and an 18-decimal token ground to each ordering; cross-chain USDC; fuzz the sandwich and early-pool cases in each.
+- [x] Site: token choice on create, amounts in the token's decimals and symbol, approvals for ERC-20 pays, "pay with another token" through the registry with a router quote.
 - [ ] RISKS.md, README, two Codex passes, testnet redeploy and walk.
+
+Review so far (2026-11-12):
+
+- Contracts: `FairLunchPool` holds every position and does every swap, callable only by `FairLunch`. `FairLunch` takes `config.token`, lists the router terminal registry second, rejects JBP6 as money. Sizes: FairLunch 19,725 bytes, FairLunchPool 10,389.
+- Tests: the 59 ETH tests unchanged and green. New `test/fork/FairLunchErc20.t.sol` runs create, pay, serve, buy, burn, the burn bound, collect, an early pool at either extreme, and fuzzed sandwiches and raises for USDC (6 decimals), an 18-decimal token sorted before the lunch's token and one sorted after. Routed payments both ways (USDC into an ETH lunch, ETH into a USDC lunch, cooking and served), the terminal order, the JBP6 rejection, and a USDC copy on Optimism sending home, all pass.
+- The tests are not literally the lifecycle suite parameterized: the ETH suite stays as it was and the ERC-20 suite is a shorter one run three times. The ETH-only cases it doesn't repeat are the ones about ETH itself (a creator that rejects ETH, locked payers, JBP6 credit pauses).
+- Site: amounts in the lunch's money everywhere, "Raise in" on create (ETH, USDC, or one token address on a single chain), an Allow step before an ERC-20 payment, and paying a cooking lunch in the other of ETH and USDC through the router terminal with a 99% minimum from a simulation. 19 site tests green, and the token address derivation was checked against a lunch the new contract made on the fork.
+- Not in the site: buying a served lunch's token with another token (two swaps, two minimums). Uniswap's own page covers it.
+- Found on the way: where JBP6's router can't swap a lunch's money, the 2.5% fee on the raise sits in the router gateway for three days of failed retries before it can be refunded into the lunch's balance. RISKS.md says so.
+
