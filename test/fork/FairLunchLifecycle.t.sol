@@ -105,6 +105,7 @@ contract FairLunchLifecycle is Test {
     IAllowanceTransfer internal constant PERMIT2 = IAllowanceTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
     IGeomeanOracle internal constant ORACLE = IGeomeanOracle(0xB436Cedbee8F191A3860719b4B0f474434F315c8);
 
+    IERC20 internal constant USDC = IERC20(0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913);
     uint256 internal constant RAISE_SQRT_PRICE_X96 = 1000 << 96;
     // Where a trade costs the fundraise's price once the pool's 1% fee is counted: 1% more tokens per ETH, and 1%
     // fewer.
@@ -313,6 +314,61 @@ contract FairLunchLifecycle is Test {
         // Right up to the deadline.
         vm.warp(deadline);
         assertEq(_pay(id, bob, 0.5 ether), 500_000e18);
+    }
+
+    /// @notice USDC paid through the router terminal is swapped into ETH and counts like ETH.
+    function test_pay_inUsdcThroughTheRouter() public {
+        uint256 id = _create(0, 0, 0);
+        deal(address(USDC), bob, 3000e6);
+        vm.prank(bob);
+        USDC.approve(address(ROUTER_REGISTRY), 3000e6);
+
+        vm.prank(bob);
+        ROUTER_REGISTRY.pay(id, address(USDC), 3000e6, bob, 0, "", "");
+
+        uint256 raised = _balance(id);
+        assertGt(raised, 0.1 ether, "3000 USDC's worth of ETH");
+        assertEq(_token(id).balanceOf(bob), raised * 1_000_000, "a million per ETH it became");
+        assertEq(USDC.balanceOf(address(lunch)), 0, "lunch holds USDC");
+        _assertHoldsNothing(id);
+    }
+
+    /// @notice Once served, routed revenue with no minimum waits for `burn` like any other.
+    function test_pay_inUsdcThroughTheRouter_afterServe() public {
+        uint256 id = _served(0, 0, 0);
+        uint256 waiting = _balance(id);
+        deal(address(USDC), bob, 3000e6);
+        vm.prank(bob);
+        USDC.approve(address(ROUTER_REGISTRY), 3000e6);
+
+        vm.prank(bob);
+        ROUTER_REGISTRY.pay(id, address(USDC), 3000e6, bob, 0, "", "");
+
+        assertGt(_balance(id), waiting + 0.1 ether, "waits as ETH");
+        assertEq(_token(id).balanceOf(bob), 0, "nothing minted");
+        _assertHoldsNothing(id);
+    }
+
+    /// @notice The router terminal comes second, so ETH itself always goes straight to the terminal.
+    function test_createFor_routesOtherTokens() public {
+        uint256 id = _create(0, 0, 0);
+        IJBTerminal[] memory terminals = lunch.DIRECTORY().terminalsOf(id);
+        assertEq(terminals.length, 2);
+        assertEq(address(terminals[1]), address(ROUTER_REGISTRY));
+        assertEq(address(lunch.DIRECTORY().primaryTerminalOf(id, JBConstants.NATIVE_TOKEN)), address(TERMINAL));
+    }
+
+    /// @notice A lunch can't raise JBP6: the lunch passes on all the JBP6 it holds as fee proceeds.
+    function test_createFor_revertsRaisingJbp6OrNothing() public {
+        uint256 fee = PROJECTS.creationFee();
+        FairLunchConfig memory config = _config(creator, 0, 0, 0);
+        config.token = address(TOKENS.tokenOf(1));
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(config);
+
+        config.token = address(0);
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(config);
     }
 
     function test_pay_revertsAfterDeadline() public {

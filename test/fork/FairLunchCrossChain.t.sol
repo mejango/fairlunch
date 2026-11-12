@@ -49,6 +49,9 @@ contract FairLunchCrossChain is Test {
     // The CCIP sucker deployer for the other chain of the pair has the same address on Base and Optimism.
     IJBSuckerDeployer internal constant CCIP_DEPLOYER = IJBSuckerDeployer(0x8f6f0a70939997310309d7ab66B1B199faAfE7F0);
 
+    IERC20 internal constant BASE_USDC = IERC20(0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913);
+    IERC20 internal constant OP_USDC = IERC20(0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85);
+
     uint256 internal baseFork;
     uint256 internal optimismFork;
     FairLunch internal lunch;
@@ -118,6 +121,15 @@ contract FairLunchCrossChain is Test {
             JBSuckerDeployerConfig({deployer: CCIP_DEPLOYER, peer: bytes32(0), mappings: mappings});
     }
 
+    /// @notice A copy of a lunch that raises USDC on Base, mapping `local` here to `remote` there.
+    function _usdcConfig(IERC20 local, IERC20 remote) internal view returns (FairLunchConfig memory config) {
+        config = _config(true);
+        config.token = address(BASE_USDC);
+        config.suckerDeploymentConfiguration.deployerConfigurations[0].mappings[0] = JBTokenMapping({
+            localToken: address(local), minGas: 200_000, remoteToken: bytes32(uint256(uint160(address(remote))))
+        });
+    }
+
     function _pay(uint256 id, uint256 amount) internal returns (uint256) {
         vm.prank(alice);
         return TERMINAL.pay{value: amount}(id, JBConstants.NATIVE_TOKEN, amount, alice, 0, "", "");
@@ -171,6 +183,48 @@ contract FairLunchCrossChain is Test {
         if (REGISTRY.toRemoteFee() != 0) {
             assertGt(TOKENS.totalBalanceOf(caller, 1), 0, "the caller got the fee's JBP6");
         }
+    }
+
+    /// @notice A USDC lunch's copy takes the other chain's USDC and sends it home as the host's.
+    function test_remote_usdcLunchSendsUsdcHome() public {
+        vm.selectFork(optimismFork);
+        uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_usdcConfig(OP_USDC, BASE_USDC));
+        assertEq(lunch.recordOf(id).token, address(OP_USDC), "takes this chain's USDC");
+
+        deal(address(OP_USDC), alice, 500e6);
+        vm.startPrank(alice);
+        OP_USDC.approve(address(TERMINAL), 500e6);
+        assertEq(TERMINAL.pay(id, address(OP_USDC), 500e6, alice, 0, "", ""), 0, "remote payments mint nothing");
+        vm.stopPrank();
+        assertEq(STORE.balanceOf(address(TERMINAL), id, address(OP_USDC)), 500e6);
+
+        address caller = address(0xCA11E40001);
+        vm.deal(caller, 1 ether);
+        vm.prank(caller);
+        lunch.sendHome{value: 0.1 ether}(id);
+
+        assertEq(STORE.balanceOf(address(TERMINAL), id, address(OP_USDC)), 0, "the whole balance left");
+        assertEq(OP_USDC.balanceOf(address(lunch)), 0, "no USDC stranded on the lunch contract");
+        assertEq(address(lunch).balance, 0, "no ETH stranded on the lunch contract");
+        assertEq(TOKENS.totalSupplyOf(id), 0, "the carrier token was burned");
+        assertEq(TOKENS.totalBalanceOf(address(lunch), 1), 0, "no JBP6 stranded on the lunch contract");
+    }
+
+    /// @notice A copy has to send home exactly the money the host raises.
+    function test_createFor_usdcCopyNeedsUsdcHome() public {
+        vm.selectFork(optimismFork);
+        uint256 fee = PROJECTS.creationFee();
+
+        // ETH can't stand in for an ERC-20.
+        FairLunchConfig memory native = _usdcConfig(IERC20(JBConstants.NATIVE_TOKEN), BASE_USDC);
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(native);
+
+        // Nor can a mapping that arrives as another token.
+        FairLunchConfig memory other = _usdcConfig(OP_USDC, IERC20(address(0xDEAD)));
+        other.token = address(BASE_USDC);
+        vm.expectRevert();
+        lunch.createFor{value: fee}(other);
     }
 
     /// @notice When the sucker can't pay its fee to JBP6 it keeps the fee for whoever called it. That's the lunch

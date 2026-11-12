@@ -14,6 +14,8 @@ A `burn` never pushes the price more than 200 ticks (about 2%) above the pool's 
 
 ## Chains
 
+A lunch raises ETH or any ordinary ERC-20, named when it's made. Where this file says ETH, read the lunch's money. Every lunch also lists the Juicebox router terminal registry as a second terminal, so people can pay in other tokens and have them swapped into the lunch's money on the way in.
+
 A lunch has one host chain, where its pool lives. It can also be created on other chains, joined to the host by Juicebox suckers. Payments on the other chains mint nothing. Anyone calls `sendHome` there to bridge the ETH to the host chain, where it counts as raised before `serve` and is used by `burn` after.
 
 ## Contracts

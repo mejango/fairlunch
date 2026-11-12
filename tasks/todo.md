@@ -452,7 +452,7 @@ Decisions taken, open to jango's correction:
 - Price stays 1,000,000 tokens per whole unit of the fundraise token (per ETH, per USDC), whatever its decimals.
 - The pool's work (open, corrective swap, burn's swap, collect, the price bound) moves to its own contract that only `FairLunch` can call and that holds every position. `FairLunch` has 770 bytes spare and token ordering makes every direction two-sided.
 - An ERC-20 lunch with copies names each chain's token address in its config. Nothing on chain can check that two addresses are the same asset, so a wrong one strands what's paid on that copy, the same as a pair Chainlink doesn't carry today. Payers on copies get no tokens either way.
-- If JBP6 can't take the token, the payout fee is forgiven into the lunch's balance by core (it then gets burned) and `collect` adds the token-side fees to the lunch's balance instead of reverting.
+- If JBP6 can't take the token: `collect` adds the money-side pool fees to the lunch's balance instead of paying JBP6, and the payout fee at `serve` is held by the router terminal gateway as a pending call that refunds to the lunch's balance after three failures over three days (traced on a fork, 2026-11-12). With USDC the fee reaches JBP6 and the creator gets its tokens.
 - A token that takes a fee on transfer or rebases isn't supported: `createFor` can't detect it, RISKS.md says so.
 
 Tasks:

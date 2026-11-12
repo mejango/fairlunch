@@ -8,6 +8,7 @@ What Fair Lunch trusts, what can go wrong, and what was chosen on purpose.
 - **The Juicebox buyback hook.** Once a lunch is served, its payments and cash outs trade through the buyback hook the registry gave its project when it was created, and that hook can mint the lunch's token. A lunch keeps that hook for good. Whoever owns the registry chooses the hook later lunches get.
 - **Uniswap V4 and Permit2.** The liquidity lives in a V4 position held by `FairLunch`.
 - **The bridge behind each sucker.** ETH sent home is only as safe as that bridge.
+- **The router terminal.** Every lunch lists the router terminal registry as its second terminal, so people can pay in other tokens. Whichever router the registry gives the project swaps what's paid into the lunch's money and pays it in. It never holds a lunch's balance. A bad router could only lose what's paid through it.
 - **The deployer, once.** Whoever deploys `FairLunch` sets its Uniswap V4 addresses a single time. Wrong addresses there break or drain every lunch on that chain, and they can't be changed. The deploy rehearsal test pins the expected values.
 
 Nobody can change a lunch after it's created, including its creator.
@@ -38,6 +39,12 @@ Nobody can change a lunch after it's created, including its creator.
 - **ETH that arrives after the deadline but before `serve` is in the raise.** That includes bridged ETH. The pool is sized from the project's balance at `serve`.
 - **Pool fees in ETH are paid into JBP6**, and the JBP6 tokens go to the creator. Pool fees in the token are burned.
 - **ETH or tokens sent straight to the contract are lost.** It has no way to return them.
+- **A lunch raises one kind of money: ETH or an ERC-20.** The price is 1,000,000 tokens per whole unit of it, whatever its decimals. Everything this file says about ETH goes for an ERC-20 lunch's money too, except where it says otherwise below.
+- **Tokens that take a fee on transfer, rebase, or have more than 24 decimals aren't supported.** `createFor` can't tell, and a lunch that raises one can get stuck. JBP6 itself can't be a lunch's money.
+- **Paying in another token is a swap.** The router terminal prices its swap from the pools it finds unless the payer names a minimum for it. Name one.
+- **An ERC-20 lunch's token stays on its host chain.** `serve` opens the bridges to holders only for ETH lunches. Copies still send their money home.
+- **An ERC-20 lunch's copy names that chain's address for the money.** Nothing on chain can check that two addresses on two chains are the same asset. `createFor` checks the bridge carries the copy's token home as the host's money, and nothing more.
+- **Where JBP6 can't take a lunch's money, fees go to burns instead, some of them late.** The money side of pool fees goes into the lunch's balance. The 2.5% Juicebox fee on the raise is paid to JBP6 through its router terminal. If the router can't swap the token, its gateway holds the fee, and gives it back to the lunch's balance once the swap has failed three times over three days and someone calls the gateway to finalize it. The creator gets no JBP6 for either.
 - **Nothing here is audited.**
 
 ## Not covered by tests
