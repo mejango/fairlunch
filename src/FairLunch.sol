@@ -30,6 +30,7 @@ import {JBTokenMapping} from "@bananapus/suckers-v6/src/structs/JBTokenMapping.s
 import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
 import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
@@ -53,8 +54,9 @@ import {FairLunchRecord} from "./structs/FairLunchRecord.sol";
 /// @notice Tasty token launcher.
 /// @dev A lunch is a Juicebox project this contract owns forever, so nobody can ever change it.
 ///
-/// Cooking: until its deadline, a lunch sells its token for ETH at a fixed price on its host chain. Nothing can be
-/// cashed out.
+/// Cooking: until its deadline, a lunch sells its token at a fixed price on its host chain, for the money it names:
+/// ETH or an ERC-20. Nothing can be cashed out. A payment in anything else is swapped into that money on the way in
+/// by the Juicebox router terminal.
 ///
 /// Served: once the deadline passes, anyone can serve the lunch. The raise leaves the project through a normal payout
 /// (so the JB fee applies, and the JBP6 it mints goes to the creator), the creator gets the share they asked for up to
@@ -105,8 +107,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @notice The tick spacing of every lunch's pool.
     int24 public constant override TICK_SPACING = 200;
 
-    /// @notice The number of tokens a payer receives per ETH during the fundraise, and the price the pool opens at.
-    uint256 public constant override TOKENS_PER_ETH = 1_000_000;
+    /// @notice The number of tokens a payer receives per whole unit of the lunch's money (per ETH, per USDC) during
+    /// the fundraise, and the price the pool opens at.
+    uint256 public constant override TOKENS_PER_UNIT = 1_000_000;
 
     /// @notice The farthest a burn's buy can push the price past its time-weighted average, in ticks (about 2%).
     int24 public constant override TWAP_MAX_DEVIATION = 200;
@@ -126,7 +129,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// of the balance.
     uint256 internal constant _SEND_HOME_MULTIPLE = 1_000_000;
 
-    /// @notice The gas a sucker reserves on the remote chain for a native token claim.
+    /// @notice The gas a sucker reserves on the remote chain for a claim.
     uint32 internal constant _SUCKER_MIN_GAS = 200_000;
 
     //*********************************************************************//
@@ -151,10 +154,13 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @notice The holder of every lunch's liquidity, which trades in its pool.
     FairLunchPool public immutable override POOL;
 
+    /// @notice The terminal that takes payments in other tokens and swaps them into a lunch's money.
+    IJBTerminal public immutable override ROUTER_TERMINAL_REGISTRY;
+
     /// @notice The registry of every lunch's suckers.
     IJBSuckerRegistry public immutable override SUCKER_REGISTRY;
 
-    /// @notice The terminal every lunch accepts ETH through.
+    /// @notice The terminal every lunch holds its money in.
     IJBMultiTerminal public immutable override TERMINAL;
 
     /// @notice The token ledger.
@@ -206,7 +212,8 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// omnichain deployer trusts, so relayed creations resolve the signer instead of the forwarder.
     /// @param omnichainDeployer The deployer every lunch is launched through.
     /// @param buybackRegistry The registry of the buyback hook.
-    /// @param terminal The terminal every lunch accepts ETH through.
+    /// @param terminal The terminal every lunch holds its money in.
+    /// @param routerTerminalRegistry The terminal that takes payments in other tokens.
     /// @param suckerRegistry The registry of every lunch's suckers.
     /// @param permit2 The Permit2 contract the position manager pulls tokens through.
     /// @param vestingDeployer The deployer of the wallets that vest creators' tokens.
@@ -215,6 +222,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         IJBOmnichainDeployer omnichainDeployer,
         IJBBuybackHookRegistry buybackRegistry,
         IJBMultiTerminal terminal,
+        IJBTerminal routerTerminalRegistry,
         IJBSuckerRegistry suckerRegistry,
         IAllowanceTransfer permit2,
         FairLunchVestingDeployer vestingDeployer,
@@ -228,6 +236,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         CONTROLLER = omnichainDeployer.CONTROLLER();
         DIRECTORY = terminal.DIRECTORY();
         TERMINAL = terminal;
+        ROUTER_TERMINAL_REGISTRY = routerTerminalRegistry;
         TOKENS = terminal.TOKENS();
         SUCKER_REGISTRY = suckerRegistry;
         POOL = new FairLunchPool(permit2);
@@ -252,7 +261,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// `TWAP_WINDOW` after serving so that the average holds only prices from the served pool: anyone can create the
     /// pool early and leave misleading history in it.
     /// @param projectId The ID of the lunch's project.
-    /// @return spent The amount of ETH spent buying tokens.
+    /// @return spent The amount of the lunch's money spent buying tokens.
     /// @return burned The number of tokens burned.
     function burn(uint256 projectId) external override nonReentrant returns (uint256 spent, uint256 burned) {
         FairLunchRecord storage record = _recordOf[projectId];
@@ -270,7 +279,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             holder: address(this),
             projectId: projectId,
             cashOutCount: 0,
-            tokenToReclaim: JBConstants.NATIVE_TOKEN,
+            tokenToReclaim: record.token,
             minTokensReclaimed: 0,
             beneficiary: payable(address(this)),
             metadata: ""
@@ -281,13 +290,14 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             // belongs to the creator.
             _sendFeeTokensTo(record.creator);
 
-            // Buy as much as the price bound allows. The tokens and the ETH the buy couldn't spend come back.
-            spent = POOL.buy{value: amount}({
-                key: poolKeyOf(projectId), twapWindow: TWAP_WINDOW, maxDeviation: TWAP_MAX_DEVIATION
+            // Buy as much as the price bound allows. The tokens and the money the buy couldn't spend come back.
+            (PoolKey memory key, bool moneyIs0) = _poolOf({projectId: projectId, token: record.token});
+            spent = POOL.buy{value: _handTo({to: address(POOL), token: record.token, amount: amount})}({
+                key: key, moneyIs0: moneyIs0, amount: amount, twapWindow: TWAP_WINDOW, maxDeviation: TWAP_MAX_DEVIATION
             });
 
             // Put back what the buy couldn't spend.
-            if (amount != spent) _addToBalanceOf({projectId: projectId, amount: amount - spent});
+            if (amount != spent) _addToBalanceOf({projectId: projectId, token: record.token, amount: amount - spent});
         }
 
         // Burn everything bought, along with any tokens that arrived carrying revenue from other chains.
@@ -296,19 +306,21 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         emit Burn({projectId: projectId, spent: spent, burned: burned, caller: _msgSender()});
     }
 
-    /// @notice Collect a served lunch's liquidity fees, burning the token side and paying the ETH side into JBP6 with
+    /// @notice Collect a served lunch's liquidity fees, burning the token side and paying the money side into JBP6 with
     /// the creator as beneficiary.
-    /// @dev Anyone can call this. The position's liquidity is never touched.
+    /// @dev Anyone can call this. The position's liquidity is never touched. If JBP6 doesn't take the lunch's money in
+    /// this contract's terminal, the money side goes into the lunch's balance instead, where `burn` uses it.
     /// @param projectId The ID of the lunch's project.
     /// @return tokensBurned The number of tokens collected and burned.
-    /// @return ethPaid The amount of ETH paid into JBP6.
-    function collect(uint256 projectId) external override nonReentrant returns (uint256 tokensBurned, uint256 ethPaid) {
+    /// @return paid The amount of the lunch's money collected.
+    function collect(uint256 projectId) external override nonReentrant returns (uint256 tokensBurned, uint256 paid) {
         FairLunchRecord storage record = _recordOf[projectId];
 
         // Only a served lunch has a position.
         if (record.servedAt == 0) revert FairLunch_NotServed(projectId);
 
-        uint256 ethBefore = address(this).balance;
+        address token = record.token;
+        uint256 before = _holdingOf(token);
 
         // Take the position's fees without touching its liquidity.
         POOL.collect({key: poolKeyOf(projectId), positionId: record.positionId});
@@ -316,24 +328,29 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         // Burn the token side.
         tokensBurned = _burnTokensOf(projectId);
 
-        // Pay the ETH side into JBP6, which mints JBP6 to the creator.
-        ethPaid = address(this).balance - ethBefore;
-        if (ethPaid != 0) {
-            // slither-disable-next-line unused-return
-            DIRECTORY.primaryTerminalOf({
-                projectId: _FEE_PROJECT_ID, token: JBConstants.NATIVE_TOKEN
-            }).pay{value: ethPaid}({
-                projectId: _FEE_PROJECT_ID,
-                token: JBConstants.NATIVE_TOKEN,
-                amount: ethPaid,
-                beneficiary: record.creator,
-                minReturnedTokens: 0,
-                memo: "",
-                metadata: ""
-            });
+        paid = _holdingOf(token) - before;
+        if (paid != 0) {
+            if (
+                DIRECTORY.primaryTerminalOf({projectId: _FEE_PROJECT_ID, token: token})
+                    == IJBTerminal(address(TERMINAL))
+            ) {
+                // Pay the money side into JBP6, which mints JBP6 to the creator.
+                // slither-disable-next-line unused-return
+                TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: paid})}({
+                    projectId: _FEE_PROJECT_ID,
+                    token: token,
+                    amount: paid,
+                    beneficiary: record.creator,
+                    minReturnedTokens: 0,
+                    memo: "",
+                    metadata: ""
+                });
+            } else {
+                _addToBalanceOf({projectId: projectId, token: token, amount: paid});
+            }
         }
 
-        emit Collect({projectId: projectId, tokensBurned: tokensBurned, ethPaid: ethPaid, caller: _msgSender()});
+        emit Collect({projectId: projectId, tokensBurned: tokensBurned, paid: paid, caller: _msgSender()});
     }
 
     /// @notice Make a lunch on this chain.
@@ -346,9 +363,22 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
         // Only the host sells tokens, so only the host needs time left to sell them. A copy on another chain can be
         // made after the deadline: its terms, deadline included, must match the host's to pair with it.
+        // The money this chain's project takes: the lunch's own on the host, and on a copy whatever its first sucker
+        // maps home.
+        address token = config.token;
+        if (!isHost && config.suckerDeploymentConfiguration.deployerConfigurations.length != 0) {
+            JBTokenMapping[] calldata mappings = config.suckerDeploymentConfiguration.deployerConfigurations[0].mappings;
+            if (mappings.length != 0) token = mappings[0].localToken;
+        }
+
+        // A lunch that raises ETH takes ETH everywhere, and one that raises an ERC-20 takes ERC-20s everywhere. None
+        // takes JBP6: this contract passes on all the JBP6 it holds as fee proceeds.
         if (
             config.creator == address(0) || config.hostChainId == 0 || (isHost && config.deadline <= block.timestamp)
-                || config.keepPercent > MAX_CREATOR_PERCENT || config.tokenPercent > MAX_CREATOR_PERCENT
+                || config.token == address(0)
+                || (config.token == JBConstants.NATIVE_TOKEN) != (token == JBConstants.NATIVE_TOKEN)
+                || token == address(TOKENS.tokenOf(_FEE_PROJECT_ID)) || config.keepPercent > MAX_CREATOR_PERCENT
+                || config.tokenPercent > MAX_CREATOR_PERCENT
         ) revert FairLunch_InvalidConfig();
 
         // A lunch needs this chain's Uniswap addresses.
@@ -362,6 +392,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                 _msgSender(),
                 config.salt,
                 config.hostChainId,
+                config.token,
                 config.deadline,
                 config.creator,
                 config.keepPercent,
@@ -382,8 +413,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                 revert FairLunch_InvalidConfig();
             }
 
-            // The host's suckers start with nothing mapped, so the raise can't be bridged away. `serve` maps the
-            // native token.
+            // The host's suckers start with nothing mapped, so the raise can't be bridged away.
             if (isHost && suckerDeploymentConfiguration.deployerConfigurations[i].mappings.length != 0) {
                 revert FairLunch_HostMapsNoTokens();
             }
@@ -392,19 +422,26 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         // Only the host sells tokens. Everywhere else, payments mint nothing and wait to be sent home.
         JBRulesetConfig[] memory rulesetConfigurations = new JBRulesetConfig[](1);
         rulesetConfigurations[0] = _rulesetConfigOf({
-            weight: isHost ? uint112(TOKENS_PER_ETH * 1e18) : 0,
+            token: token,
+            weight: isHost ? uint112(TOKENS_PER_UNIT * 1e18) : 0,
             splitGroups: new JBSplitGroup[](0),
             fundAccessLimitGroups: new JBFundAccessLimitGroup[](0)
         });
 
-        // Accept ETH.
+        // Hold the money in the terminal, and take everything else through the router terminal, which swaps it into
+        // the money first. The router goes second so the directory never picks it for the money itself.
         JBAccountingContext[] memory accountingContexts = new JBAccountingContext[](1);
         accountingContexts[0] = JBAccountingContext({
-            token: JBConstants.NATIVE_TOKEN, decimals: 18, currency: JBConstants.NATIVE_TOKEN_CURRENCY
+            token: token,
+            decimals: token == JBConstants.NATIVE_TOKEN ? 18 : IERC20Metadata(token).decimals(),
+            currency: uint32(uint160(token))
         });
-        JBTerminalConfig[] memory terminalConfigurations = new JBTerminalConfig[](1);
+        JBTerminalConfig[] memory terminalConfigurations = new JBTerminalConfig[](2);
         terminalConfigurations[0] = JBTerminalConfig({
             terminal: IJBTerminal(address(TERMINAL)), accountingContextsToAccept: accountingContexts
+        });
+        terminalConfigurations[1] = JBTerminalConfig({
+            terminal: ROUTER_TERMINAL_REGISTRY, accountingContextsToAccept: new JBAccountingContext[](0)
         });
 
         // Expose who is paying the creation fee so its credit goes to them, not to this contract.
@@ -424,14 +461,14 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         originalPayer = address(0);
 
         // Everywhere but the host, payments only ever leave through the bridge home. Without one that's ready to carry
-        // ETH they'd be stuck, so there's no lunch. A mapping that was set and then switched off doesn't count, nor
-        // does one with any gas but the gas `serve` gives the host's: set too high, it could never send. Nor does one
-        // that turns ETH into another token on the way: the host only takes ETH.
+        // this chain's money they'd be stuck, so there's no lunch. A mapping that was set and then switched off
+        // doesn't count, nor does one with any gas but `_SUCKER_MIN_GAS`: set too high, it could never send. Nor does
+        // one that arrives as anything but the lunch's money: the host takes nothing else.
         if (!isHost) {
             (uint256 enabled,, uint256 minGas, uint256 remoteToken) = ISuckerRoute(
                     address(_hostSuckerOf({projectId: projectId, hostChainId: config.hostChainId}))
-                ).remoteTokenFor(JBConstants.NATIVE_TOKEN);
-            if (enabled == 0 || minGas != _SUCKER_MIN_GAS || remoteToken != uint160(JBConstants.NATIVE_TOKEN)) {
+                ).remoteTokenFor(token);
+            if (enabled == 0 || minGas != _SUCKER_MIN_GAS || remoteToken != uint160(config.token)) {
                 revert FairLunch_InvalidConfig();
             }
         }
@@ -450,6 +487,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
         FairLunchRecord storage record = _recordOf[projectId];
         record.hostChainId = config.hostChainId;
+        record.token = token;
         record.deadline = config.deadline;
         record.creator = config.creator;
         record.keepPercent = config.keepPercent;
@@ -476,13 +514,14 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @notice Send this chain's revenue to the lunch's host chain.
     /// @dev Anyone can call this on a chain other than the host. `msg.value` pays the sucker's fee and the bridge, and
     /// whatever they don't use is refunded to the caller.
-    /// Suckers only carry ETH that backs tokens being bridged, so this mints tokens to carry it: one wei of token when
-    /// nobody holds the token on this chain (cashing out the whole supply reclaims the whole balance), otherwise
+    /// Suckers only carry money that backs tokens being bridged, so this mints tokens to carry it: one wei of token
+    /// when nobody holds the token on this chain (cashing out the whole supply reclaims the whole balance), otherwise
     /// `_SEND_HOME_MULTIPLE` times the supply, which carries all but a sliver. The tokens are minted to this contract
     /// on the host chain, where the next `burn` burns them.
     /// @param projectId The ID of the lunch's project on this chain.
     function sendHome(uint256 projectId) external payable override nonReentrant {
         uint256 hostChainId = _recordOf[projectId].hostChainId;
+        address token = _recordOf[projectId].token;
 
         // The host has nowhere to send to. This also rejects projects that aren't lunches.
         if (hostChainId == 0 || hostChainId == block.chainid) revert FairLunch_NotRemote(projectId);
@@ -510,10 +549,10 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             projectTokenCount: tokenCount,
             beneficiary: bytes32(uint256(uint160(address(this)))),
             minTokensReclaimed: 0,
-            token: JBConstants.NATIVE_TOKEN,
+            token: token,
             metadata: bytes32(0)
         });
-        sucker.toRemote{value: msg.value}(JBConstants.NATIVE_TOKEN);
+        sucker.toRemote{value: msg.value}(token);
 
         // The sucker's fee bought JBP6 for this contract. It belongs to the caller who paid it. If the fee couldn't be
         // paid, the sucker kept it for this contract to take back.
@@ -542,45 +581,48 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             revert FairLunch_TooEarly({projectId: projectId, readyAt: uint256(record.deadline) + 1});
         }
 
-        uint256 raised = _balanceOf(projectId);
+        address token = record.token;
+        uint256 raised = _balanceOf({projectId: projectId, token: token});
         if (raised == 0) revert FairLunch_NothingRaised(projectId);
 
         // From here on the lunch is served: payments stop minting and start buying back.
         record.servedAt = uint48(block.timestamp);
 
         // Anything this contract holds beyond this was sent to it by mistake and isn't the lunch's.
-        uint256 ethBefore = address(this).balance;
+        uint256 before = _holdingOf(token);
 
         // Pay the whole raise out: the creator's keep to the creator, everything else to this contract as the owner.
         _queuePayoutOf({
             projectId: projectId,
+            token: token,
             raised: raised,
             creator: record.creator,
             keep: _min(mulDiv(raised, record.keepPercent, JBConstants.SPLITS_TOTAL_PERCENT), record.keepCap)
         });
         // slither-disable-next-line unused-return
         TERMINAL.sendPayoutsOf({
-            projectId: projectId,
-            token: JBConstants.NATIVE_TOKEN,
-            amount: raised,
-            currency: JBConstants.NATIVE_TOKEN_CURRENCY,
-            minTokensPaidOut: 0
+            projectId: projectId, token: token, amount: raised, currency: uint32(uint160(token)), minTokensPaidOut: 0
         });
-        uint256 poolEth = address(this).balance - ethBefore;
+        uint256 poolAmount = _holdingOf(token) - before;
 
         // The payout's fee minted JBP6 to this contract as the project's owner. It belongs to the creator.
         _sendFeeTokensTo(record.creator);
 
-        // Mint the other side of the market: as many tokens as the pool's ETH would have bought during the fundraise,
-        // so the pool opens at the price payers paid.
-        uint256 poolTokens = poolEth * TOKENS_PER_ETH;
+        // Mint the other side of the market: as many tokens as the pool's money would have bought during the
+        // fundraise, so the pool opens at the price payers paid.
+        uint256 poolTokens = mulDiv(
+            poolAmount,
+            TOKENS_PER_UNIT * 1e18,
+            10 ** TERMINAL.accountingContextForTokenOf({projectId: projectId, token: token}).decimals
+        );
 
-        _mintTokensOf({projectId: projectId, tokenCount: poolTokens, beneficiary: address(this)});
+        _mintTokensOf({projectId: projectId, tokenCount: poolTokens, beneficiary: address(POOL)});
 
-        // Put the ETH and the tokens in the pool, forever. What the pool's price didn't take comes back.
-        PoolKey memory key = poolKeyOf(projectId);
-        IERC20(Currency.unwrap(key.currency1)).safeTransfer({to: address(POOL), value: poolTokens});
-        record.positionId = POOL.open{value: poolEth}({key: key, tokens: poolTokens});
+        // Put the money and the tokens in the pool, forever. What the pool's price didn't take comes back.
+        (PoolKey memory key, bool moneyIs0) = _poolOf({projectId: projectId, token: token});
+        record.positionId = POOL.open{value: _handTo({to: address(POOL), token: token, amount: poolAmount})}({
+            key: key, moneyIs0: moneyIs0, money: poolAmount, tokens: poolTokens
+        });
 
         // From here on the buyback hook routes the lunch's payments and cash outs through that pool.
         IJBBuybackHook(address(BUYBACK_REGISTRY.hookOf(projectId)))
@@ -589,14 +631,14 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             fee: POOL_FEE,
             tickSpacing: TICK_SPACING,
             twapWindow: TWAP_WINDOW,
-            terminalToken: JBConstants.NATIVE_TOKEN
+            terminalToken: token
         });
 
-        // Whatever the pool's price didn't take: burn the tokens, and leave the ETH in the balance for the burn.
+        // Whatever the pool's price didn't take: burn the tokens, and leave the money in the balance for the burn.
         // slither-disable-next-line unused-return
         _burnTokensOf(projectId);
-        uint256 ethLeft = address(this).balance - ethBefore;
-        if (ethLeft != 0) _addToBalanceOf({projectId: projectId, amount: ethLeft});
+        uint256 left = _holdingOf(token) - before;
+        if (left != 0) _addToBalanceOf({projectId: projectId, token: token, amount: left});
 
         // Mint the creator's share of the total supply, now that it's settled, into a wallet that vests it linearly
         // from now.
@@ -613,22 +655,24 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         }
 
         // Open the bridges now that there is no raise left to bridge away.
-        address[] memory suckers = SUCKER_REGISTRY.suckersOf(projectId);
-        for (uint256 i; i < suckers.length; i++) {
-            IJBSucker(suckers[i])
-                .mapToken(
-                    JBTokenMapping({
-                    localToken: JBConstants.NATIVE_TOKEN,
-                    minGas: _SUCKER_MIN_GAS,
-                    remoteToken: bytes32(uint256(uint160(JBConstants.NATIVE_TOKEN)))
-                })
-                );
+        // ponytail: only for ETH, which is the same token everywhere. An ERC-20 lunch's token stays on its host until
+        // this knows each chain's address for the money.
+        if (token == JBConstants.NATIVE_TOKEN) {
+            address[] memory suckers = SUCKER_REGISTRY.suckersOf(projectId);
+            for (uint256 i; i < suckers.length; i++) {
+                IJBSucker(suckers[i])
+                    .mapToken(
+                        JBTokenMapping({
+                        localToken: token, minGas: _SUCKER_MIN_GAS, remoteToken: bytes32(uint256(uint160(token)))
+                    })
+                    );
+            }
         }
 
         emit Serve({
             projectId: projectId,
             raised: raised,
-            poolEth: poolEth,
+            poolAmount: poolAmount,
             poolTokens: poolTokens,
             creatorTokens: creatorTokens,
             vestingWallet: record.vestingWallet,
@@ -669,34 +713,23 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     //*********************************************************************//
 
     /// @notice The Uniswap V4 pool of a lunch.
-    /// @dev ETH is always currency0: the native currency's address is zero, which sorts before every token.
     /// @param projectId The ID of the lunch's project.
     /// @return key The pool's key.
     function poolKeyOf(uint256 projectId) public view override returns (PoolKey memory key) {
-        return PoolKey({
-            currency0: Currency.wrap(address(0)),
-            currency1: Currency.wrap(address(TOKENS.tokenOf(projectId))),
-            fee: POOL_FEE,
-            tickSpacing: TICK_SPACING,
-            hooks: IHooks(address(ORACLE_HOOK))
-        });
+        (key,) = _poolOf({projectId: projectId, token: _recordOf[projectId].token});
     }
 
     //*********************************************************************//
     // ---------------------- internal transactions ---------------------- //
     //*********************************************************************//
 
-    /// @notice Add ETH to a lunch's balance.
+    /// @notice Add money to a lunch's balance.
     /// @param projectId The ID of the lunch's project.
-    /// @param amount The amount of ETH to add.
-    function _addToBalanceOf(uint256 projectId, uint256 amount) internal {
-        TERMINAL.addToBalanceOf{value: amount}({
-            projectId: projectId,
-            token: JBConstants.NATIVE_TOKEN,
-            amount: amount,
-            shouldReturnHeldFees: false,
-            memo: "",
-            metadata: ""
+    /// @param token The lunch's money.
+    /// @param amount The amount to add.
+    function _addToBalanceOf(uint256 projectId, address token, uint256 amount) internal {
+        TERMINAL.addToBalanceOf{value: _handTo({to: address(TERMINAL), token: token, amount: amount})}({
+            projectId: projectId, token: token, amount: amount, shouldReturnHeldFees: false, memo: "", metadata: ""
         });
     }
 
@@ -708,6 +741,18 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         if (tokenCount != 0) {
             CONTROLLER.burnTokensOf({holder: address(this), projectId: projectId, tokenCount: tokenCount, memo: ""});
         }
+    }
+
+    /// @notice Get an amount of money ready for a call to take: ETH is sent with the call, and an ERC-20 is sent to the
+    /// pool contract or approved for the terminal.
+    /// @param to The contract about to be called.
+    /// @param token The money.
+    /// @param amount The amount.
+    /// @return value The ETH to send with the call.
+    function _handTo(address to, address token, uint256 amount) internal returns (uint256 value) {
+        if (token == JBConstants.NATIVE_TOKEN) return amount;
+        if (to == address(POOL)) IERC20(token).safeTransfer({to: to, value: amount});
+        else IERC20(token).forceApprove({spender: to, value: amount});
     }
 
     /// @notice Mint a lunch's tokens.
@@ -725,16 +770,17 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @dev The payout limit can only ever be used once because the ruleset never cycles. The creator's keep is a
     /// split, and the rest of the payout goes to this contract as the project's owner.
     /// @param projectId The ID of the lunch's project.
-    /// @param raised The amount of ETH to make payable.
+    /// @param token The lunch's money.
+    /// @param raised The amount to make payable.
     /// @param creator The address that receives the keep.
-    /// @param keep The amount of ETH the creator keeps, before the JB fee.
-    function _queuePayoutOf(uint256 projectId, uint256 raised, address creator, uint256 keep) internal {
+    /// @param keep The amount the creator keeps, before the JB fee.
+    function _queuePayoutOf(uint256 projectId, address token, uint256 raised, address creator, uint256 keep) internal {
         JBCurrencyAmount[] memory payoutLimits = new JBCurrencyAmount[](1);
-        payoutLimits[0] = JBCurrencyAmount({amount: uint224(raised), currency: JBConstants.NATIVE_TOKEN_CURRENCY});
+        payoutLimits[0] = JBCurrencyAmount({amount: uint224(raised), currency: uint32(uint160(token))});
         JBFundAccessLimitGroup[] memory fundAccessLimitGroups = new JBFundAccessLimitGroup[](1);
         fundAccessLimitGroups[0] = JBFundAccessLimitGroup({
             terminal: address(TERMINAL),
-            token: JBConstants.NATIVE_TOKEN,
+            token: token,
             payoutLimits: payoutLimits,
             surplusAllowances: new JBCurrencyAmount[](0)
         });
@@ -752,12 +798,13 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                 hook: IJBSplitHook(address(0))
             });
             splitGroups = new JBSplitGroup[](1);
-            splitGroups[0] = JBSplitGroup({groupId: uint256(uint160(JBConstants.NATIVE_TOKEN)), splits: splits});
+            splitGroups[0] = JBSplitGroup({groupId: uint256(uint160(token)), splits: splits});
         }
 
         JBRulesetConfig[] memory rulesetConfigurations = new JBRulesetConfig[](1);
-        rulesetConfigurations[0] =
-            _rulesetConfigOf({weight: 0, splitGroups: splitGroups, fundAccessLimitGroups: fundAccessLimitGroups});
+        rulesetConfigurations[0] = _rulesetConfigOf({
+            token: token, weight: 0, splitGroups: splitGroups, fundAccessLimitGroups: fundAccessLimitGroups
+        });
 
         // Queue through the omnichain deployer so the ruleset keeps the wrapper that serves the lunch's suckers.
         // slither-disable-next-line unused-return
@@ -814,11 +861,17 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         revert FairLunch_NoHostSucker({projectId: projectId, hostChainId: hostChainId});
     }
 
-    /// @notice The ETH in a lunch's balance.
+    /// @notice The money in a lunch's balance.
     /// @param projectId The ID of the lunch's project.
-    function _balanceOf(uint256 projectId) internal view returns (uint256) {
-        return TERMINAL.STORE()
-            .balanceOf({terminal: address(TERMINAL), projectId: projectId, token: JBConstants.NATIVE_TOKEN});
+    /// @param token The lunch's money.
+    function _balanceOf(uint256 projectId, address token) internal view returns (uint256) {
+        return TERMINAL.STORE().balanceOf({terminal: address(TERMINAL), projectId: projectId, token: token});
+    }
+
+    /// @notice How much of a lunch's money this contract holds.
+    /// @param token The money.
+    function _holdingOf(address token) internal view returns (uint256) {
+        return token == JBConstants.NATIVE_TOKEN ? address(this).balance : IERC20(token).balanceOf(address(this));
     }
 
     /// @notice The smaller of two numbers.
@@ -826,13 +879,34 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         return a < b ? a : b;
     }
 
+    /// @notice The Uniswap V4 pool of a lunch, and which side of it the lunch's money is on.
+    /// @dev A pool's currencies are sorted by address. ETH's is zero, so it always comes first.
+    /// @param projectId The ID of the lunch's project.
+    /// @param token The lunch's money.
+    /// @return key The pool's key.
+    /// @return moneyIs0 Whether the money is the pool's currency0.
+    function _poolOf(uint256 projectId, address token) internal view returns (PoolKey memory key, bool moneyIs0) {
+        address money = token == JBConstants.NATIVE_TOKEN ? address(0) : token;
+        address projectToken = address(TOKENS.tokenOf(projectId));
+        moneyIs0 = money < projectToken;
+        key = PoolKey({
+            currency0: Currency.wrap(moneyIs0 ? money : projectToken),
+            currency1: Currency.wrap(moneyIs0 ? projectToken : money),
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(ORACLE_HOOK))
+        });
+    }
+
     /// @notice The ruleset every lunch uses: no reserved tokens, no cash outs, no owner powers beyond minting, and
     /// `DATA_HOOK` deciding payments and cash outs.
-    /// @param weight The number of tokens minted per ETH paid, as a fixed point number with 18 decimals.
-    /// @param splitGroups The ruleset's splits.
+    /// @param token The lunch's money, which the ruleset counts in.
+    /// @param weight The number of tokens minted per whole unit of money paid, as a fixed point number with 18
+    /// decimals. @param splitGroups The ruleset's splits.
     /// @param fundAccessLimitGroups The ruleset's payout limits.
     /// @return config The ruleset's configuration.
     function _rulesetConfigOf(
+        address token,
         uint112 weight,
         JBSplitGroup[] memory splitGroups,
         JBFundAccessLimitGroup[] memory fundAccessLimitGroups
@@ -848,7 +922,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         config.metadata = JBRulesetMetadata({
             reservedPercent: 0,
             cashOutTaxRate: JBConstants.MAX_CASH_OUT_TAX_RATE,
-            baseCurrency: JBConstants.NATIVE_TOKEN_CURRENCY,
+            baseCurrency: uint32(uint160(token)),
             pausePay: false,
             pauseCreditTransfers: false,
             allowOwnerMinting: true,

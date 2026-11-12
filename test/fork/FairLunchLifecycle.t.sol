@@ -6,6 +6,7 @@ import {IJBBuybackHookRegistry} from "@bananapus/buyback-hook-v6/src/interfaces/
 import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
+import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTerminalStore} from "@bananapus/core-v6/src/interfaces/IJBTerminalStore.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
@@ -92,6 +93,7 @@ contract FairLunchLifecycle is Test {
 
     IJBOmnichainDeployer internal constant OMNI = IJBOmnichainDeployer(0xB853758A70a6b4216c09f1d071eA2344AbA0a34f);
     IJBMultiTerminal internal constant TERMINAL = IJBMultiTerminal(0x130f5Dd2bD8805443Cf41755253D778a75a67f53);
+    IJBTerminal internal constant ROUTER_REGISTRY = IJBTerminal(0xe0427F250fdb0379c8E98e884Ee4570521208CbC);
     IJBTerminalStore internal constant STORE = IJBTerminalStore(0x7497ae014A60561925B51C0A3B4adE7460B9927C);
     IJBTokens internal constant TOKENS = IJBTokens(0x1f80d8f057eE36b4C2656D107E4e4558B71bA7D9);
     IJBProjects internal constant PROJECTS = IJBProjects(0x6017d1FBa9DC279BFA0B03fD931C22E242AB3691);
@@ -126,6 +128,7 @@ contract FairLunchLifecycle is Test {
             omnichainDeployer: OMNI,
             buybackRegistry: BUYBACK,
             terminal: TERMINAL,
+            routerTerminalRegistry: ROUTER_REGISTRY,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
             vestingDeployer: vestingDeployer,
@@ -153,6 +156,7 @@ contract FairLunchLifecycle is Test {
     {
         config.name = "Sandwich";
         config.symbol = "SAND";
+        config.token = JBConstants.NATIVE_TOKEN;
         config.hostChainId = uint64(block.chainid);
         config.deadline = deadline;
         config.creator = to;
@@ -1165,6 +1169,7 @@ contract FairLunchLifecycle is Test {
             omnichainDeployer: OMNI,
             buybackRegistry: BUYBACK,
             terminal: TERMINAL,
+            routerTerminalRegistry: ROUTER_REGISTRY,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
             vestingDeployer: vestingDeployer,

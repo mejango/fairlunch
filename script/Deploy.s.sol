@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {IJBBuybackHookRegistry} from "@bananapus/buyback-hook-v6/src/interfaces/IJBBuybackHookRegistry.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
+import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBOmnichainDeployer} from "@bananapus/omnichain-deployers-v6/src/interfaces/IJBOmnichainDeployer.sol";
 import {IJBSuckerRegistry} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerRegistry.sol";
 import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
@@ -31,6 +32,9 @@ contract Deploy is Script, Sphinx {
     //*********************************************************************//
 
     /// @notice The canonical Permit2, at the same address on every chain.
+    /// @notice The router terminal registry, at the same address on every chain.
+    IJBTerminal internal constant _ROUTER_TERMINAL_REGISTRY = IJBTerminal(0xe0427F250fdb0379c8E98e884Ee4570521208CbC);
+
     IAllowanceTransfer internal constant _PERMIT2 = IAllowanceTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 
     /// @notice The salt both contracts are deployed with.
@@ -78,6 +82,7 @@ contract Deploy is Script, Sphinx {
                 _deployed({package: "buyback-hook-v6", chain: chain, name: "JBBuybackHookRegistry"})
             ),
             terminal: IJBMultiTerminal(_deployed({package: "core-v6", chain: chain, name: "JBMultiTerminal"})),
+            routerTerminalRegistry: _ROUTER_TERMINAL_REGISTRY,
             suckerRegistry: IJBSuckerRegistry(
                 _deployed({package: "suckers-v6", chain: chain, name: "JBSuckerRegistry"})
             ),

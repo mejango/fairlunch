@@ -9,12 +9,14 @@ import {JBSuckerDeploymentConfig} from "@bananapus/omnichain-deployers-v6/src/st
 /// @custom:member projectUri The metadata URI of the lunch's Juicebox project.
 /// @custom:member hostChainId The ID of the chain the lunch takes place on: where the fundraise happens, where the
 /// pool lives, and where every buyback and burn happens. Every other chain only collects revenue to send home.
+/// @custom:member token The money the lunch raises in on its host chain: `JBConstants.NATIVE_TOKEN` for ETH, or an
+/// ERC-20. The same on every chain's copy of the configuration. A copy collects whatever its first sucker maps to it.
 /// @custom:member deadline The timestamp after which the fundraise stops accepting payments and the lunch can be
 /// served.
-/// @custom:member creator The address that receives the kept ETH, the JBP6 minted by fees, and the vested tokens.
+/// @custom:member creator The address that receives the kept money, the JBP6 minted by fees, and the vested tokens.
 /// @custom:member keepPercent The share of the raise the creator keeps, out of `JBConstants.SPLITS_TOTAL_PERCENT`.
-/// @custom:member keepCap The most ETH the creator can keep, in wei, whatever the raise ends up being.
-/// @custom:member tokenPercent The creator's share of the total token supply at launch, out of
+/// @custom:member keepCap The most the creator can keep, in the money's smallest unit, whatever the raise ends up
+/// being. @custom:member tokenPercent The creator's share of the total token supply at launch, out of
 /// `JBConstants.SPLITS_TOTAL_PERCENT`.
 /// @custom:member vestingDuration The number of seconds over which the creator's tokens vest linearly, starting when
 /// the lunch is served.
@@ -27,6 +29,7 @@ struct FairLunchConfig {
     string symbol;
     string projectUri;
     uint64 hostChainId;
+    address token;
     uint48 deadline;
     address creator;
     uint32 keepPercent;

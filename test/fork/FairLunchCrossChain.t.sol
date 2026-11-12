@@ -38,6 +38,7 @@ contract FairLunchCrossChain is Test {
     IJBOmnichainDeployer internal constant OMNI = IJBOmnichainDeployer(0xB853758A70a6b4216c09f1d071eA2344AbA0a34f);
     IJBController internal constant CONTROLLER = IJBController(0x3Fcec3572e84b624477BcfF4E2CF1f7dEAb648F1);
     IJBMultiTerminal internal constant TERMINAL = IJBMultiTerminal(0x130f5Dd2bD8805443Cf41755253D778a75a67f53);
+    IJBTerminal internal constant ROUTER_REGISTRY = IJBTerminal(0xe0427F250fdb0379c8E98e884Ee4570521208CbC);
     IJBTerminalStore internal constant STORE = IJBTerminalStore(0x7497ae014A60561925B51C0A3B4adE7460B9927C);
     IJBTokens internal constant TOKENS = IJBTokens(0x1f80d8f057eE36b4C2656D107E4e4558B71bA7D9);
     IJBProjects internal constant PROJECTS = IJBProjects(0x6017d1FBa9DC279BFA0B03fD931C22E242AB3691);
@@ -86,6 +87,7 @@ contract FairLunchCrossChain is Test {
             omnichainDeployer: OMNI,
             buybackRegistry: BUYBACK,
             terminal: TERMINAL,
+            routerTerminalRegistry: ROUTER_REGISTRY,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
             vestingDeployer: vestingDeployer,
@@ -96,6 +98,7 @@ contract FairLunchCrossChain is Test {
     function _config(bool mapNative) internal view returns (FairLunchConfig memory config) {
         config.name = "Sandwich";
         config.symbol = "SAND";
+        config.token = JBConstants.NATIVE_TOKEN;
         config.hostChainId = 8453;
         config.deadline = deadline;
         config.creator = creator;

@@ -34,6 +34,7 @@ contract Rehearse is Deploy {
             FairLunchConfig memory config;
             config.name = names[i];
             config.symbol = symbols[i];
+            config.token = JBConstants.NATIVE_TOKEN;
             config.hostChainId = uint64(block.chainid);
             config.deadline = deadlines[i];
             config.creator = msg.sender;
