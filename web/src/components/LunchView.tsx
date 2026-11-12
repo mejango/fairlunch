@@ -12,7 +12,7 @@ import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { readCopies, readHostOf, readLunch, readPoolFees, type Lunch } from '@/lib/fair-lunch/reads'
 import { PERCENT_TOTAL, splitOf, tokensFor } from '@/lib/fair-lunch/split'
-import { allowanceShortOf, allowTx, claimTx, payTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
+import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
 import { chainName, projectPath } from '@/lib/urn'
 
@@ -36,22 +36,22 @@ const amountOf = (text: string, decimals = 18): bigint => {
 const moneyText = (lunch: Pick<Lunch, 'money'>, amount: bigint) => `${formatEth(amount, lunch.money.decimals)} ${lunch.money.symbol}`
 
 /** How much of its money a wallet still has to let the terminal take before it can pay `amount`. Zero for ETH. */
-function useShort(lunch: Lunch, amount: bigint): bigint {
+function useShort(lunch: Lunch, amount: bigint, paying: Lunch['money'] = lunch.money): bigint {
   const { address } = useWallet()
   const { data } = useQuery({
-    queryKey: ['fair-lunch', 'allowance', lunch.chainId, lunch.money.address, address, amount.toString()],
-    queryFn: () => allowanceShortOf(lunch, address!, amount),
+    queryKey: ['fair-lunch', 'allowance', lunch.chainId, paying.address, address, amount.toString()],
+    queryFn: () => allowanceShortOf(lunch, address!, amount, paying),
     enabled: Boolean(address) && amount > 0n,
   })
   return data ?? 0n
 }
 
 /** The step before paying an ERC-20: letting the terminal take exactly what's about to be paid. */
-function Allow({ lunch, amount }: { lunch: Lunch; amount: bigint }) {
+function Allow({ lunch, amount, paying = lunch.money }: { lunch: Lunch; amount: bigint; paying?: Lunch['money'] }) {
   return (
-    <TxAction chainId={lunch.chainId} label={`Allow ${lunch.money.symbol}`} title={`Allow ${lunch.money.symbol}`} doneTitle="Allowed"
-      prepare={async () => ({ request: await allowTx(lunch, amount), rows: [
-        { label: 'Allows', value: `Paying ${moneyText(lunch, amount)} into ${lunch.name}`, strong: true },
+    <TxAction chainId={lunch.chainId} label={`Allow ${paying.symbol}`} title={`Allow ${paying.symbol}`} doneTitle="Allowed"
+      prepare={async () => ({ request: await allowTx(lunch, amount, paying), rows: [
+        { label: 'Allows', value: `Paying ${moneyText({ money: paying }, amount)} into ${lunch.name}`, strong: true },
         { label: 'Costs you', value: 'Network fee only' },
       ] })} />
   )
@@ -90,35 +90,41 @@ const UNISWAP_CHAIN: Record<number, string> = { 1: 'ethereum', 10: 'optimism', 8
 /** A wei amount as text for an input: six significant digits, no grouping. */
 const inputText = (wei: bigint, decimals = 18) => String(Number(Number(formatUnits(wei, decimals)).toPrecision(6)))
 
-function AmountInput({ label, value, onChange }: { label: string; value: string; onChange: (text: string) => void }) {
-  return (
-    <label className="field">
-      {label}
-      <input className="input text-xl" inputMode="decimal" placeholder="0.1" value={value} onChange={event => onChange(event.target.value)} />
-    </label>
-  )
-}
-
-/** While cooking: money in, tokens out at the fixed price. */
+/** While cooking: money in, tokens out at the fixed price. Another token is swapped into the money on the way in. */
 function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
   const [text, setText] = useState('')
-  const amount = amountOf(text, lunch.money.decimals)
+  const other = otherMoneyOf(lunch)
+  const [routed, setRouted] = useState(false)
+  const paying = routed && other ? other : lunch.money
+  const amount = amountOf(text, paying.decimals)
   const tokens = tokensFor(amount, lunch.money.decimals)
-  const short = useShort(lunch, amount)
+  const short = useShort(lunch, amount, paying)
   return (
     <section className="card space-y-3 p-4">
       {status}
-      <AmountInput label={lunch.money.symbol} value={text} onChange={setText} />
-      <p className="text-sm text-muted">You get {formatTokens(tokens)} {lunch.symbol}. No refunds.</p>
+      <label className="field">
+        Pay
+        <span className="flex gap-2">
+          <input className="input min-w-0 flex-1 text-xl" inputMode="decimal" placeholder="0.1" value={text} onChange={event => setText(event.target.value)} />
+          {other ? (
+            <select aria-label="Pay with" className="input select-caret w-auto" value={paying.symbol} onChange={event => setRouted(event.target.value === other.symbol)}>
+              <option>{lunch.money.symbol}</option>
+              <option>{other.symbol}</option>
+            </select>
+          ) : <span className="self-center font-semibold">{lunch.money.symbol}</span>}
+        </span>
+      </label>
+      <p className="text-sm text-muted">
+        {routed ? `Swapped to ${lunch.money.symbol} first, then 1M ${lunch.symbol} per ${lunch.money.symbol}. No refunds.` : `You get ${formatTokens(tokens)} ${lunch.symbol}. No refunds.`}
+      </p>
       <div className="flex flex-col items-end gap-2">
-        {short > 0n ? <Allow lunch={lunch} amount={short} /> : <TxAction chainId={lunch.chainId} label="Fund" title={`Fund ${lunch.name}`} doneTitle="Funded" onDone={() => setText('')}
+        {short > 0n ? <Allow lunch={lunch} amount={short} paying={paying} /> : <TxAction chainId={lunch.chainId} label="Fund" title={`Fund ${lunch.name}`} doneTitle="Funded" onDone={() => setText('')}
           prepare={async account => {
             if (amount === 0n) throw new Error('Enter an amount.')
-            return { request: await payTx(lunch, amount, account), rows: [
-              { label: 'You pay', value: moneyText(lunch, amount), strong: true },
-              { label: 'You get', value: `${formatTokens(tokens)} ${lunch.symbol}` },
-              { label: 'Refunds', value: 'None' },
-            ] }
+            const pay = { label: 'You pay', value: moneyText({ money: paying }, amount), strong: true }
+            if (!routed) return { request: await payTx(lunch, amount, account), rows: [pay, { label: 'You get', value: `${formatTokens(tokens)} ${lunch.symbol}` }, { label: 'Refunds', value: 'None' }] }
+            const { request, minimum } = await routedPayTx(lunch, paying, amount, account)
+            return { request, rows: [pay, { label: 'You get at least', value: `${formatTokens(minimum)} ${lunch.symbol}` }, { label: 'Refunds', value: 'None' }] }
           }} />}
       </div>
     </section>

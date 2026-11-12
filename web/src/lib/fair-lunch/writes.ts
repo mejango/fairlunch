@@ -1,4 +1,4 @@
-import { jbDirectoryAbi, jbMultiTerminalAbi, jbProjectsAbi, jbTerminalStoreAbi, MappableAsset, NATIVE_TOKEN, parseSuckerDeployerConfig, type JBChainId } from '@bananapus/nana-sdk-core'
+import { jbDirectoryAbi, jbMultiTerminalAbi, jbProjectsAbi, jbTerminalStoreAbi, MappableAsset, NATIVE_TOKEN, parseSuckerDeployerConfig, USDC_ADDRESSES, type JBChainId } from '@bananapus/nana-sdk-core'
 import { quoteUniswapV4ExactInputSingle } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { buildBridgeClaimTx, buildBuybackCashOutMetadata, buildBuybackPayMetadata, CCIP_SUCKER_TRANSPORT_VALUES, findSuckerTransportValue, type JBClaim } from '@bananapus/nana-sdk-core/v6'
 import { erc20Abi, isAddressEqual, pad, zeroHash, type Abi, type Address, type Hex } from 'viem'
@@ -79,20 +79,46 @@ const isEth = (money: Pick<Lunch['money'], 'address'>) => isAddressEqual(money.a
 const valueOf = (money: Lunch['money'], amount: bigint) => (isEth(money) ? amount : 0n)
 
 /**
- * How much more of a lunch's money the terminal has to be allowed to take before `account` can pay `amount`. Zero for
- * ETH, and once the allowance covers it.
+ * How much more of a token its taker has to be allowed before `account` can pay `amount`: the terminal for a lunch's
+ * own money, the router terminal for anything else. Zero for ETH, and once the allowance covers it.
  */
-export async function allowanceShortOf(lunch: Pick<Lunch, 'chainId' | 'money'>, account: Address, amount: bigint): Promise<bigint> {
-  if (isEth(lunch.money) || amount === 0n) return 0n
-  const { terminal } = await wiringOn(lunch.chainId)
-  const allowed = await jbCenterPublicClient(lunch.chainId).readContract({ address: lunch.money.address, abi: erc20Abi, functionName: 'allowance', args: [account, terminal] })
+export async function allowanceShortOf(lunch: Pick<Lunch, 'chainId' | 'money'>, account: Address, amount: bigint, paying: Lunch['money'] = lunch.money): Promise<bigint> {
+  if (isEth(paying) || amount === 0n) return 0n
+  const allowed = await jbCenterPublicClient(lunch.chainId).readContract({ address: paying.address, abi: erc20Abi, functionName: 'allowance', args: [account, await takerOf(lunch, paying)] })
   return allowed >= amount ? 0n : amount
 }
 
-/** Allowing the terminal to take exactly `amount` of a lunch's money. */
-export async function allowTx(lunch: Pick<Lunch, 'chainId' | 'money'>, amount: bigint): Promise<TxRequest> {
-  const { terminal } = await wiringOn(lunch.chainId)
-  return { chainId: lunch.chainId, address: lunch.money.address, abi: erc20Abi as Abi, functionName: 'approve', args: [terminal, amount], label: `Allow ${lunch.money.symbol}` }
+/** Allowing exactly `amount` of a token to be taken for a payment. */
+export async function allowTx(lunch: Pick<Lunch, 'chainId' | 'money'>, amount: bigint, paying: Lunch['money'] = lunch.money): Promise<TxRequest> {
+  return { chainId: lunch.chainId, address: paying.address, abi: erc20Abi as Abi, functionName: 'approve', args: [await takerOf(lunch, paying), amount], label: `Allow ${paying.symbol}` }
+}
+
+/** Who pulls a token when a lunch is paid with it. */
+async function takerOf(lunch: Pick<Lunch, 'chainId' | 'money'>, paying: Lunch['money']): Promise<Address> {
+  const { terminal, router } = await wiringOn(lunch.chainId)
+  return isAddressEqual(paying.address, lunch.money.address) ? terminal : router
+}
+
+/** The other token a cooking lunch can be paid in through the router terminal: USDC for an ETH lunch, ETH for the
+ * rest. ponytail: one alternative. A token picker when people ask to pay in more. */
+export function otherMoneyOf(lunch: Pick<Lunch, 'chainId' | 'money'>): Lunch['money'] | null {
+  if (!isEth(lunch.money)) return { address: NATIVE_TOKEN as Address, symbol: 'ETH', decimals: 18 }
+  const usdc = USDC_ADDRESSES[lunch.chainId as JBChainId]
+  return usdc ? { address: usdc, symbol: 'USDC', decimals: 6 } : null
+}
+
+/**
+ * A payment into a cooking lunch in another token. The router terminal swaps it into the lunch's money and pays that
+ * in. The call is tried against the chain as it is now, and refuses to land for less than 99% of the tokens that got.
+ */
+export async function routedPayTx(lunch: Pick<Lunch, 'chainId' | 'projectId' | 'money'>, paying: Lunch['money'], amount: bigint, payer: Address): Promise<{ request: TxRequest; minimum: bigint }> {
+  const { router } = await wiringOn(lunch.chainId)
+  const call = { address: router, abi: jbMultiTerminalAbi, functionName: 'pay', value: valueOf(paying, amount) } as const
+  const args = (minimum: bigint) => [BigInt(lunch.projectId), paying.address, amount, payer, minimum, '', '0x'] as const
+  const { result } = await jbCenterPublicClient(lunch.chainId).simulateContract({ ...call, args: args(0n), account: payer })
+  if (result === 0n) throw new Error(`No ${lunch.money.symbol} for that right now.`)
+  const minimum = (result * 99n) / 100n
+  return { request: { chainId: lunch.chainId, ...call, abi: jbMultiTerminalAbi as Abi, args: args(minimum), label: 'Fund' }, minimum }
 }
 
 /** One of the calls anyone can make for a lunch on its host chain. One that would do nothing is refused: a collect
