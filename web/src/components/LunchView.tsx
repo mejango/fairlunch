@@ -272,7 +272,7 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
       <h2 className="text-3xl font-bold sm:text-4xl">{PHASE_LABEL[phase]}</h2>
       {timer ? <p className="mt-1 text-xl tabular-nums text-muted">{timer}</p> : null}
       {phase === 'cooking' && lunch.deadline > lunch.startedAt ? (
-        <progress className="mt-2 block h-2 w-full" aria-label="Time gone of the fundraise"
+        <progress className="progress-time mt-2 block h-2 w-full" aria-label="Time gone of the fundraise"
           max={lunch.deadline - lunch.startedAt} value={Math.max(0, now - lunch.startedAt)} />
       ) : null}
     </div>

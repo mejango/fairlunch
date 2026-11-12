@@ -360,3 +360,19 @@
     animation: none;
   }
 }
+
+/* Native progress bars: a pale track the color of the card's border, a rounded fill. Green by default, blue for
+   time (`progress-time`). */
+progress {
+  appearance: none;
+  -webkit-appearance: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9999px;
+  background: theme('colors.line');
+  color: #2e7d32;
+}
+progress::-webkit-progress-bar { background: theme('colors.line'); }
+progress::-webkit-progress-value { background: currentColor; border-radius: 9999px; }
+progress::-moz-progress-bar { background: currentColor; border-radius: 9999px; }
+progress.progress-time { color: #2f6fed; }
