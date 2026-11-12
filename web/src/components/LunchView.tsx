@@ -153,8 +153,7 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
     </label>
   )
   return (
-    <section className="card space-y-3 p-4">
-      <h2 className="text-lg font-bold">🍴 Swap</h2>
+    <section className="card space-y-3 p-4" aria-label="Swap">
       <div>
         {side('pay', 'Sell', from)}
         <button type="button" aria-label="Switch direction" onClick={() => { setSelling(!selling); setTyped({ side: 'pay', text: '' }) }}
