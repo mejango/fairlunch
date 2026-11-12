@@ -45,6 +45,20 @@ contract Rehearse is Deploy {
             uint256 id = lunch.createFor{value: fee}(config);
             terminal.pay{value: raises[i]}(id, JBConstants.NATIVE_TOKEN, raises[i], msg.sender, 0, "", "");
         }
+
+        // And one that raises USDC, left for the caller to pay.
+        FairLunchConfig memory usdc;
+        usdc.name = "Taco";
+        usdc.symbol = "TACO";
+        usdc.token = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+        usdc.hostChainId = uint64(block.chainid);
+        usdc.deadline = uint48(block.timestamp + 7 days);
+        usdc.creator = msg.sender;
+        usdc.keepPercent = JBConstants.SPLITS_TOTAL_PERCENT / 5;
+        usdc.keepCap = 2000e6;
+        usdc.tokenPercent = JBConstants.SPLITS_TOTAL_PERCENT / 10;
+        usdc.vestingDuration = 52 weeks;
+        lunch.createFor{value: fee}(usdc);
         vm.stopBroadcast();
     }
 }

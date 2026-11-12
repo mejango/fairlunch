@@ -52,7 +52,7 @@ export function PriceChart({ lunch, burns }: { lunch: Lunch; burns: readonly Bur
     <section>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className={`text-sm font-semibold ${up ? 'text-[#2e7d32]' : 'text-err'}`}>
-          {formatChange(change)} <span className="font-normal text-muted">{hover === null ? `past ${range[0] === 'All' ? 'all time' : range[0]}` : `${formatPrice(shown.price)} ETH, ${clock(shown.time, true)}`}</span>
+          {formatChange(change)} <span className="font-normal text-muted">{hover === null ? `past ${range[0] === 'All' ? 'all time' : range[0]}` : `${formatPrice(shown.price)} ${lunch.money.symbol}, ${clock(shown.time, true)}`}</span>
         </div>
         <div className="flex gap-1" role="group" aria-label="Chart range">
           {RANGES.map(option => (
@@ -63,7 +63,7 @@ export function PriceChart({ lunch, burns }: { lunch: Lunch; burns: readonly Bur
           ))}
         </div>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full touch-none select-none" role="img" aria-label={`${lunch.symbol} price in ETH`}
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full touch-none select-none" role="img" aria-label={`${lunch.symbol} price in ${lunch.money.symbol}`}
         onPointerMove={event => {
           const box = event.currentTarget.getBoundingClientRect()
           const time = start + ((event.clientX - box.left) / box.width) * (end - start)

@@ -19,6 +19,11 @@ export const fairLunchAbi = [
         "internalType": "contract IJBMultiTerminal"
       },
       {
+        "name": "routerTerminalRegistry",
+        "type": "address",
+        "internalType": "contract IJBTerminal"
+      },
+      {
         "name": "suckerRegistry",
         "type": "address",
         "internalType": "contract IJBSuckerRegistry"
@@ -138,13 +143,13 @@ export const fairLunchAbi = [
   },
   {
     "type": "function",
-    "name": "PERMIT2",
+    "name": "POOL",
     "inputs": [],
     "outputs": [
       {
         "name": "",
         "type": "address",
-        "internalType": "contract IAllowanceTransfer"
+        "internalType": "contract FairLunchPool"
       }
     ],
     "stateMutability": "view"
@@ -164,26 +169,13 @@ export const fairLunchAbi = [
   },
   {
     "type": "function",
-    "name": "POOL_MANAGER",
+    "name": "ROUTER_TERMINAL_REGISTRY",
     "inputs": [],
     "outputs": [
       {
         "name": "",
         "type": "address",
-        "internalType": "contract IPoolManager"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "POSITION_MANAGER",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IPositionManager"
+        "internalType": "contract IJBTerminal"
       }
     ],
     "stateMutability": "view"
@@ -242,7 +234,7 @@ export const fairLunchAbi = [
   },
   {
     "type": "function",
-    "name": "TOKENS_PER_ETH",
+    "name": "TOKENS_PER_UNIT",
     "inputs": [],
     "outputs": [
       {
@@ -333,7 +325,7 @@ export const fairLunchAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "ethPaid",
+        "name": "paid",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -368,6 +360,11 @@ export const fairLunchAbi = [
             "name": "hostChainId",
             "type": "uint64",
             "internalType": "uint64"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
           },
           {
             "name": "deadline",
@@ -601,6 +598,11 @@ export const fairLunchAbi = [
             "internalType": "uint64"
           },
           {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
             "name": "deadline",
             "type": "uint48",
             "internalType": "uint48"
@@ -708,25 +710,6 @@ export const fairLunchAbi = [
     "stateMutability": "view"
   },
   {
-    "type": "function",
-    "name": "unlockCallback",
-    "inputs": [
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "stateMutability": "nonpayable"
-  },
-  {
     "type": "event",
     "name": "Burn",
     "inputs": [
@@ -774,7 +757,7 @@ export const fairLunchAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "ethPaid",
+        "name": "paid",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -873,7 +856,7 @@ export const fairLunchAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "poolEth",
+        "name": "poolAmount",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
@@ -953,17 +936,6 @@ export const fairLunchAbi = [
       },
       {
         "name": "hostChainId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "FairLunch_NoLiquidity",
-    "inputs": [
-      {
-        "name": "projectId",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -1091,22 +1063,6 @@ export const fairLunchAbi = [
     "type": "error",
     "name": "ReentrancyGuardReentrantCall",
     "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "SafeCastOverflowedUintDowncast",
-    "inputs": [
-      {
-        "name": "bits",
-        "type": "uint8",
-        "internalType": "uint8"
-      },
-      {
-        "name": "value",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
   },
   {
     "type": "error",

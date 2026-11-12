@@ -3,8 +3,8 @@ import { formatUnits } from 'viem'
 const number = (digits: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: digits })
 
 /** "1.2345" from wei: four decimals, fewer for big amounts, never scientific. */
-export function formatEth(wei: bigint): string {
-  const value = Number(formatUnits(wei, 18))
+export function formatEth(wei: bigint, decimals = 18): string {
+  const value = Number(formatUnits(wei, decimals))
   if (value !== 0 && value < 0.0001) return '<0.0001'
   return number(value >= 1000 ? 0 : value >= 10 ? 2 : 4).format(value)
 }

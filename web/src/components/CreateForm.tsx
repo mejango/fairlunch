@@ -4,13 +4,15 @@ import { JBCenterClient } from '@bananapus/nana-sdk-core/jbcenter'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type FormEvent } from 'react'
-import { getAddress, isAddress, isAddressEqual, parseEther, parseEventLogs, toHex, zeroAddress, type Hex } from 'viem'
+import { NATIVE_TOKEN, USDC_ADDRESSES, type JBChainId } from '@bananapus/nana-sdk-core'
+import { formatUnits, getAddress, isAddress, isAddressEqual, parseEventLogs, parseUnits, toHex, zeroAddress, type Address, type Hex, type PublicClient } from 'viem'
 import { TxAction } from '@/components/TxAction'
 import { TxError } from '@/components/ui/TxError'
 import { useWallet } from '@/hooks/useWallet'
 import { environmentForChainIds, PRODUCTION_CHAINS, TESTNET_CHAINS } from '@/lib/chains'
 import { fairLunchAbi } from '@/lib/fair-lunch/abi'
 import { deploymentOn } from '@/lib/fair-lunch/deployments'
+import { readMoney } from '@/lib/fair-lunch/reads'
 import { createTx, madeOn, type LunchTerms } from '@/lib/fair-lunch/writes'
 import { jbCenterBaseUrl } from '@/lib/jbcenter-config'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
@@ -39,6 +41,7 @@ export function CreateForm() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [hostId, setHostId] = useState<number>(CHAINS[0]?.id ?? 0)
+  const [raiseIn, setRaiseIn] = useState<'ETH' | 'USDC' | 'other'>('ETH')
   const [made, setMade] = useState<Record<number, Hex | null>>({})
   const [hostPath, setHostPath] = useState<string | null>(null)
 
@@ -46,7 +49,8 @@ export function CreateForm() {
   const [restored, setRestored] = useState(false)
   useEffect(() => {
     const attempt = loadAttempt()
-    if (attempt) { setTerms(attempt.terms); setMade(attempt.made); setHostPath(attempt.hostPath) }
+    // An attempt saved before lunches could raise other tokens can't be finished as it was.
+    if (attempt?.terms.tokenOn) { setTerms(attempt.terms); setMade(attempt.made); setHostPath(attempt.hostPath) }
     setRestored(true)
   }, [])
   useEffect(() => {
@@ -80,8 +84,15 @@ export function CreateForm() {
     const form = new FormData(event.currentTarget)
     const text = (name: string) => String(form.get(name) ?? '').trim()
     const days = whole(text('days'), 1, 365), keep = whole(text('keep'), 0, 50), share = whole(text('share'), 0, 50)
-    let cap: bigint
-    try { cap = parseEther(text('cap') || '0') } catch { return setError('Enter the most ETH to keep as a number.') }
+    const otherChainIds = others.filter(chain => form.get(`also-${chain.id}`)).map(chain => chain.id)
+    const chainIds = [hostId, ...otherChainIds]
+    // ETH and USDC have a known address on every chain. Any other token is only known where the creator names it.
+    const custom = text('money')
+    if (raiseIn === 'other' && (!isAddress(custom) || isAddressEqual(custom, zeroAddress))) return setError('Enter the token to raise as 0x and 40 characters.')
+    if (raiseIn === 'other' && otherChainIds.length) return setError('Raise ETH or USDC to accept payments on other chains.')
+    const tokenOn = Object.fromEntries(chainIds.map(chainId => [chainId,
+      raiseIn === 'ETH' ? NATIVE_TOKEN as Address : raiseIn === 'USDC' ? USDC_ADDRESSES[chainId as JBChainId] : getAddress(custom)]))
+    if (chainIds.some(chainId => !tokenOn[chainId])) return setError('USDC isn’t on one of those chains.')
     if (!text('name') || !text('symbol')) return setError('Give it a name and a ticker.')
     if (days === null) return setError('Raise for 1 to 365 days.')
     if (keep === null || share === null) return setError('Keep 0 to 50 percent.')
@@ -91,13 +102,17 @@ export function CreateForm() {
     setError(null)
     setBusy(true)
     try {
+      let money: { symbol: string; decimals: number }
+      try { money = await readMoney(jbCenterPublicClient(hostId) as PublicClient, tokenOn[hostId]) } catch { return setError('That token couldn’t be read on this chain.') }
+      let cap: bigint
+      try { cap = parseUnits(text('cap') || '0', money.decimals) } catch { return setError(`Enter the most ${money.symbol} to keep as a number.`) }
       const center = new JBCenterClient({ baseUrl: jbCenterBaseUrl() })
       const logo = form.get('logo')
       const logoUri = logo instanceof File && logo.size ? (await center.pinImage(logo, { filename: logo.name })).uri : undefined
       const { uri } = await center.pinJson({ name: text('name'), ...(logoUri ? { logoUri } : {}) })
       setTerms({
         name: text('name'), symbol: text('symbol').toUpperCase(), projectUri: uri,
-        hostChainId: hostId, otherChainIds: others.filter(chain => form.get(`also-${chain.id}`)).map(chain => chain.id),
+        hostChainId: hostId, otherChainIds, tokenOn, money: { symbol: money.symbol, decimals: money.decimals },
         deadline: Math.floor(Date.now() / 1000) + days * 86_400, sender: address, creator: getAddress(payout),
         keepPercent: keep, keepCapWei: cap, tokenPercent: share, vestingSeconds: Number(text('vesting')) * WEEK,
         salt: toHex(crypto.getRandomValues(new Uint8Array(32))),
@@ -127,7 +142,7 @@ export function CreateForm() {
                     return { request: await createTx(terms, chainId), rows: [
                       { label: 'Token', value: `${terms.name} (${terms.symbol})` },
                       { label: 'Raise ends', value: new Date(terms.deadline * 1000).toLocaleString() },
-                      { label: 'You keep', value: `${terms.keepPercent}% of the raise, up to ${text18(terms.keepCapWei)} ETH, before the 2.5% fee` },
+                      { label: 'You keep', value: `${terms.keepPercent}% of the raise, up to ${formatUnits(terms.keepCapWei, terms.money.decimals)} ${terms.money.symbol}, before the 2.5% fee` },
                       { label: 'Your tokens', value: `${terms.tokenPercent}% over ${terms.vestingSeconds / WEEK} weeks` },
                       { label: 'Paid to', value: isAddressEqual(terms.creator, account) ? 'This wallet' : terms.creator },
                       { label: 'Can change later', value: 'Nothing', strong: true },
@@ -177,6 +192,20 @@ export function CreateForm() {
         </label>
         <label className="field">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
       </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="field">🥫 Raise in
+          <select className="input select-caret" value={raiseIn} onChange={event => setRaiseIn(event.target.value as typeof raiseIn)}>
+            <option value="ETH">ETH</option>
+            <option value="USDC">USDC</option>
+            <option value="other">Another token</option>
+          </select>
+        </label>
+        {raiseIn === 'other' ? (
+          <label className="field">Token address
+            <input name="money" className="input font-mono text-sm" placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
+          </label>
+        ) : null}
+      </div>
       {others.length ? (
         <fieldset className="text-sm">
           <legend className="font-semibold">🥗 Also accept payments and bridge from</legend>
@@ -187,7 +216,7 @@ export function CreateForm() {
       ) : null}
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">🧀 You keep, % of the raise<input name="keep" className="input" inputMode="numeric" defaultValue="10" required /></label>
-        <label className="field">🧈 But no more than, ETH<input name="cap" className="input" inputMode="decimal" defaultValue="10" required /></label>
+        <label className="field">🧈 But no more than, {raiseIn === 'other' ? 'tokens' : raiseIn}<input name="cap" className="input" inputMode="decimal" defaultValue="10" required /></label>
         <label className="field">🥬 Your tokens, % of supply<input name="share" className="input" inputMode="numeric" defaultValue="10" required /></label>
         <label className="field">🥒 Unlocking over
           <select name="vesting" className="input select-caret" defaultValue="52">
@@ -205,7 +234,6 @@ export function CreateForm() {
   )
 }
 
-const text18 = (wei: bigint) => (Number(wei) / 1e18).toString()
 
 /** A create in progress, kept in this browser: a lunch's chains only pair if every one gets these exact terms, so a
  * reload between chains must not make new ones. */

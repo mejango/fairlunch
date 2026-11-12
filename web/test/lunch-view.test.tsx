@@ -20,11 +20,12 @@ const lunch = (over: Partial<Lunch>): Lunch => ({
   keepPercent: 200_000_000n, keepCap: ETH, tokenPercent: 100_000_000n, vestingDuration: 52 * 604800, vestingWallet: '0x0000000000000000000000000000000000000002',
   token: '0x0000000000000000000000000000000000000003', name: 'Sandwich', symbol: 'SAND', uri: '', balance: 3n * ETH, supply: 3_000_000n * ETH,
   poolKey: { currency0: '0x0000000000000000000000000000000000000000', currency1: '0x0000000000000000000000000000000000000003', fee: 10000, tickSpacing: 200, hooks: '0x0000000000000000000000000000000000000004' },
-  price: null, pooledEth: null, ...over,
+  money: { address: '0x000000000000000000000000000000000000EEEe', symbol: 'ETH', decimals: 18 }, moneyIs0: true,
+  price: null, pooled: null, ...over,
 })
 
 let root: Root | null = null
-async function show(found: Lunch | null, copies: Copy[] = [], fees = { tokens: 5n * ETH, eth: ETH / 100n }): Promise<string> {
+async function show(found: Lunch | null, copies: Copy[] = [], fees = { tokens: 5n * ETH, money: ETH / 100n }): Promise<string> {
   vi.spyOn(Date, 'now').mockReturnValue(NOW * 1000)
   reads.readLunch.mockResolvedValue(found)
   reads.readCopies.mockResolvedValue(copies)
@@ -87,12 +88,12 @@ describe('LunchView', () => {
   })
 
   it('hides Burn and Collect when there is nothing for them to move', async () => {
-    await show(lunch({ deadline: NOW - 9000, servedAt: NOW - 7200, price: 0.000001, balance: 0n }), [], { tokens: 0n, eth: 0n })
+    await show(lunch({ deadline: NOW - 9000, servedAt: NOW - 7200, price: 0.000001, balance: 0n }), [], { tokens: 0n, money: 0n })
     expect(buttons()).toEqual(['↓', 'Buy SAND'])
   })
 
   it('lists other chains with only the buttons that have something to move', async () => {
-    const copy = (over: Partial<Copy>): Copy => ({ chainId: 10, projectId: 3, balance: 0n, onTheWay: 0n, hostSucker: '0x0000000000000000000000000000000000000005', claims: [], ...over })
+    const copy = (over: Partial<Copy>): Copy => ({ chainId: 10, projectId: 3, money: { address: '0x000000000000000000000000000000000000EEEe', symbol: 'ETH', decimals: 18 }, balance: 0n, onTheWay: 0n, hostSucker: '0x0000000000000000000000000000000000000005', claims: [], ...over })
     const claim = { token: '0x000000000000000000000000000000000000EEEe', proof: [], leaf: { index: 0n, beneficiary: '0x', projectTokenCount: 1n, terminalTokenAmount: ETH / 10n, metadata: '0x' } } as unknown as Copy['claims'][number]
     const text = await show(lunch({}), [
       copy({ balance: ETH / 2n, onTheWay: ETH / 5n }),

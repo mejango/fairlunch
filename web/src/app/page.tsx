@@ -29,7 +29,7 @@ export default async function Home() {
             return (
               <li key={`${lunch.chainId}:${lunch.projectId}`}>
                 <Link href={projectPath(lunch.chainId, lunch.projectId)} className="card block p-4 hover:border-ink">
-                  <Card name={lunch.name ?? `Lunch ${lunch.projectId}`} chainId={lunch.chainId} status={statusOf(lunch, paidIn, now)} {...figureOf(lunch.price, `${formatEth(paidIn)} ETH`)}
+                  <Card name={lunch.name ?? `Lunch ${lunch.projectId}`} chainId={lunch.chainId} status={statusOf(lunch, paidIn, now)} {...figureOf(lunch.price, `${formatEth(paidIn, lunch.money.decimals)} ${lunch.money.symbol}`, lunch.money.symbol)}
                     logo={logo ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={logo} alt="" className="h-12 w-12 rounded-lg border border-line object-cover" />
@@ -68,10 +68,10 @@ function statusOf(lunch: { deadline: number; servedAt: number }, raised: bigint,
 }
 
 /** A card's number: the market price and how far it is from the fundraise's once there's a pool, the raise before. */
-function figureOf(price: number | null, raised: string): { figure: ReactNode; note: string } {
+function figureOf(price: number | null, raised: string, symbol = 'ETH'): { figure: ReactNode; note: string } {
   if (price === null) return { figure: raised, note: 'raised' }
   const change = price / RAISE_PRICE - 1
-  return { figure: <span className={change >= 0 ? 'text-[#2e7d32]' : 'text-accent'}>{formatChange(change)}</span>, note: `${formatPrice(price)} ETH` }
+  return { figure: <span className={change >= 0 ? 'text-[#2e7d32]' : 'text-accent'}>{formatChange(change)}</span>, note: `${formatPrice(price)} ${symbol}` }
 }
 
 function Card({ logo, name, chainId, status, figure, note }: { logo: ReactNode; name: string; chainId: number; status: string; figure: ReactNode; note: string }) {

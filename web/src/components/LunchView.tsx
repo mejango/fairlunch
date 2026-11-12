@@ -2,7 +2,8 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
-import { formatUnits, parseEther } from 'viem'
+import { formatUnits, parseUnits } from 'viem'
+import { useWallet } from '@/hooks/useWallet'
 import { ChainIcon } from '@/components/ChainIcon'
 import { PriceChart, type Burn } from '@/components/PriceChart'
 import { TxAction } from '@/components/TxAction'
@@ -10,8 +11,8 @@ import { assetUrl, formatEth, formatPrice, formatTokens } from '@/lib/format'
 import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib/fair-lunch/phase'
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { readCopies, readHostOf, readLunch, readPoolFees, type Lunch } from '@/lib/fair-lunch/reads'
-import { PERCENT_TOTAL, splitOf, TOKENS_PER_ETH } from '@/lib/fair-lunch/split'
-import { claimTx, payTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
+import { PERCENT_TOTAL, splitOf, tokensFor } from '@/lib/fair-lunch/split'
+import { allowanceShortOf, allowTx, claimTx, payTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
 import { chainName, projectPath } from '@/lib/urn'
 
@@ -27,8 +28,33 @@ function useNow(): number {
   return now
 }
 
-const amountOf = (text: string): bigint => {
-  try { return parseEther(text.trim() || '0') } catch { return 0n }
+const amountOf = (text: string, decimals = 18): bigint => {
+  try { return parseUnits(text.trim() || '0', decimals) } catch { return 0n }
+}
+
+/** An amount of a lunch's money, with its symbol. */
+const moneyText = (lunch: Pick<Lunch, 'money'>, amount: bigint) => `${formatEth(amount, lunch.money.decimals)} ${lunch.money.symbol}`
+
+/** How much of its money a wallet still has to let the terminal take before it can pay `amount`. Zero for ETH. */
+function useShort(lunch: Lunch, amount: bigint): bigint {
+  const { address } = useWallet()
+  const { data } = useQuery({
+    queryKey: ['fair-lunch', 'allowance', lunch.chainId, lunch.money.address, address, amount.toString()],
+    queryFn: () => allowanceShortOf(lunch, address!, amount),
+    enabled: Boolean(address) && amount > 0n,
+  })
+  return data ?? 0n
+}
+
+/** The step before paying an ERC-20: letting the terminal take exactly what's about to be paid. */
+function Allow({ lunch, amount }: { lunch: Lunch; amount: bigint }) {
+  return (
+    <TxAction chainId={lunch.chainId} label={`Allow ${lunch.money.symbol}`} title={`Allow ${lunch.money.symbol}`} doneTitle="Allowed"
+      prepare={async () => ({ request: await allowTx(lunch, amount), rows: [
+        { label: 'Allows', value: `Paying ${moneyText(lunch, amount)} into ${lunch.name}`, strong: true },
+        { label: 'Costs you', value: 'Network fee only' },
+      ] })} />
+  )
 }
 
 function Stat({ label, value, action }: { label: ReactNode; value: string; action?: ReactNode }) {
@@ -62,9 +88,9 @@ const Swatch = ({ color }: { color: string }) => <span aria-hidden className="mr
 const UNISWAP_CHAIN: Record<number, string> = { 1: 'ethereum', 10: 'optimism', 8453: 'base', 42161: 'arbitrum' }
 
 /** A wei amount as text for an input: six significant digits, no grouping. */
-const inputText = (wei: bigint) => String(Number(Number(formatUnits(wei, 18)).toPrecision(6)))
+const inputText = (wei: bigint, decimals = 18) => String(Number(Number(formatUnits(wei, decimals)).toPrecision(6)))
 
-function AmountInput({ label = 'ETH', value, onChange }: { label?: string; value: string; onChange: (text: string) => void }) {
+function AmountInput({ label, value, onChange }: { label: string; value: string; onChange: (text: string) => void }) {
   return (
     <label className="field">
       {label}
@@ -73,25 +99,27 @@ function AmountInput({ label = 'ETH', value, onChange }: { label?: string; value
   )
 }
 
-/** While cooking: ETH in, tokens out at the fixed price. */
+/** While cooking: money in, tokens out at the fixed price. */
 function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
   const [text, setText] = useState('')
-  const amount = amountOf(text)
+  const amount = amountOf(text, lunch.money.decimals)
+  const tokens = tokensFor(amount, lunch.money.decimals)
+  const short = useShort(lunch, amount)
   return (
     <section className="card space-y-3 p-4">
       {status}
-      <AmountInput value={text} onChange={setText} />
-      <p className="text-sm text-muted">You get {formatTokens(amount * TOKENS_PER_ETH)} {lunch.symbol}. No refunds.</p>
+      <AmountInput label={lunch.money.symbol} value={text} onChange={setText} />
+      <p className="text-sm text-muted">You get {formatTokens(tokens)} {lunch.symbol}. No refunds.</p>
       <div className="flex flex-col items-end gap-2">
-        <TxAction chainId={lunch.chainId} label="Fund" title={`Fund ${lunch.name}`} doneTitle="Funded" onDone={() => setText('')}
+        {short > 0n ? <Allow lunch={lunch} amount={short} /> : <TxAction chainId={lunch.chainId} label="Fund" title={`Fund ${lunch.name}`} doneTitle="Funded" onDone={() => setText('')}
           prepare={async account => {
             if (amount === 0n) throw new Error('Enter an amount.')
             return { request: await payTx(lunch, amount, account), rows: [
-              { label: 'You pay', value: `${formatEth(amount)} ETH`, strong: true },
-              { label: 'You get', value: `${formatTokens(amount * TOKENS_PER_ETH)} ${lunch.symbol}` },
+              { label: 'You pay', value: moneyText(lunch, amount), strong: true },
+              { label: 'You get', value: `${formatTokens(tokens)} ${lunch.symbol}` },
               { label: 'Refunds', value: 'None' },
             ] }
-          }} />
+          }} />}
       </div>
     </section>
   )
@@ -102,9 +130,12 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
   const [selling, setSelling] = useState(false)
   // Which side was typed: what's paid, or what's wanted.
   const [typed, setTyped] = useState<{ side: 'pay' | 'get'; text: string }>({ side: 'pay', text: '' })
-  const amount = amountOf(typed.text)
-  const [from, to] = selling ? [lunch.symbol, 'ETH'] : ['ETH', lunch.symbol]
-  const format = (wei: bigint, unit: string) => `${unit === 'ETH' ? formatEth(wei) : formatTokens(wei)} ${unit}`
+  const money = lunch.money.symbol
+  // What's paid is the token when selling and money when buying. What's got is the other.
+  const decimalsOf = (side: 'pay' | 'get') => ((side === 'pay') === selling ? 18 : lunch.money.decimals)
+  const amount = amountOf(typed.text, decimalsOf(typed.side))
+  const [from, to] = selling ? [lunch.symbol, money] : [money, lunch.symbol]
+  const format = (wei: bigint, side: 'pay' | 'get') => ((side === 'pay') === selling ? `${formatTokens(wei)} ${lunch.symbol}` : moneyText(lunch, wei))
   const quote = useQuery({
     queryKey: ['fair-lunch', 'quote', lunch.chainId, lunch.projectId, selling, typed.side, amount.toString()],
     queryFn: async () => typed.side === 'pay'
@@ -113,7 +144,10 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
     enabled: amount > 0n,
     refetchInterval: 15_000,
   })
-  const other = (side: 'pay' | 'get') => (amount > 0n && quote.data ? inputText(quote.data[side]) : '')
+  const other = (side: 'pay' | 'get') => (amount > 0n && quote.data ? inputText(quote.data[side], decimalsOf(side)) : '')
+  // A buy sized by what it gets may need a little more money than the quote by the time it lands.
+  const paying = selling ? 0n : typed.side === 'pay' ? amount : ((quote.data?.pay ?? 0n) * 101n) / 100n
+  const short = useShort(lunch, paying)
   const verb = `${selling ? 'Sell' : 'Buy'} ${lunch.symbol}`
   const side = (which: 'pay' | 'get', label: string, unit: string) => (
     <label className="block rounded-xl border border-line p-3 focus-within:border-ink">
@@ -136,17 +170,17 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
       </div>
       {amount > 0n && !quote.data ? <p className="text-sm text-muted">{quote.isError ? 'No quote right now.' : 'Getting a quote…'}</p> : null}
       <div className="flex flex-col items-end gap-2">
-        <TxAction chainId={lunch.chainId} label={verb} title={verb} doneTitle="Done" onDone={() => setTyped({ side: 'pay', text: '' })}
+        {short > 0n ? <Allow lunch={lunch} amount={short} /> : <TxAction chainId={lunch.chainId} label={verb} title={verb} doneTitle="Done" onDone={() => setTyped({ side: 'pay', text: '' })}
           prepare={async account => {
             if (amount === 0n) throw new Error('Enter an amount.')
             const pay = typed.side === 'pay' ? amount : await quoteSwapFor(lunch, amount, selling)
             const out = await quoteSwap(lunch, pay, selling)
             const minimum = out - (out * SLIPPAGE_BPS) / 10_000n
             return { request: await tradeTx(lunch, pay, minimum, account, selling), rows: [
-              { label: 'You pay', value: format(pay, from), strong: true },
-              { label: 'You get at least', value: format(minimum, to) },
+              { label: 'You pay', value: format(pay, 'pay'), strong: true },
+              { label: 'You get at least', value: format(minimum, 'get') },
             ] }
-          }} />
+          }} />}
       </div>
     </section>
   )
@@ -170,17 +204,17 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
   return (
     <>
       <dl className="divide-y divide-line">
-        <Row label="Current price" value={lunch.price ? `${formatPrice(lunch.price)} ETH` : '…'} />
+        <Row label="Current price" value={lunch.price ? `${formatPrice(lunch.price)} ${lunch.money.symbol}` : '…'} />
         <Row label="Supply" value={formatTokens(lunch.supply)} />
-        <Row label="Waiting to buy and burn" value={`${formatEth(lunch.balance)} ETH`} action={phase === 'eating' && lunch.balance > 0n ? (
+        <Row label="Waiting to buy and burn" value={moneyText(lunch, lunch.balance)} action={phase === 'eating' && lunch.balance > 0n ? (
           <TxAction chainId={lunch.chainId} className={SMALL} label="🔥 Buy and burn" title="Buy and burn" doneTitle="Burned"
             prepare={upkeep(lunch, 'burn', `Buys ${lunch.symbol} from the pool and burns it`)} />
         ) : null} />
         <Row label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
-        <Row label="🔒 In the pool" value={lunch.pooledEth === null ? '…' : `${formatEth(lunch.pooledEth)} ETH`} />
-        <Row label="🧾 Pool fees" value={fees ? `${formatEth(fees.eth)} ETH\n${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} action={fees && (fees.eth > 0n || fees.tokens > 0n) ? (
+        <Row label="🔒 In the pool" value={lunch.pooled === null ? '…' : moneyText(lunch, lunch.pooled)} />
+        <Row label="🧾 Pool fees" value={fees ? `${moneyText(lunch, fees.money)}\n${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} action={fees && (fees.money > 0n || fees.tokens > 0n) ? (
           <TxAction chainId={lunch.chainId} className={SMALL} label="Collect" title="Collect pool fees" doneTitle="Collected"
-            prepare={upkeep(lunch, 'collect', `Burns the pool's ${lunch.symbol} fees, pays its ETH fees into JBP6 for the creator`)} />
+            prepare={upkeep(lunch, 'collect', `Burns the pool's ${lunch.symbol} fees, pays its ${lunch.money.symbol} fees into JBP6 for the creator`)} />
         ) : null} />
         <Row label="👩‍🍳 Chef tokens vested" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
       </dl>
@@ -206,7 +240,7 @@ function Copies({ lunch }: { lunch: Lunch }) {
   return (
     <section className="card space-y-3 p-4">
       <h2 className="text-lg font-bold">🚚 Other chains</h2>
-      <p className="text-sm text-muted">ETH paid on these chains gets no tokens. It goes to {host}.</p>
+      <p className="text-sm text-muted">{lunch.money.symbol} paid on these chains gets no tokens. It goes to {host}.</p>
       <ul className="divide-y divide-line">
         {copies.map(copy => {
           const arrived = copy.claims[0]
@@ -215,7 +249,7 @@ function Copies({ lunch }: { lunch: Lunch }) {
               <div>
                 <p className="flex items-center gap-1.5 font-semibold"><ChainIcon chainId={copy.chainId} /> {chainName(copy.chainId)}</p>
                 <p className="text-sm tabular-nums text-muted">
-                  {formatEth(copy.balance)} ETH waiting{copy.onTheWay > 0n ? `, ${formatEth(copy.onTheWay)} ETH on the way` : ''}
+                  {moneyText(copy, copy.balance)} waiting{copy.onTheWay > 0n ? `, ${moneyText(copy, copy.onTheWay)} on the way` : ''}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -224,16 +258,16 @@ function Copies({ lunch }: { lunch: Lunch }) {
                     prepare={async account => {
                       const { sending, ...request } = await sendHomeTx(copy, account)
                       return { request, rows: [
-                        { label: 'Sends', value: `${formatEth(sending)} ETH to ${lunch.name} on ${host}`, strong: true },
+                        { label: 'Sends', value: `${moneyText(copy, sending)} to ${lunch.name} on ${host}`, strong: true },
                         { label: 'You pay up to', value: `${formatEth(request.value)} ETH for the bridge` },
                         { label: 'You get back', value: "What the bridge doesn't use" },
                       ] }
                     }} />
                 ) : null}
                 {arrived ? (
-                  <TxAction chainId={lunch.chainId} className={secondary} label={`Bring in ${formatEth(arrived.leaf.terminalTokenAmount)} ETH`} title="Bring it in" doneTitle="Brought in"
+                  <TxAction chainId={lunch.chainId} className={secondary} label={`Bring in ${moneyText(lunch, arrived.leaf.terminalTokenAmount)}`} title="Bring it in" doneTitle="Brought in"
                     prepare={async () => ({ request: claimTx(lunch.chainId, copy, arrived), rows: [
-                      { label: 'Adds', value: `${formatEth(arrived.leaf.terminalTokenAmount)} ETH to ${lunch.name}`, strong: true },
+                      { label: 'Adds', value: `${moneyText(lunch, arrived.leaf.terminalTokenAmount)} to ${lunch.name}`, strong: true },
                       { label: 'Costs you', value: 'Network fee only' },
                     ] })} />
                 ) : null}
@@ -274,7 +308,7 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
   if (!lunch) return <NoLunch chainId={chainId} projectId={projectId} />
 
   const phase = phaseOf(lunch, lunch.balance, now)
-  const split = splitOf(lunch.balance, lunch.supply, lunch)
+  const split = splitOf(lunch.balance, lunch.supply, lunch, lunch.money.decimals)
   const logo = assetUrl(logoUri)
   // Each part of the raise as a percent of it, for the pie.
   const slice = (wei: bigint) => (lunch.balance > 0n ? Number((wei * 10_000n) / lunch.balance) / 100 : 0)
@@ -333,19 +367,19 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
           ) : (
             <>
               <p className="text-sm text-muted">Raised</p>
-              <p className="text-4xl font-bold tabular-nums">{formatEth(lunch.balance)} ETH</p>
+              <p className="text-4xl font-bold tabular-nums">{moneyText(lunch, lunch.balance)}</p>
               <div className="mt-4 flex items-center gap-5">
                 {lunch.balance > 0n ? (
                   <div role="img" aria-label="Where the raise goes" className="h-24 w-24 shrink-0 rounded-full border border-line"
                     style={{ background: `conic-gradient(${POOL} 0 ${slice(split.poolEth)}%, ${CREATOR} 0)` }} />
                 ) : null}
                 <dl className="space-y-2">
-                  <Stat label={<><Swatch color={POOL} />🔒 To the pool</>} value={`${formatEth(split.poolEth)} ETH`} />
-                  <Stat label={<><Swatch color={CREATOR} />👩‍🍳 To the chef</>} value={`${formatEth(split.creatorEth + split.fee)} ETH`} />
+                  <Stat label={<><Swatch color={POOL} />🔒 To the pool</>} value={moneyText(lunch, split.poolEth)} />
+                  <Stat label={<><Swatch color={CREATOR} />👩‍🍳 To the chef</>} value={moneyText(lunch, split.creatorEth + split.fee)} />
                 </dl>
               </div>
               <p className="mt-3 text-sm text-muted">
-                Creator keeps {percent(lunch.keepPercent)} of the raise, up to {formatUnits(lunch.keepCap, 18)} ETH. The rest is locked in the pool.
+                Creator keeps {percent(lunch.keepPercent)} of the raise, up to {formatUnits(lunch.keepCap, lunch.money.decimals)} {lunch.money.symbol}. The rest is locked in the pool.
               </p>
               {tokenTotal > 0n ? (
                 <>
@@ -366,8 +400,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
           )}
           <p className="mt-3 text-sm text-muted">
             {lunch.servedAt
-              ? `Creator kept ${percent(lunch.keepPercent)} of the raise, up to ${formatUnits(lunch.keepCap, 18)} ETH, and got ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks. The rest was locked in the pool.`
-              : `Funders get 1M ${lunch.symbol} per ETH, fixed. The pool gets the same for its ETH. Creator gets ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.`}
+              ? `Creator kept ${percent(lunch.keepPercent)} of the raise, up to ${formatUnits(lunch.keepCap, lunch.money.decimals)} ${lunch.money.symbol}, and got ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks. The rest was locked in the pool.`
+              : `Funders get 1M ${lunch.symbol} per ${lunch.money.symbol}, fixed. The pool gets the same for its ${lunch.money.symbol}. Creator gets ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.`}
           </p>
         </section>
       </div>
