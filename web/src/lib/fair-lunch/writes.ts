@@ -69,7 +69,7 @@ export async function payTx(lunch: Pick<Lunch, 'chainId' | 'projectId'>, amount:
 }
 
 /** One of the calls anyone can make for a lunch on its host chain. One that would do nothing is refused: a collect
- * with no fees, or a burn the pool's price is too far off its average to buy with. */
+ * with no fees, or a burn the price limit stops before it buys anything. */
 export async function upkeepTx(chainId: number, projectId: number, functionName: 'serve' | 'burn' | 'collect', account: Address): Promise<TxRequest> {
   const { lunch } = await wiringOn(chainId)
   const call = { address: lunch, abi: fairLunchAbi, functionName, args: [BigInt(projectId)] } as const
@@ -79,7 +79,7 @@ export async function upkeepTx(chainId: number, projectId: number, functionName:
   }
   if (functionName === 'burn') {
     const { result } = await jbCenterPublicClient(chainId).simulateContract({ ...call, functionName, account })
-    if (result[0] === 0n && result[1] === 0n) throw new Error("The pool's price is off its average for now. Try again in a few minutes.")
+    if (result[0] === 0n && result[1] === 0n) throw new Error("The price is at its limit for now. Try again in a few minutes.")
   }
   return { chainId, ...call, abi: fairLunchAbi as Abi }
 }

@@ -341,7 +341,17 @@ Plan, as built:
 - [x] With the room, pass 6's open Medium is closed: a copy's ETH mapping must arrive on the host as ETH. On the forks the CCIP sucker already refuses a wrapped mapping, so the test only asserts no such lunch can be made.
 - [x] Site: Buy is the terminal's `pay` and Sell is `cashOutTokensOf`, each with the pool's quote less 2% in the buyback metadata (SDK builders). Permit2, the router and the approval steps are gone.
 - [x] 53 contract tests and 18 site tests pass. `npm run check` passes.
-- [ ] Codex pass 7 on the rework.
+- [x] Codex pass 7 on the rework: HOLD, one High.
 - [ ] Redeploy to the testnets and walk it, with buy and sell.
 
 Found on the way: the oracle hook reports no history until a pool has observations at two timestamps. In a served pool nothing has traded in, the buyback hook buys at the current price for small payments only, and won't sell without a named minimum. A trade slipped in ahead of `burn` writes the second observation, and the burn then holds to the average (`test_burn_doesntChaseAPushedPrice`).
+
+Codex pass 7 (2026-11-12):
+
+| Finding | Call | Result |
+|---|---|---|
+| High: with weight 0 there is no issuance floor, and the buyback hook's own tolerance widens with trade size. A 4 ETH buy ahead of a 1 ETH `burn` or unquoted payment, sold after, made about 0.44 ETH | Real | `burn` is back on Fair Lunch's own bounded swap (200 ticks past the 30 minute average and the last block's price, partial fills). Only trades that name a minimum go through the hook, at any time: an unquoted payment waits for `burn`, an unquoted cash out reverts. `test_burn_sandwichLosesMoney` runs the whole round trip |
+| Tests: the sandwich test never sold back, the plain-payment test had no second observation, the burn fuzz checked conservation only | Real | Replaced by the round trip above and the restored bound tests |
+| Test: the wrapped-ETH mapping test accepts any revert | Kept | The CCIP sucker refuses the mapping first on every fork, so Fair Lunch's check can't be reached there. Said so in the test |
+
+This changes what jango approved in one way: a payment without a minimum is not a purchase. It waits and is burned by the next `burn`, as before the rework. A payment with a minimum is a purchase for the payer. `FairLunch` is 23,766 bytes (810 spare), the hook 5,113. 52 tests pass.

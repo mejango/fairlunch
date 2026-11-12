@@ -62,7 +62,13 @@ contract Deploy is Script, Sphinx {
     function _deploy(address configurator) internal returns (FairLunch lunch) {
         string memory chain = _chainName();
 
-        FairLunchVestingDeployer vestingDeployer = new FairLunchVestingDeployer{salt: _SALT}();
+        // The vesting deployer's address depends only on its own code, so a redeploy of a revised `FairLunch` finds it
+        // already there.
+        address vesting = vm.computeCreate2Address({
+            salt: _SALT, initCodeHash: keccak256(type(FairLunchVestingDeployer).creationCode)
+        });
+        FairLunchVestingDeployer vestingDeployer =
+            vesting.code.length != 0 ? FairLunchVestingDeployer(vesting) : new FairLunchVestingDeployer{salt: _SALT}();
 
         lunch = new FairLunch{salt: _SALT}({
             omnichainDeployer: IJBOmnichainDeployer(

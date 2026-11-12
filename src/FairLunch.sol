@@ -70,10 +70,11 @@ import {FairLunchRecord} from "./structs/FairLunchRecord.sol";
 /// their cap, their token allocation starts vesting, and everything else becomes one full-range Uniswap V4 position
 /// that this contract holds forever.
 ///
-/// Eating: from then on the lunch's pool is the only place its token comes from. Payments and cash outs go through the
-/// Juicebox buyback hook: a payment buys the token from the pool for its beneficiary, and a cash out sells it there.
-/// Whatever reaches the project's balance some other way (revenue carried from other chains through the lunch's
-/// suckers, or a payment whose buy couldn't go through) is used by `burn` to buy the token and burn it.
+/// Eating: from then on the lunch's pool is the only place its token comes from. A payment or cash out that names the
+/// least it will take trades in the pool through the Juicebox buyback hook: the payment buys for its beneficiary, the
+/// cash out sells. Every other payment lands in the project's balance, along with revenue carried from other chains
+/// through the lunch's suckers. `burn` uses the balance to buy the token and burn it, never paying more than a bound
+/// above the pool's time-weighted average price. Whatever a bounded buy can't spend waits for the next one.
 ///
 /// This contract is each lunch's owner and the holder of its liquidity. `FairLunchDataHook`, which it deploys, is each
 /// lunch's data hook (wrapped by `JBOmnichainDeployer`). This contract holds no ETH or tokens between calls.
@@ -132,8 +133,11 @@ contract FairLunch is
     /// @notice The number of tokens a payer receives per ETH during the fundraise, and the price the pool opens at.
     uint256 public constant override TOKENS_PER_ETH = 1_000_000;
 
-    /// @notice The number of seconds of price history the buyback hook prices with, and the wait after serving before
-    /// it's trusted: until then only payments and cash outs that name their own minimum go through the pool.
+    /// @notice The farthest a burn's buy can push the price past its time-weighted average, in ticks (about 2%).
+    int24 public constant override TWAP_MAX_DEVIATION = 200;
+
+    /// @notice The number of seconds of price history a burn's buy is bounded by, and the wait after serving before
+    /// the first one.
     uint32 public constant override TWAP_WINDOW = 30 minutes;
 
     //*********************************************************************//
@@ -257,7 +261,7 @@ contract FairLunch is
     {
         OMNICHAIN_DEPLOYER = omnichainDeployer;
         BUYBACK_REGISTRY = buybackRegistry;
-        DATA_HOOK = new FairLunchDataHook({buybackRegistry: buybackRegistry, twapWindow: TWAP_WINDOW});
+        DATA_HOOK = new FairLunchDataHook(buybackRegistry);
         CONTROLLER = omnichainDeployer.CONTROLLER();
         DIRECTORY = terminal.DIRECTORY();
         TERMINAL = terminal;
@@ -280,11 +284,10 @@ contract FairLunch is
     //*********************************************************************//
 
     /// @notice Use a served lunch's whole balance to buy its token from the pool and burn it.
-    /// @dev Anyone can call this. The balance is paid back into the lunch through the buyback hook, which buys only if
-    /// the pool gives what its average price over the last `TWAP_WINDOW` says it should, and otherwise leaves the ETH
-    /// in
-    /// the balance for the next call. The first buyback waits a full `TWAP_WINDOW` after serving so that the average
-    /// holds only prices from the served pool: anyone can create the pool early and leave misleading history in it.
+    /// @dev Anyone can call this. The buy stops at a price `TWAP_MAX_DEVIATION` ticks above the pool's average over the
+    /// last `TWAP_WINDOW`, and whatever it couldn't spend goes back into the balance. The first buyback waits a full
+    /// `TWAP_WINDOW` after serving so that the average holds only prices from the served pool: anyone can create the
+    /// pool early and leave misleading history in it.
     /// @param projectId The ID of the lunch's project.
     /// @return spent The amount of ETH spent buying tokens.
     /// @return burned The number of tokens burned.
@@ -315,19 +318,20 @@ contract FairLunch is
             // belongs to the creator.
             _sendFeeTokensTo(record.creator);
 
-            // Pay it back in with this contract as the beneficiary. The buyback hook buys with it, or returns it to
-            // the balance.
+            PoolKey memory key = poolKeyOf(projectId);
+
+            // Buying the token lowers the pool's tokens-per-ETH price, so the bound sits below the reference.
+            uint160 sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(_boundTickOf(key) - TWAP_MAX_DEVIATION);
+
+            // Buy as much as the bound allows.
             // slither-disable-next-line unused-return
-            TERMINAL.pay{value: amount}({
-                projectId: projectId,
-                token: JBConstants.NATIVE_TOKEN,
-                amount: amount,
-                beneficiary: address(this),
-                minReturnedTokens: 0,
-                memo: "",
-                metadata: ""
-            });
-            spent = amount - _balanceOf(projectId);
+            (uint160 sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
+            if (sqrtPriceX96 > sqrtPriceLimitX96) {
+                (spent,) = _swap({key: key, zeroForOne: true, amountIn: amount, sqrtPriceLimitX96: sqrtPriceLimitX96});
+            }
+
+            // Put back what the buy couldn't spend.
+            if (amount != spent) _addToBalanceOf({projectId: projectId, amount: amount - spent});
         }
 
         // Burn everything bought, along with any tokens that arrived carrying revenue from other chains.
@@ -1021,6 +1025,30 @@ contract FairLunch is
     function _balanceOf(uint256 projectId) internal view returns (uint256) {
         return TERMINAL.STORE()
             .balanceOf({terminal: address(TERMINAL), projectId: projectId, token: JBConstants.NATIVE_TOKEN});
+    }
+
+    /// @notice The tick a buyback's price bound is measured from: the pool's average tick over the last `TWAP_WINDOW`,
+    /// or its tick a second ago if that's higher (cheaper tokens).
+    /// @dev The average keeps a buyback from chasing a price that was pushed up over several blocks. The tick a second
+    /// ago is the price before anything traded in this block, which keeps a buyback from chasing a price that was
+    /// pushed up just ahead of it. Reverts if the pool's history doesn't reach `TWAP_WINDOW` back.
+    /// @param key The pool's key.
+    /// @return tick The reference tick, rounded toward negative infinity.
+    function _boundTickOf(PoolKey memory key) internal view returns (int24 tick) {
+        uint32[] memory secondsAgos = new uint32[](3);
+        secondsAgos[0] = TWAP_WINDOW;
+        secondsAgos[1] = 1;
+
+        // slither-disable-next-line unused-return
+        (int56[] memory tickCumulatives,) = ORACLE_HOOK.observe({key: key, secondsAgos: secondsAgos});
+
+        int56 delta = tickCumulatives[2] - tickCumulatives[0];
+        tick = int24(delta / int56(uint56(TWAP_WINDOW)));
+        if (delta < 0 && delta % int56(uint56(TWAP_WINDOW)) != 0) tick--;
+
+        // Over one second the cumulative's change is the tick itself.
+        int24 lastTick = int24(tickCumulatives[2] - tickCumulatives[1]);
+        if (lastTick > tick) tick = lastTick;
     }
 
     /// @notice The smaller of two numbers.

@@ -16,10 +16,11 @@ import {FairLunchRecord} from "./structs/FairLunchRecord.sol";
 
 /// @notice The rules for paying and cashing out a lunch.
 /// @dev Every lunch's rulesets name this contract as their data hook, wrapped by `JBOmnichainDeployer`. While a lunch
-/// is cooking it sells at the fixed price until the deadline. Once it's served, payments and cash outs go to the
-/// Juicebox
-/// buyback hook, which trades them in the lunch's pool. Deployed by `FairLunch`, which it reads each lunch's record
-/// from.
+/// is cooking it sells at the fixed price until the deadline. Once it's served, a payment or cash out that names the
+/// least it will take goes to the Juicebox buyback hook, which trades it in the lunch's pool. The hook's own price
+/// check is too loose to rely on here, since a served lunch has no issuance price under it. So a payment without a
+/// minimum lands in the balance for `FairLunch.burn`, and a cash out without one reverts. Deployed by `FairLunch`,
+/// which it reads each lunch's record from.
 contract FairLunchDataHook is IJBRulesetDataHook {
     //*********************************************************************//
     // --------------------------- custom errors ------------------------- //
@@ -38,20 +39,15 @@ contract FairLunchDataHook is IJBRulesetDataHook {
     /// @notice The contract that owns every lunch.
     IFairLunch public immutable FAIR_LUNCH;
 
-    /// @notice The number of seconds after serving before the buyback hook's price is trusted.
-    uint256 public immutable TWAP_WINDOW;
-
     //*********************************************************************//
     // -------------------------- constructor ---------------------------- //
     //*********************************************************************//
 
     /// @dev Deployed by `FairLunch` from its constructor.
     /// @param buybackRegistry The registry of the buyback hook.
-    /// @param twapWindow The number of seconds after serving before the buyback hook's price is trusted.
-    constructor(IJBBuybackHookRegistry buybackRegistry, uint256 twapWindow) {
+    constructor(IJBBuybackHookRegistry buybackRegistry) {
         BUYBACK_REGISTRY = buybackRegistry;
         FAIR_LUNCH = IFairLunch(msg.sender);
-        TWAP_WINDOW = twapWindow;
     }
 
     //*********************************************************************//
@@ -103,11 +99,11 @@ contract FairLunchDataHook is IJBRulesetDataHook {
         (cashOutTaxRate, cashOutCount, totalSupply, effectiveSurplusValue, hookSpecifications) =
             BUYBACK_REGISTRY.beforeCashOutRecordedWith(context);
 
-        // `(uint256 minimumSwapAmountOut, bool skip)`.
+        // The sale has to name the least ETH it will take, `(uint256 minimumSwapAmountOut, bool skip)`, and the hook
+        // has to be selling it: left to the terminal, the tokens would burn for nothing.
         if (
             hookSpecifications.length == 0 || hookSpecifications[0].noop
-                || (block.timestamp < servedAt + TWAP_WINDOW
-                    && _minimumIn({metadata: context.metadata, purpose: "cashOut", word: 0}) == 0)
+                || _minimumIn({metadata: context.metadata, purpose: "cashOut", word: 0}) == 0
         ) revert FairLunchDataHook_NoSale(context.projectId);
     }
 
@@ -129,13 +125,11 @@ contract FairLunchDataHook is IJBRulesetDataHook {
         if (record.hostChainId != block.chainid) return (context.weight, hookSpecifications);
 
         if (record.servedAt != 0) {
-            // Until the pool has a window of its own price history, the hook's price can't be trusted: a payment that
-            // doesn't name its own minimum waits in the balance. `(uint256 amountToSwapWith, uint256
-            // minimumSwapAmountOut, bool skipSplits)`.
-            if (
-                block.timestamp < uint256(record.servedAt) + TWAP_WINDOW
-                    && _minimumIn({metadata: context.metadata, purpose: "pay", word: 1}) == 0
-            ) return (0, hookSpecifications);
+            // A payment that doesn't name the fewest tokens it will take, `(uint256 amountToSwapWith, uint256
+            // minimumSwapAmountOut, bool skipSplits)`, lands in the balance for `burn`.
+            if (_minimumIn({metadata: context.metadata, purpose: "pay", word: 1}) == 0) {
+                return (0, hookSpecifications);
+            }
 
             return BUYBACK_REGISTRY.beforePayRecordedWith(context);
         }

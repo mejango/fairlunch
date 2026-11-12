@@ -255,6 +255,19 @@ export const fairLunchAbi = [
   },
   {
     "type": "function",
+    "name": "TWAP_MAX_DEVIATION",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "int24",
+        "internalType": "int24"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "TWAP_WINDOW",
     "inputs": [],
     "outputs": [

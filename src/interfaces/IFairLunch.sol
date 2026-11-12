@@ -126,6 +126,9 @@ interface IFairLunch {
     /// @notice The number of tokens a payer receives per ETH during the fundraise, and the price the pool opens at.
     function TOKENS_PER_ETH() external view returns (uint256);
 
+    /// @notice The farthest a burn's buy can push the price past its time-weighted average, in ticks.
+    function TWAP_MAX_DEVIATION() external view returns (int24);
+
     /// @notice The number of seconds of price history a buyback is bounded by, and the wait after serving before the
     /// first buyback.
     function TWAP_WINDOW() external view returns (uint32);
