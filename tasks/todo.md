@@ -257,3 +257,5 @@ Second pass, on the fixed tree and the create form. It confirmed the minimum is 
 | Low: the create review's keep reads as ETH received | Real | Says "before the 2.5% fee" |
 | Low: Send home can still race another send while the wallet prompt is open | Open | Needs a zero-balance check inside `sendHome`, which costs bytes the contract barely has. For jango |
 
+Codex pass 4, on the late-copy contract change alone: no findings, verdict MERGE for the diff. It notes a copy made with no host behind it is the already documented host-first risk, and that late creation after `serve` through delivery and burn has no test.
+
