@@ -1,16 +1,18 @@
 // A lunch's whole life on two testnets, one step per run, with the builders the site uses:
-//   FAIR_LUNCH_KEY_FILE=<file holding a testnet key> node scripts/testnet-walk.mjs <state.json> <create|send-home|serve|status|claim|burn|collect>
+//   FAIR_LUNCH_KEY_FILE=<file holding a testnet key> node scripts/testnet-walk.mjs <state.json> <create|send-home|serve|status|claim|burn|collect|pay-host|buy|sell>
+// FAIR_LUNCH_ADDRESS names the deployment to walk.
 // The host is Arbitrum Sepolia and the copy is Sepolia: the one testnet pair Chainlink carries ETH between. Fair
 // Lunch must be at the same address on both.
 import { jbDirectoryAbi, jbMultiTerminalAbi, jbProjectsAbi, jbTerminalStoreAbi, MappableAsset, NATIVE_TOKEN, parseSuckerDeployerConfig } from '@bananapus/nana-sdk-core'
-import { buildBridgeClaimTx, CCIP_SUCKER_TRANSPORT_VALUES, claimFromSuckerMovement, findSuckerTransportValue, getSuckerMovements, getV6SuckerPairs } from '@bananapus/nana-sdk-core/v6'
+import { buildBridgeClaimTx, buildBuybackCashOutMetadata, buildBuybackPayMetadata, CCIP_SUCKER_TRANSPORT_VALUES, claimFromSuckerMovement, findSuckerTransportValue, getSuckerMovements, getV6SuckerPairs } from '@bananapus/nana-sdk-core/v6'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { createPublicClient, createWalletClient, formatEther, http, pad, parseEther, zeroHash } from 'viem'
+import { quoteUniswapV4ExactInputSingle } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
+import { createPublicClient, createWalletClient, erc20Abi, formatEther, http, pad, parseEther, zeroHash } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { arbitrumSepolia, sepolia } from 'viem/chains'
 import { fairLunchAbi } from '../src/lib/fair-lunch/abi.ts'
 
-const LUNCH = '0x5b572319a362683a6735a00876709e3dd10b0557'
+const LUNCH = process.env.FAIR_LUNCH_ADDRESS
 const [stateFile, step] = process.argv.slice(2)
 const account = privateKeyToAccount(readFileSync(process.env.FAIR_LUNCH_KEY_FILE, 'utf8').trim())
 const side = (chain, rpc) => ({ chain, client: createPublicClient({ chain, transport: http(rpc) }), wallet: createWalletClient({ chain, transport: http(rpc), account }) })
@@ -89,6 +91,22 @@ if (step === 'create') {
 } else if (step === 'pay-host') {
   await pay(host, state.hostId, process.argv[4] ?? '0.01', 0n)
   console.log({ balance: formatEther(await balanceOf(host, state.hostId)) })
+} else if (step === 'buy' || step === 'sell') {
+  // As the site trades: the pool's quote less 2%, named to the buyback hook. Without a quoter, any minimum at all.
+  const selling = step === 'sell'
+  const id = BigInt(state.hostId)
+  const amount = parseEther(process.argv[4] ?? (selling ? '1000' : '0.001'))
+  const { terminal } = await wiring(host)
+  const read = functionName => host.client.readContract({ address: LUNCH, abi: fairLunchAbi, functionName, args: functionName === 'poolKeyOf' ? [id] : [] })
+  const [hook, poolKey] = [await read('BUYBACK_REGISTRY'), await read('poolKeyOf')]
+  const out = await quoteUniswapV4ExactInputSingle(host.client, { chainId: host.chain.id, poolKey, zeroForOne: !selling, amountIn: amount }).catch(() => 50n)
+  const minimum = out - out / 50n
+  const tokens = () => host.client.readContract({ address: poolKey.currency1, abi: erc20Abi, functionName: 'balanceOf', args: [account.address] })
+  const before = { tokens: await tokens(), eth: await host.client.getBalance({ address: account.address }) }
+  await send(host, selling
+    ? { address: terminal, abi: jbMultiTerminalAbi, functionName: 'cashOutTokensOf', args: [account.address, id, amount, NATIVE_TOKEN, 0n, account.address, buildBuybackCashOutMetadata({ hook, minimumSwapAmountOut: minimum })] }
+    : { address: terminal, abi: jbMultiTerminalAbi, functionName: 'pay', args: [id, NATIVE_TOKEN, amount, account.address, 0n, '', buildBuybackPayMetadata({ hook, amountToSwapWith: 0n, minimumSwapAmountOut: minimum, skipSplits: true })], value: amount })
+  console.log({ minimum: formatEther(minimum), tokens: formatEther(await tokens() - before.tokens), eth: formatEther(await host.client.getBalance({ address: account.address }) - before.eth), balance: formatEther(await balanceOf(host, state.hostId)) })
 } else if (step === 'claim') {
   const { pair, moves } = await movements()
   const ready = moves.filter(move => move.status === 'claimable')

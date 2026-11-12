@@ -326,3 +326,22 @@ What the testnets showed:
 
 - Chainlink carries ETH between Sepolia and Arbitrum Sepolia only. Base Sepolia's wrapped ETH has no pool, and Sepolia's pool has no Base Sepolia lane. A copy on Sepolia with a Base Sepolia host (projects 16 and 64) was created and paid, and its `sendHome` reverts with `ChainNotAllowed`. All twelve mainnet pairs carry ETH. In RISKS.
 - Sepolia runs Glamsterdam. Deploying Fair Lunch there took 38.2M gas against about 8M elsewhere, and forge's estimate failed twice. Sent with the node's estimate. `createFor` took 5.6M there against 1.55M on Arbitrum Sepolia.
+
+## Buyback hook rework (2026-11-12)
+
+jango: "lets do it", and a payment after serve is a purchase: "the payer is responsible for then burning if it wishes to (revenue-paying applications will)".
+
+Plan, as built:
+
+- [x] After `serve`, payments and cash outs forward to the Juicebox buyback hook registry. A payment buys for its beneficiary, a cash out sells into the pool. The served ruleset keeps weight 0 and the 100% cash out tax, so the pool is the only source and sink.
+- [x] `serve` registers the pool with the project's buyback hook. `createFor` on the host requires that hook to price with the pool's oracle, so `serve` can't get stuck on it.
+- [x] `burn` keeps its 30 minute wait, takes the balance, pays it back in with Fair Lunch as beneficiary and burns what it holds. Gone: the pay hook, Fair Lunch's own price bound and `TWAP_MAX_DEVIATION`.
+- [x] For 30 minutes after `serve` only trades that name a minimum are forwarded. An unquoted payment waits in the balance, an unquoted cash out reverts. A cash out the hook wouldn't sell reverts instead of burning tokens for nothing.
+- [x] The rules moved to `FairLunchDataHook`, deployed by `FairLunch`: forwarding in place put `FairLunch` 2,327 bytes over the limit. Now 23,048 bytes (1,528 spare) and 5,319.
+- [x] With the room, pass 6's open Medium is closed: a copy's ETH mapping must arrive on the host as ETH. On the forks the CCIP sucker already refuses a wrapped mapping, so the test only asserts no such lunch can be made.
+- [x] Site: Buy is the terminal's `pay` and Sell is `cashOutTokensOf`, each with the pool's quote less 2% in the buyback metadata (SDK builders). Permit2, the router and the approval steps are gone.
+- [x] 53 contract tests and 18 site tests pass. `npm run check` passes.
+- [ ] Codex pass 7 on the rework.
+- [ ] Redeploy to the testnets and walk it, with buy and sell.
+
+Found on the way: the oracle hook reports no history until a pool has observations at two timestamps. In a served pool nothing has traded in, the buyback hook buys at the current price for small payments only, and won't sell without a named minimum. A trade slipped in ahead of `burn` writes the second observation, and the burn then holds to the average (`test_burn_doesntChaseAPushedPrice`).
