@@ -56,7 +56,7 @@ describe('LunchView', () => {
     const bar = document.querySelector<HTMLProgressElement>('progress[aria-label="Time gone of the fundraise"]')
     expect([bar?.value, bar?.max]).toEqual([3600, 7200])
     expect(text).toContain('No refunds')
-    expect(buttons()).toEqual(['Pay'])
+    expect(buttons()).toEqual(['Fund'])
   })
 
   it('offers only Serve once the deadline passes with something raised', async () => {

@@ -62,11 +62,10 @@ function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
   return (
     <section className="card space-y-3 p-4">
       {status}
-      <h3 className="text-lg font-bold">🍴 Fund</h3>
       <AmountInput value={text} onChange={setText} />
       <p className="text-sm text-muted">You get {formatTokens(amount * TOKENS_PER_ETH)} {lunch.symbol}. No refunds.</p>
       <div className="flex flex-col items-end gap-2">
-        <TxAction chainId={lunch.chainId} label="Pay" title={`Pay ${lunch.name}`} doneTitle="Paid" onDone={() => setText('')}
+        <TxAction chainId={lunch.chainId} label="Fund" title={`Fund ${lunch.name}`} doneTitle="Funded" onDone={() => setText('')}
           prepare={async account => {
             if (amount === 0n) throw new Error('Enter an amount.')
             return { request: await payTx(lunch, amount, account), rows: [
