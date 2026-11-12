@@ -201,7 +201,7 @@ export function CreateForm() {
           </select>
         </label>
         {raiseIn === 'other' ? (
-          <label className="field min-w-0 flex-1">Token address
+          <label className="field min-w-0 flex-1">🧂 Token address
             <input name="money" className="input font-mono text-sm" placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
           </label>
         ) : null}
