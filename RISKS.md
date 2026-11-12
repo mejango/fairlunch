@@ -17,7 +17,8 @@ Nobody can change a lunch after it's created, including its creator.
 
 - **A fundraise ends at its deadline, not after it.** A lunch's rulesets are its clock. A payment or refund in a block stamped with the deadline is too late, and no fundraise can run longer than about 136 years, the longest a ruleset lasts.
 - **Refunds end at the deadline.** Until the deadline a holder can cash tokens out on the host chain for what they were paid for, less a wei of rounding at most. After it money paid in stays in: a cash out between the deadline and `serve` reverts, and once served the only exit is selling into the pool.
-- **A refund can come back 2.5% short.** Juicebox takes its fee on a refund up to the amount another project has paid into the lunch from the same terminal. Someone has to give the lunch that much money to cause it, and the money stays in the lunch for `burn`.
+- **A refund can come back 2.5% short.** Juicebox takes its fee on a refund up to the amount another project has paid out into the lunch's balance from the same terminal. Someone has to give the lunch that much money to cause it: a lunch that's still selling refuses payouts that would buy tokens, so the money can't be taken back out.
+- **A tiny refund can be refused.** A refund that would round to nothing reverts and keeps its tokens. Money added to the balance by someone else makes rounding coarser, which only matters for dust unless the amount added is enormous.
 - **A raise can shrink at the last second.** Whoever paid can take it back until the deadline, so the raise and projected market cap a payer sees may be gone by the time the lunch is served. A large payer can fund early and refund in the last block, and nobody else can react. If everyone refunds, the lunch is unfunded and dead.
 - **Liquidity is locked forever.** There is no function that removes it.
 - **The creator's ETH is paid at `serve` in full.** Only their tokens vest.

@@ -29,6 +29,7 @@ contract FairLunchDataHook is IJBRulesetDataHook {
     //*********************************************************************//
 
     error FairLunchDataHook_Closed(uint256 projectId);
+    error FairLunchDataHook_NoPayouts(uint256 projectId);
     error FairLunchDataHook_NoSale(uint256 projectId);
     error FairLunchDataHook_NothingToRefund(uint256 projectId);
 
@@ -102,9 +103,11 @@ contract FairLunchDataHook is IJBRulesetDataHook {
             // refund.
             if (_shareOf({context: context, count: cashOutCount}) > refund) {
                 cashOutCount = Math.mulDiv({
-                    x: refund, y: context.totalSupply, denominator: context.surplus.value, rounding: Math.Rounding.Ceil
-                });
-                if (_shareOf({context: context, count: cashOutCount}) > refund) cashOutCount -= 1;
+                    x: refund + 1,
+                    y: context.totalSupply,
+                    denominator: context.surplus.value,
+                    rounding: Math.Rounding.Ceil
+                }) - 1;
             }
 
             // A cash out that would reclaim nothing would still burn its tokens.
@@ -145,9 +148,13 @@ contract FairLunchDataHook is IJBRulesetDataHook {
         // The ruleset that sells tokens is the only one with a price. A lunch that isn't served yet, or is served
         // elsewhere, mints nothing: its payments wait to be sent home. The rulesets refuse payments while a payer would
         // expect tokens and get none.
-        if (context.weight != 0 || FAIR_LUNCH.servedAtOf(context.projectId) == 0) {
+        if (context.weight != 0) {
+            // Another project's payout arrives owing Juicebox's fee, which the terminal would take from whichever
+            // payer is refunded next. So a lunch that's still selling doesn't sell to payouts.
+            if (context.payer == context.terminal) revert FairLunchDataHook_NoPayouts(context.projectId);
             return (context.weight, hookSpecifications);
         }
+        if (FAIR_LUNCH.servedAtOf(context.projectId) == 0) return (0, hookSpecifications);
 
         // A payment that doesn't name the fewest tokens it will take, `(uint256 amountToSwapWith, uint256
         // minimumSwapAmountOut, bool skipSplits)`, lands in the balance for `burn`.

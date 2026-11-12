@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {IJBBuybackHookRegistry} from "@bananapus/buyback-hook-v6/src/interfaces/IJBBuybackHookRegistry.sol";
 import {JBCashOuts} from "@bananapus/core-v6/src/libraries/JBCashOuts.sol";
 import {JBBeforeCashOutRecordedContext} from "@bananapus/core-v6/src/structs/JBBeforeCashOutRecordedContext.sol";
+import {JBBeforePayRecordedContext} from "@bananapus/core-v6/src/structs/JBBeforePayRecordedContext.sol";
 import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashOutHookSpecification.sol";
 import {mulDiv} from "@prb/math/src/Common.sol";
 import {Test} from "forge-std/Test.sol";
@@ -38,6 +39,21 @@ contract FairLunchDataHookTest is Test {
         context.surplus.decimals = decimals;
     }
 
+    /// @notice A lunch that's still selling takes payments from payers, and none from another project's payout.
+    function test_pay_refusesPayoutsWhileSelling() public {
+        JBBeforePayRecordedContext memory context;
+        context.terminal = address(0x7E);
+        context.payer = address(0xA11CE);
+        context.projectId = 7;
+        context.weight = 1_000_000e18;
+        (uint256 weight,) = hook.beforePayRecordedWith(context);
+        assertEq(weight, 1_000_000e18);
+
+        context.payer = context.terminal;
+        vm.expectRevert(abi.encodeWithSelector(FairLunchDataHook.FairLunchDataHook_NoPayouts.selector, 7));
+        hook.beforePayRecordedWith(context);
+    }
+
     /// @notice The only token of a 24-decimal lunch can't take a balance someone else added.
     function test_refund_leavesWhatWasntPaidForIt() public {
         vm.expectRevert(abi.encodeWithSelector(FairLunchDataHook.FairLunchDataHook_NothingToRefund.selector, 7));
@@ -56,6 +72,7 @@ contract FairLunchDataHookTest is Test {
         uint8 decimals
     )
         public
+        view
     {
         decimals = uint8(bound(decimals, 0, 24));
         supply = bound(supply, 1, type(uint208).max);
