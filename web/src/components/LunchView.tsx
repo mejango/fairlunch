@@ -104,7 +104,7 @@ function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
       </label>
       <p className="text-sm text-muted">
         {routed ? `Swapped to ${lunch.money.symbol} first, then 1M ${lunch.symbol} per ${lunch.money.symbol}. No refunds.` : `You get ${formatTokens(tokens)} ${lunch.symbol}. No refunds.`}
-        {amount > 0n && !routed ? ` Projected initial market cap becomes ${moneyText(lunch, projectedCapOf(raisedOf(lunch.balance, lunch.supply, lunch.money.decimals) + amount, lunch.supply + tokens, lunch, lunch.money.decimals))}.` : null}
+        {amount > 0n && !routed ? <span className="block">{`Projected initial market cap becomes ${moneyText(lunch, projectedCapOf(raisedOf(lunch.balance, lunch.supply, lunch.money.decimals) + amount, lunch.supply + tokens, lunch, lunch.money.decimals))}.`}</span> : null}
       </p>
       <div className="flex flex-col items-end gap-2">
         {short > 0n ? <Allow lunch={lunch} amount={short} paying={paying} /> : <TxAction chainId={lunch.chainId} label="Fund" title={`Fund ${lunch.name}`} doneTitle="Funded" onDone={() => setText('')}
