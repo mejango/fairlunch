@@ -192,16 +192,16 @@ export function CreateForm() {
         </label>
         <label className="field">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="field">🥫 Raise in
+      <div className="flex gap-4">
+        <label className="field w-32 shrink-0">🥫 Raise in
           <select className="input select-caret" value={raiseIn} onChange={event => setRaiseIn(event.target.value as typeof raiseIn)}>
             <option value="ETH">ETH</option>
             <option value="USDC">USDC</option>
-            <option value="other">Another token</option>
+            <option value="other">Other</option>
           </select>
         </label>
         {raiseIn === 'other' ? (
-          <label className="field">Token address
+          <label className="field min-w-0 flex-1">Token address
             <input name="money" className="input font-mono text-sm" placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
           </label>
         ) : null}
