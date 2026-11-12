@@ -331,6 +331,9 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
                   <Stat label={<><Swatch color={CREATOR} />👩‍🍳 To the creator and fees</>} value={`${formatEth(split.creatorEth + split.fee)} ETH`} />
                 </dl>
               </div>
+              <p className="mt-3 text-sm text-muted">
+                Creator keeps {percent(lunch.keepPercent)} of the raise, up to {formatUnits(lunch.keepCap, 18)} ETH. The rest is locked in the pool.
+              </p>
               {tokenTotal > 0n ? (
                 <>
                   <p className="mt-5 text-sm text-muted">Tokens if served now</p>
@@ -348,8 +351,10 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
               ) : null}
             </>
           )}
-          <p className="mt-4 text-sm text-muted">
-            Creator {lunch.servedAt ? 'kept' : 'keeps'} {percent(lunch.keepPercent)} of the raise, up to {formatUnits(lunch.keepCap, 18)} ETH, and {lunch.servedAt ? 'got' : 'gets'} {percent(lunch.tokenPercent)} of the tokens, unlocking over {Math.round(lunch.vestingDuration / 604800)} weeks. The rest {lunch.servedAt ? 'was' : 'is'} locked in the pool.
+          <p className="mt-3 text-sm text-muted">
+            {lunch.servedAt
+              ? `Creator kept ${percent(lunch.keepPercent)} of the raise, up to ${formatUnits(lunch.keepCap, 18)} ETH, and got ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks. The rest was locked in the pool.`
+              : `Creator gets ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.`}
           </p>
         </section>
       </div>
