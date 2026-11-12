@@ -159,8 +159,7 @@ export function CreateForm() {
       <h1 className="text-2xl font-bold">🛒 Ingredients</h1>
       <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
         <li>Sell a new token at a fixed price until the deadline. No refunds.</li>
-        <li>Then you get your share of the raise and of the tokens.</li>
-        <li>The rest becomes permanently locked Uniswap liquidity.</li>
+        <li>You get your share of the raise, the rest is locked in a liquidity pool.</li>
         <li>Tokens go to funders, to the pool to match the money it gets, and some to you.</li>
         <li>Later payments on any chain buy the token on the main chain and burn it.</li>
       </ul>
