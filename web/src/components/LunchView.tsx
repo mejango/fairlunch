@@ -237,16 +237,14 @@ function Copies({ lunch }: { lunch: Lunch }) {
   })
   if (!copies?.length) return null
   const host = chainName(lunch.chainId)
-  const secondary = 'btn-secondary min-h-[44px] px-4'
-  return (
-    <section className="card space-y-3 p-4">
-      <h2 className="text-lg font-bold">🚚 Other chains</h2>
-      <p className="text-sm text-muted">{lunch.money.symbol} paid on these chains gets no tokens. It goes to {host}.</p>
-      <ul className="divide-y divide-line">
+    return (
+    <section className="mt-4 border-t border-line pt-3">
+      <h2 className="text-sm text-muted">🚚 Other chains</h2>
+      <ul>
         {copies.map(copy => {
           const arrived = copy.claims[0]
           return (
-            <li key={copy.chainId} className="flex flex-wrap items-center justify-between gap-3 py-3">
+            <li key={copy.chainId} className="flex flex-wrap items-center justify-between gap-3 pt-2">
               <div>
                 <p className="flex items-center gap-1.5 font-semibold"><ChainIcon chainId={copy.chainId} /> {chainName(copy.chainId)}</p>
                 <p className="text-sm tabular-nums text-muted">
@@ -255,7 +253,7 @@ function Copies({ lunch }: { lunch: Lunch }) {
               </div>
               <div className="flex flex-wrap gap-2">
                 {copy.balance > 0n ? (
-                  <TxAction chainId={copy.chainId} className={secondary} label="Send home" title={`Send to ${host}`} doneTitle="Sent"
+                  <TxAction chainId={copy.chainId} className={SMALL} label="Send home" title={`Send to ${host}`} doneTitle="Sent"
                     prepare={async account => {
                       const { sending, ...request } = await sendHomeTx(copy, account)
                       return { request, rows: [
@@ -266,7 +264,7 @@ function Copies({ lunch }: { lunch: Lunch }) {
                     }} />
                 ) : null}
                 {arrived ? (
-                  <TxAction chainId={lunch.chainId} className={secondary} label={`Bring in ${moneyText(lunch, arrived.leaf.terminalTokenAmount)}`} title="Bring it in" doneTitle="Brought in"
+                  <TxAction chainId={lunch.chainId} className={SMALL} label={`Bring in ${moneyText(lunch, arrived.leaf.terminalTokenAmount)}`} title="Bring it in" doneTitle="Brought in"
                     prepare={async () => ({ request: claimTx(lunch.chainId, copy, arrived), rows: [
                       { label: 'Adds', value: `${moneyText(lunch, arrived.leaf.terminalTokenAmount)} to ${lunch.name}`, strong: true },
                       { label: 'Costs you', value: 'Network fee only' },
@@ -404,10 +402,9 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
               ? `The chef kept ${percent(lunch.keepPercent)} of the raise, up to ${formatUnits(lunch.keepCap, lunch.money.decimals)} ${lunch.money.symbol}, and got ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks. The rest was locked in the pool.`
               : `Funders get 1M ${lunch.symbol} per ${lunch.money.symbol}, fixed. The pool gets the same for its ${lunch.money.symbol}. The chef gets ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.`}
           </p>
+          <Copies lunch={lunch} />
         </section>
       </div>
-
-      <Copies lunch={lunch} />
     </div>
   )
 }
