@@ -186,6 +186,9 @@ const upkeep = (lunch: Lunch, functionName: 'serve' | 'burn' | 'collect', says: 
 })
 const SMALL = 'btn-secondary min-h-[36px] px-3 text-sm'
 
+/** A number on its own row with the button that moves it at its right. */
+const ACTION_ROW = 'col-span-2 flex flex-wrap items-end justify-between gap-3'
+
 /** A served lunch's numbers, with the calls anyone can make beside what they'd move. */
 function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readonly Burn[]; now: number; phase: Phase }) {
   const { data: fees } = useQuery({
@@ -194,31 +197,29 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
     refetchInterval: 60_000,
   })
   const uniswap = UNISWAP_CHAIN[lunch.chainId]
-  const canBurn = phase === 'eating' && lunch.balance > 0n
-  const canCollect = !!fees && (fees.money > 0n || fees.tokens > 0n)
   return (
     <>
       <dl className="grid grid-cols-2 gap-4">
         <Stat label="Current price" value={lunch.price ? `${formatPrice(lunch.price)} ${lunch.money.symbol}` : '…'} />
         <Stat label="Supply" value={formatTokens(lunch.supply)} />
-        <Stat label="Waiting to buy and burn" value={moneyText(lunch, lunch.balance)} />
-        <Stat label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
         <Stat label="🔒 In the pool" value={lunch.pooled === null ? '…' : moneyText(lunch, lunch.pooled)} />
-        <Stat label="👩‍🍳 Chef tokens vested" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
-        <div className="col-span-2"><Stat label="🧾 Pool fees" value={fees ? `${moneyText(lunch, fees.money)} + ${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} /></div>
-      </dl>
-      {canBurn || canCollect ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {canBurn ? (
+        <Stat label="Waiting to buy and burn" value={moneyText(lunch, lunch.balance)} />
+        <div className={ACTION_ROW}>
+          <Stat label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
+          {phase === 'eating' && lunch.balance > 0n ? (
             <TxAction chainId={lunch.chainId} className={SMALL} label="🔥 Buy and burn" title="Buy and burn" doneTitle="Burned"
               prepare={upkeep(lunch, 'burn', `Buys ${lunch.symbol} from the pool and burns it`)} />
           ) : null}
-          {canCollect ? (
-            <TxAction chainId={lunch.chainId} className={SMALL} label="🧾 Collect fees" title="Collect pool fees" doneTitle="Collected"
+        </div>
+        <div className={ACTION_ROW}>
+          <Stat label="🧾 Pool fees" value={fees ? `${moneyText(lunch, fees.money)} + ${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} />
+          {fees && (fees.money > 0n || fees.tokens > 0n) ? (
+            <TxAction chainId={lunch.chainId} className={SMALL} label="Collect" title="Collect pool fees" doneTitle="Collected"
               prepare={upkeep(lunch, 'collect', `Burns the pool's ${lunch.symbol} fees, pays its ${lunch.money.symbol} fees into JBP6 for the chef`)} />
           ) : null}
         </div>
-      ) : null}
+        <Stat label="👩‍🍳 Chef tokens vested" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
+      </dl>
       {uniswap ? (
         <p className="mt-4 text-sm">
           <a className="text-accent underline" target="_blank" rel="noreferrer" href={`https://app.uniswap.org/explore/pools/${uniswap}/${uniswapV4PoolId(lunch.poolKey)}`}>See the pool on Uniswap</a>
@@ -239,7 +240,7 @@ function Copies({ lunch }: { lunch: Lunch }) {
   const host = chainName(lunch.chainId)
     return (
     <section className="mt-4 border-t border-line pt-3">
-      <h2 className="text-sm text-muted">🚚 Other chains</h2>
+      <h2 className="text-sm text-muted">🚚 Delivery</h2>
       <ul>
         {copies.map(copy => {
           const arrived = copy.claims[0]
