@@ -156,14 +156,14 @@ export function CreateForm() {
 
   return (
     <form onSubmit={event => void submit(event)} className="card mx-auto max-w-xl space-y-4 p-5">
-      <h1 className="text-2xl font-bold">🥪 Lunch ingredients</h1>
+      <h1 className="text-2xl font-bold">🥪 Ingredients</h1>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">🍞 Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
         <label className="field">🥓 Ticker<input name="symbol" className="input uppercase" maxLength={10} required placeholder="SAND" /></label>
       </div>
       <label className="field">🍅 Logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="input py-2" /></label>
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="field">🍽️ Chain
+        <label className="field">🧅 Chain
           <select name="host" className="input select-caret" value={hostId} onChange={event => setHostId(Number(event.target.value))}>
             {CHAINS.map(chain => <option key={chain.id} value={chain.id}>{chainName(chain.id)}</option>)}
           </select>
@@ -188,12 +188,12 @@ export function CreateForm() {
           </select>
         </label>
       </div>
-      <label className="field">🥖 Pay your share to
+      <label className="field">🥑 Pay your share to
         <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
       </label>
       <p className="text-sm text-muted">🔒 Everything else goes into a pool nobody can pull. Nothing can be changed after.</p>
       <TxError error={error} />
-      <button type="submit" className="btn-primary min-h-[48px] px-5 text-lg" disabled={busy}>{busy ? 'Saving…' : isConnected ? 'Review' : 'Connect wallet'}</button>
+      <button type="submit" className="btn-primary min-h-[48px] px-5 text-lg" disabled={busy}>{busy ? 'Saving…' : 'Start cooking'}</button>
     </form>
   )
 }
