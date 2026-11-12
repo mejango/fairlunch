@@ -204,8 +204,8 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
         <Stat label="Waiting to buy and burn" value={moneyText(lunch, lunch.balance)} />
         <Stat label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
         <Stat label="🔒 In the pool" value={lunch.pooled === null ? '…' : moneyText(lunch, lunch.pooled)} />
-        <Stat label="🧾 Pool fees" value={fees ? `${moneyText(lunch, fees.money)}\n${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} />
         <Stat label="👩‍🍳 Chef tokens vested" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
+        <div className="col-span-2"><Stat label="🧾 Pool fees" value={fees ? `${moneyText(lunch, fees.money)} + ${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} /></div>
       </dl>
       {canBurn || canCollect ? (
         <div className="mt-4 flex flex-wrap gap-2">
