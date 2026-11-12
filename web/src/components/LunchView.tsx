@@ -254,7 +254,7 @@ function Copies({ lunch }: { lunch: Lunch }) {
               </div>
               <div className="flex flex-wrap gap-2">
                 {copy.balance > 0n ? (
-                  <TxAction chainId={copy.chainId} className={SMALL} label="Send home" title={`Send to ${host}`} doneTitle="Sent"
+                  <TxAction chainId={copy.chainId} className={SMALL} label="Deliver" title={`Send to ${host}`} doneTitle="Sent"
                     prepare={async account => {
                       const { sending, ...request } = await sendHomeTx(copy, account)
                       return { request, rows: [
