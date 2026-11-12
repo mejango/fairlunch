@@ -28,6 +28,7 @@ Nobody can change a lunch after it's created, including its creator.
 - **Holders can bridge after `serve`.** A holder who bridges their tokens to another chain takes their share of any ETH waiting for a buyback along, into the lunch's project there.
 - **A payment after `serve` mints the payer nothing.** The website must say so before they pay.
 - **Remote chains hold ETH until someone calls `sendHome`.** The caller pays the bridge's transport cost and the sucker's fee, gets back what isn't used, and gets the JBP6 the fee buys. Bridged ETH then needs a `claim` on the host chain.
+- **A copy needs a bridge that carries ETH to the host.** `createFor` checks the copy's ETH mapping is on and carries the right gas. It can't check that Chainlink moves ETH between the two chains. Where it doesn't, `sendHome` reverts and what's paid there stays. All twelve pairs among Ethereum, Base, Arbitrum and Optimism carried ETH on 2026-11-12. Among testnets only Sepolia and Arbitrum Sepolia do.
 - **Make the host chain's lunch first.** ETH sent home before the host's lunch exists arrives at an address with nothing there to receive it, and stays there. Only the creator can create a lunch's copies, and the website makes the host's first.
 - **ETH that arrives after the deadline but before `serve` is in the raise.** That includes bridged ETH. The pool is sized from the project's balance at `serve`.
 - **Pool fees in ETH are paid into JBP6**, and the JBP6 tokens go to the creator. Pool fees in the token are burned.
