@@ -479,9 +479,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
             <ServedStats lunch={lunch} burns={burns} now={now} phase={phase} />
           ) : (
             <>
-              <p className="text-sm text-muted">Raised</p>
-              <p className="text-4xl font-bold tabular-nums">{moneyText(lunch, raised)}</p>
-              <dl className="mt-3">
+              <dl className="grid grid-cols-2 items-end gap-4">
+                <Stat label="Raised" value={moneyText(lunch, raised)} />
                 <Stat label="Projected initial market cap" value={moneyText(lunch, moneyFor(lunch.supply + split.poolTokens + split.creatorTokens + split.claimsTokens, lunch.money.decimals))} />
               </dl>
               <div className="mt-4 flex items-center gap-5">
