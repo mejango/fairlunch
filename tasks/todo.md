@@ -463,9 +463,13 @@ Tasks:
 - [x] Pool: sorted currencies, raise price and serve limits from decimals and ordering, both-direction settle, burn bound on the right side.
 - [x] Tests: the lifecycle suite parameterized over ETH, USDC and an 18-decimal token ground to each ordering; cross-chain USDC; fuzz the sandwich and early-pool cases in each.
 - [x] Site: token choice on create, amounts in the token's decimals and symbol, approvals for ERC-20 pays, "pay with another token" through the registry with a router quote.
-- [ ] RISKS.md, README, two Codex passes, testnet redeploy and walk.
+- [x] RISKS.md, README, two Codex passes, testnet redeploy and walk.
 
 Review so far (2026-11-12):
+
+- Codex pass 11: no findings. Pass 12: five items, all addressed in `4280ba5`: the pool takes at most `type(uint120).max` tokens' worth of money and the rest waits for `burn`; `buy` spends nothing when its bound falls off the price range; `collect` adds the money to the lunch's balance if JBP6 refuses it; the raise price keeps full precision below 1; RISKS.md names pausable, blockable and upgradeable tokens. Pass 13: those four fixes correct, one Medium left (a token with more than 24 decimals could block `serve`), closed by rejecting it in `createFor`.
+- Testnet: `0x62e3f452f43315a26de300652760f1a51fb55264` on Arbitrum Sepolia and Sepolia, deployed before the pass 12 and 13 fixes. Lunch 19 with copy 19 walked end to end: create on both, pay both, send home, serve, buy, claim, burn (bounded, 0.00027 of 0.024 ETH), collect. Sepolia needed `--gas-estimate-multiplier 800` for the deploy under its newer gas rules.
+- Not yet redeployed to testnet with the pass 12 and 13 fixes.
 
 - Contracts: `FairLunchPool` holds every position and does every swap, callable only by `FairLunch`. `FairLunch` takes `config.token`, lists the router terminal registry second, rejects JBP6 as money. Sizes: FairLunch 19,725 bytes, FairLunchPool 10,389.
 - Tests: the 59 ETH tests unchanged and green. New `test/fork/FairLunchErc20.t.sol` runs create, pay, serve, buy, burn, the burn bound, collect, an early pool at either extreme, and fuzzed sandwiches and raises for USDC (6 decimals), an 18-decimal token sorted before the lunch's token and one sorted after. Routed payments both ways (USDC into an ETH lunch, ETH into a USDC lunch, cooking and served), the terminal order, the JBP6 rejection, and a USDC copy on Optimism sending home, all pass.

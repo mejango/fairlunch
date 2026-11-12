@@ -443,6 +443,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             decimals: token == JBConstants.NATIVE_TOKEN ? 18 : IERC20Metadata(token).decimals(),
             currency: uint32(uint160(token))
         });
+
+        // A token priced in smaller pieces than the lunch's token can't be pooled at a million per unit.
+        if (accountingContexts[0].decimals > 24) revert FairLunch_InvalidConfig();
         JBTerminalConfig[] memory terminalConfigurations = new JBTerminalConfig[](2);
         terminalConfigurations[0] = JBTerminalConfig({
             terminal: IJBTerminal(address(TERMINAL)), accountingContextsToAccept: accountingContexts

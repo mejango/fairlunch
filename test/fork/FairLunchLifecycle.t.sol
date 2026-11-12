@@ -369,6 +369,12 @@ contract FairLunchLifecycle is Test {
         config.token = address(0);
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(config);
+
+        // More than 24 decimals.
+        config.token = address(USDC);
+        vm.mockCall(address(USDC), abi.encodeWithSignature("decimals()"), abi.encode(uint8(25)));
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(config);
     }
 
     function test_pay_revertsAfterDeadline() public {
