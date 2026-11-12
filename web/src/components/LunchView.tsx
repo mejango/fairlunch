@@ -56,23 +56,26 @@ function AmountInput({ label = 'ETH', value, onChange }: { label?: string; value
 }
 
 /** While cooking: ETH in, tokens out at the fixed price. */
-function PayCard({ lunch }: { lunch: Lunch }) {
+function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
   const [text, setText] = useState('')
   const amount = amountOf(text)
   return (
     <section className="card space-y-3 p-4">
-      <h2 className="text-lg font-bold">🍴 Pay</h2>
+      {status}
+      <h3 className="text-lg font-bold">🍴 Fund</h3>
       <AmountInput value={text} onChange={setText} />
       <p className="text-sm text-muted">You get {formatTokens(amount * TOKENS_PER_ETH)} {lunch.symbol}. No refunds.</p>
-      <TxAction chainId={lunch.chainId} label="Pay" title={`Pay ${lunch.name}`} doneTitle="Paid" onDone={() => setText('')}
-        prepare={async account => {
-          if (amount === 0n) throw new Error('Enter an amount.')
-          return { request: await payTx(lunch, amount, account), rows: [
-            { label: 'You pay', value: `${formatEth(amount)} ETH`, strong: true },
-            { label: 'You get', value: `${formatTokens(amount * TOKENS_PER_ETH)} ${lunch.symbol}` },
-            { label: 'Refunds', value: 'None' },
-          ] }
-        }} />
+      <div className="flex flex-col items-end gap-2">
+        <TxAction chainId={lunch.chainId} label="Pay" title={`Pay ${lunch.name}`} doneTitle="Paid" onDone={() => setText('')}
+          prepare={async account => {
+            if (amount === 0n) throw new Error('Enter an amount.')
+            return { request: await payTx(lunch, amount, account), rows: [
+              { label: 'You pay', value: `${formatEth(amount)} ETH`, strong: true },
+              { label: 'You get', value: `${formatTokens(amount * TOKENS_PER_ETH)} ${lunch.symbol}` },
+              { label: 'Refunds', value: 'None' },
+            ] }
+          }} />
+      </div>
     </section>
   )
 }
@@ -115,17 +118,19 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
         {side('get', 'Buy', to)}
       </div>
       {amount > 0n && !quote.data ? <p className="text-sm text-muted">{quote.isError ? 'No quote right now.' : 'Getting a quote…'}</p> : null}
-      <TxAction chainId={lunch.chainId} label={verb} title={verb} doneTitle="Done" onDone={() => setTyped({ side: 'pay', text: '' })}
-        prepare={async account => {
-          if (amount === 0n) throw new Error('Enter an amount.')
-          const pay = typed.side === 'pay' ? amount : await quoteSwapFor(lunch, amount, selling)
-          const out = await quoteSwap(lunch, pay, selling)
-          const minimum = out - (out * SLIPPAGE_BPS) / 10_000n
-          return { request: await tradeTx(lunch, pay, minimum, account, selling), rows: [
-            { label: 'You pay', value: format(pay, from), strong: true },
-            { label: 'You get at least', value: format(minimum, to) },
-          ] }
-        }} />
+      <div className="flex flex-col items-end gap-2">
+        <TxAction chainId={lunch.chainId} label={verb} title={verb} doneTitle="Done" onDone={() => setTyped({ side: 'pay', text: '' })}
+          prepare={async account => {
+            if (amount === 0n) throw new Error('Enter an amount.')
+            const pay = typed.side === 'pay' ? amount : await quoteSwapFor(lunch, amount, selling)
+            const out = await quoteSwap(lunch, pay, selling)
+            const minimum = out - (out * SLIPPAGE_BPS) / 10_000n
+            return { request: await tradeTx(lunch, pay, minimum, account, selling), rows: [
+              { label: 'You pay', value: format(pay, from), strong: true },
+              { label: 'You get at least', value: format(minimum, to) },
+            ] }
+          }} />
+      </div>
     </section>
   )
 }
@@ -262,6 +267,18 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
     : phase === 'resting' ? `buybacks start in ${countdown(lunch.servedAt + REST_SECONDS - now)}`
     : null
 
+  // Where the lunch is, shown at the top of the card that phase is about.
+  const status = (
+    <div>
+      <h2 className="text-3xl font-bold sm:text-4xl">{PHASE_LABEL[phase]}</h2>
+      {timer ? <p className="mt-1 text-xl tabular-nums text-muted">{timer}</p> : null}
+      {phase === 'cooking' && lunch.deadline > lunch.startedAt ? (
+        <progress className="mt-2 block h-2 w-full" aria-label="Time gone of the fundraise"
+          max={lunch.deadline - lunch.startedAt} value={Math.max(0, now - lunch.startedAt)} />
+      ) : null}
+    </div>
+  )
+
   return (
     <div className="space-y-4">
       <header className="flex items-center gap-3">
@@ -275,23 +292,21 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
         </div>
       </header>
 
-      <section className="card w-fit max-w-full px-5 py-4">
-        <p className="text-3xl font-bold sm:text-4xl">{PHASE_LABEL[phase]}</p>
-        {timer ? <p className="mt-1 text-xl tabular-nums text-muted">{timer}</p> : null}
-        {phase === 'cooking' && lunch.deadline > lunch.startedAt ? (
-          <progress className="mt-2 block h-2 w-full" aria-label="Time gone of the fundraise"
-            max={lunch.deadline - lunch.startedAt} value={Math.max(0, now - lunch.startedAt)} />
-        ) : null}
-      </section>
-
-      {lunch.servedAt ? <PriceChart lunch={lunch} burns={burns} /> : null}
+      {lunch.servedAt ? <section className="card space-y-3 p-4">{status}<PriceChart lunch={lunch} burns={burns} /></section> : null}
 
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-3">
-          {phase === 'cooking' ? <PayCard lunch={lunch} /> : null}
+          {phase === 'cooking' ? <PayCard lunch={lunch} status={status} /> : null}
           {lunch.servedAt ? <SwapCard lunch={lunch} /> : null}
-          {phase === 'ready' ? (
-            <TxAction chainId={lunch.chainId} label="🍽️ Serve it" title="Serve lunch" doneTitle="Served" prepare={upkeep(lunch, 'serve', 'Pays the creator, opens the pool, locks the liquidity')} />
+          {phase === 'ready' || phase === 'empty' ? (
+            <section className="card space-y-3 p-4">
+              {status}
+              {phase === 'ready' ? (
+                <div className="flex flex-col items-end gap-2">
+                  <TxAction chainId={lunch.chainId} label="🍽️ Serve it" title="Serve lunch" doneTitle="Served" prepare={upkeep(lunch, 'serve', 'Pays the creator, opens the pool, locks the liquidity')} />
+                </div>
+              ) : null}
+            </section>
           ) : null}
         </div>
         <section className="card p-4">

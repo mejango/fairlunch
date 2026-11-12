@@ -32,8 +32,8 @@ export function PriceChart({ lunch, burns }: { lunch: Lunch; burns: readonly Bur
     return lunch.price ? [...history, { time: Math.floor(Date.now() / 1000), price: lunch.price }] : history
   }, [data, lunch.price])
 
-  if (isError) return <p className="card p-6 text-muted">The chart couldn&apos;t load. It&apos;ll try again.</p>
-  if (points.length < 2) return <div className="card h-[320px] animate-pulse" aria-busy="true" />
+  if (isError) return <p className="text-muted">The chart couldn&apos;t load. It&apos;ll try again.</p>
+  if (points.length < 2) return <div className="h-[320px] animate-pulse rounded-lg bg-line/40" aria-busy="true" />
 
   const prices = points.map(point => point.price)
   const low = Math.min(...prices, RAISE_PRICE), high = Math.max(...prices, RAISE_PRICE)
@@ -50,7 +50,7 @@ export function PriceChart({ lunch, burns }: { lunch: Lunch; burns: readonly Bur
   const priceAt = (time: number) => points.reduce((best, point) => (Math.abs(point.time - time) < Math.abs(best.time - time) ? point : best)).price
 
   return (
-    <section className="card p-4">
+    <section>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-3xl font-bold tabular-nums">{formatPrice(shown.price)} ETH</div>
