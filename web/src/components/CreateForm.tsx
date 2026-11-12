@@ -184,14 +184,19 @@ export function CreateForm() {
       </div>
       <label className="field">🍅 Logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif"
         className="block w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="field">🧅 Chain
-          <select name="host" className="input select-caret" value={hostId} onChange={event => setHostId(Number(event.target.value))}>
-            {CHAINS.map(chain => <option key={chain.id} value={chain.id}>{chainName(chain.id)}</option>)}
-          </select>
-        </label>
-        <label className="field">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
-      </div>
+      <label className="field">🧅 Chain
+        <select name="host" className="input select-caret" value={hostId} onChange={event => setHostId(Number(event.target.value))}>
+          {CHAINS.map(chain => <option key={chain.id} value={chain.id}>{chainName(chain.id)}</option>)}
+        </select>
+      </label>
+      {others.length ? (
+        <fieldset className="text-sm">
+          <legend className="font-semibold">🥗 Also accept payments and bridge from</legend>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
+            {others.map(chain => <label key={chain.id} className="flex min-h-[44px] items-center gap-2"><input type="checkbox" name={`also-${chain.id}`} /> {chainName(chain.id)}</label>)}
+          </div>
+        </fieldset>
+      ) : null}
       <div className="flex gap-4">
         <label className="field w-32 shrink-0">🍋 Raise in
           <select className="input select-caret" value={raiseIn} onChange={event => setRaiseIn(event.target.value as typeof raiseIn)}>
@@ -206,14 +211,7 @@ export function CreateForm() {
           </label>
         ) : null}
       </div>
-      {others.length ? (
-        <fieldset className="text-sm">
-          <legend className="font-semibold">🥗 Also accept payments and bridge from</legend>
-          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
-            {others.map(chain => <label key={chain.id} className="flex min-h-[44px] items-center gap-2"><input type="checkbox" name={`also-${chain.id}`} /> {chainName(chain.id)}</label>)}
-          </div>
-        </fieldset>
-      ) : null}
+      <label className="field">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">🧀 You keep, % of the raise<input name="keep" className="input" inputMode="numeric" defaultValue="10" required /></label>
         <label className="field">🧈 But no more than, {raiseIn === 'other' ? 'tokens' : raiseIn}<input name="cap" className="input" inputMode="decimal" defaultValue="10" required /></label>
