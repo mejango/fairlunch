@@ -61,6 +61,7 @@ import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmo
 
 import {FairLunchVestingDeployer} from "./FairLunchVestingDeployer.sol";
 import {IFairLunch} from "./interfaces/IFairLunch.sol";
+import {ISuckerRoute} from "./interfaces/ISuckerRoute.sol";
 import {FairLunchConfig} from "./structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "./structs/FairLunchRecord.sol";
 
@@ -493,12 +494,11 @@ contract FairLunch is
         originalPayer = address(0);
 
         // Everywhere but the host, payments only ever leave through the bridge home. Without one that's ready to carry
-        // ETH they'd be stuck, so there's no lunch.
+        // ETH they'd be stuck, so there's no lunch. A mapping that was set and then switched off doesn't count.
         if (
             !isHost
-                && !_hostSuckerOf({
-                    projectId: projectId, hostChainId: config.hostChainId
-                }).isMapped(JBConstants.NATIVE_TOKEN)
+                && !ISuckerRoute(address(_hostSuckerOf({projectId: projectId, hostChainId: config.hostChainId})))
+                    .remoteTokenFor(JBConstants.NATIVE_TOKEN)
         ) revert FairLunch_InvalidConfig();
 
         // Deploy the token up front so payers hold a real ERC-20 from their first payment.

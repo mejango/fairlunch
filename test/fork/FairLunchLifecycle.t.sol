@@ -311,6 +311,11 @@ contract FairLunchLifecycle is Test {
         assertEq(_balance(id), 10 ether);
 
         vm.warp(deadline + 1);
+        vm.prank(alice);
+        reclaimed = TERMINAL.cashOutTokensOf(alice, id, 1_000_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
+        assertEq(reclaimed, 0, "ready to serve");
+        assertEq(_balance(id), 10 ether);
+
         lunch.serve(id);
         _pay(id, bob, 1 ether);
 
@@ -318,6 +323,19 @@ contract FairLunchLifecycle is Test {
         reclaimed = TERMINAL.cashOutTokensOf(alice, id, 1_000_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
         assertEq(reclaimed, 0, "served");
         assertApproxEqAbs(_balance(id), 1 ether, 1e9);
+
+        // Once buybacks run, what waits for the next one is still nobody's to cash out.
+        vm.warp(_servedAt() + 31 minutes);
+        uint256 waiting = _balance(id);
+        vm.prank(alice);
+        reclaimed = TERMINAL.cashOutTokensOf(alice, id, 1_000_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
+        assertEq(reclaimed, 0, "eating");
+        assertEq(_balance(id), waiting);
+    }
+
+    function test_unlockCallback_onlyPoolManager() public {
+        vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));
+        lunch.unlockCallback("");
     }
 
     //*********************************************************************//

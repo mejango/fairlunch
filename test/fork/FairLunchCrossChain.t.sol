@@ -160,6 +160,28 @@ contract FairLunchCrossChain is Test {
         }
     }
 
+    /// @notice Holders can bridge their tokens to a copy's chain. Sending home then carries all but a millionth of the
+    /// balance, and leaves their tokens alone.
+    function test_sendHome_withHoldersOnTheRemote() public {
+        vm.selectFork(optimismFork);
+        uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_config(true));
+        _pay(id, 1 ether);
+
+        // What a sucker's `claim` does for a holder who bridged 100 tokens here.
+        vm.prank(REGISTRY.suckersOf(id)[0]);
+        CONTROLLER.mintTokensOf(id, 100e18, alice, "", false);
+
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        lunch.sendHome{value: 0.1 ether}(id);
+
+        // 100 tokens of 100,000,100 share what's left: one part in a million and one.
+        assertEq(_balance(id), 1 ether - (1 ether * uint256(1_000_000)) / 1_000_001, "a millionth stays");
+        assertEq(TOKENS.totalBalanceOf(alice, id), 100e18, "the holder's tokens are untouched");
+        assertEq(TOKENS.totalSupplyOf(id), 100e18, "every carrier token was burned");
+        assertEq(TOKENS.totalBalanceOf(address(lunch), id), 0, "no tokens stranded on the lunch contract");
+    }
+
     /// @notice A remote lunch with no bridge home, or one that can't carry ETH, would only trap what it's paid.
     function test_createFor_remoteNeedsARouteHome() public {
         vm.selectFork(optimismFork);
@@ -168,6 +190,15 @@ contract FairLunchCrossChain is Test {
         FairLunchConfig memory unmapped = _config(false);
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(unmapped);
+
+        // Mapped, then switched off: the sucker remembers the address but won't send.
+        FairLunchConfig memory disabled = _config(true);
+        JBTokenMapping[] memory mappings = new JBTokenMapping[](2);
+        mappings[0] = disabled.suckerDeploymentConfiguration.deployerConfigurations[0].mappings[0];
+        mappings[1] = JBTokenMapping({localToken: JBConstants.NATIVE_TOKEN, minGas: 200_000, remoteToken: bytes32(0)});
+        disabled.suckerDeploymentConfiguration.deployerConfigurations[0].mappings = mappings;
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(disabled);
 
         FairLunchConfig memory bridgeless = _config(true);
         bridgeless.suckerDeploymentConfiguration.deployerConfigurations = new JBSuckerDeployerConfig[](0);
