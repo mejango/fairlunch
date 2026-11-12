@@ -161,7 +161,8 @@ export function CreateForm() {
         <label className="field">🍞 Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
         <label className="field">🥓 Ticker<input name="symbol" className="input uppercase" maxLength={10} required placeholder="SAND" /></label>
       </div>
-      <label className="field">🍅 Logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="input py-2" /></label>
+      <label className="field">🍅 Logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif"
+        className="block w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">🧅 Chain
           <select name="host" className="input select-caret" value={hostId} onChange={event => setHostId(Number(event.target.value))}>
