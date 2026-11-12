@@ -10,10 +10,10 @@ import { TxAction } from '@/components/TxAction'
 import { assetUrl, formatEth, formatPrice, formatTokens } from '@/lib/format'
 import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib/fair-lunch/phase'
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
-import { claimCallOf, readServed, readClaimed, readClaimList, readCopies, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
+import { claimCallOf, readServed, readClaimed, readClaimList, readCopies, readHeld, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
 import { SHARES_TOTAL } from '@/lib/fair-lunch/claims'
-import { PERCENT_TOTAL, projectedCapOf, raisedOf, splitOf, tokensFor } from '@/lib/fair-lunch/split'
-import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
+import { moneyFor, PERCENT_TOTAL, projectedCapOf, raisedOf, splitOf, tokensFor } from '@/lib/fair-lunch/split'
+import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, refundTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
 import { chainName, projectPath } from '@/lib/urn'
 
@@ -87,6 +87,13 @@ function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
   const amount = amountOf(text, paying.decimals)
   const tokens = tokensFor(amount, lunch.money.decimals)
   const short = useShort(lunch, amount, paying)
+  const { address } = useWallet()
+  const { data: held } = useQuery({
+    queryKey: ['fair-lunch', 'held', lunch.chainId, lunch.projectId, address],
+    queryFn: ({ signal }) => readHeld(lunch, address!, signal),
+    enabled: Boolean(address),
+    refetchInterval: 15_000,
+  })
   return (
     <section className="card space-y-3 p-4">
       {status}
@@ -103,7 +110,7 @@ function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
         </span>
       </label>
       <p className="text-sm text-muted">
-        {routed ? `Swapped to ${lunch.money.symbol} first, then 1M ${lunch.symbol} per ${lunch.money.symbol}. No refunds.` : `You get ${formatTokens(tokens)} ${lunch.symbol}. No refunds.`}
+        {routed ? `Swapped to ${lunch.money.symbol} first, then 1M ${lunch.symbol} per ${lunch.money.symbol}. Refunds until the fundraise ends.` : `You get ${formatTokens(tokens)} ${lunch.symbol}. Refunds until the fundraise ends.`}
         {amount > 0n && !routed ? <span className="block">{`Projected initial market cap becomes ${moneyText(lunch, projectedCapOf(raisedOf(lunch.balance, lunch.supply, lunch.money.decimals) + amount, lunch.supply + tokens, lunch, lunch.money.decimals))}.`}</span> : null}
       </p>
       <div className="flex flex-col items-end gap-2">
@@ -111,11 +118,21 @@ function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
           prepare={async account => {
             if (amount === 0n) throw new Error('Enter an amount.')
             const pay = { label: 'You pay', value: moneyText({ money: paying }, amount), strong: true }
-            if (!routed) return { request: await payTx(lunch, amount, account), rows: [pay, { label: 'You get', value: `${formatTokens(tokens)} ${lunch.symbol}` }, { label: 'Refunds', value: 'None' }] }
+            if (!routed) return { request: await payTx(lunch, amount, account), rows: [pay, { label: 'You get', value: `${formatTokens(tokens)} ${lunch.symbol}` }, { label: 'Refunds', value: 'Until the fundraise ends' }] }
             const { request, minimum } = await routedPayTx(lunch, paying, amount, account)
-            return { request, rows: [pay, { label: 'You get at least', value: `${formatTokens(minimum)} ${lunch.symbol}` }, { label: 'Refunds', value: 'None' }] }
+            return { request, rows: [pay, { label: 'You get at least', value: `${formatTokens(minimum)} ${lunch.symbol}` }, { label: 'Refunds', value: 'Until the fundraise ends' }] }
           }} />}
       </div>
+      {held ? (
+        <div className={ACTION_ROW}>
+          <Stat label="You hold" value={`${formatTokens(held)} ${lunch.symbol}`} />
+          <TxAction chainId={lunch.chainId} className={SMALL} label="Refund" title={`Refund from ${lunch.name}`} doneTitle="Refunded"
+            prepare={async account => ({ request: await refundTx(lunch, held, (moneyFor(held, lunch.money.decimals) * 97n) / 100n, account), rows: [
+              { label: 'You give back', value: `${formatTokens(held)} ${lunch.symbol}`, strong: true },
+              { label: 'You get', value: moneyText(lunch, moneyFor(held, lunch.money.decimals)) },
+            ] })} />
+        </div>
+      ) : null}
     </section>
   )
 }

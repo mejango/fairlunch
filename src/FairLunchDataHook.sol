@@ -9,6 +9,8 @@ import {JBBeforePayRecordedContext} from "@bananapus/core-v6/src/structs/JBBefor
 import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashOutHookSpecification.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
+import {mulDiv} from "@prb/math/src/Common.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import {IFairLunch} from "./interfaces/IFairLunch.sol";
@@ -57,8 +59,9 @@ contract FairLunchDataHook is IJBRulesetDataHook {
 
     /// @notice Lets Fair Lunch cash out a lunch's whole balance for free, and sells everyone else's cash outs into the
     /// pool once the lunch is served.
-    /// @dev Part of `IJBRulesetDataHook`. Every lunch's rulesets tax cash outs at 100%, so no holder can ever reclaim
-    /// anything from the balance. Fair Lunch cashing out zero tokens is how `burn` takes the balance without a fee:
+    /// @dev Part of `IJBRulesetDataHook`. While the host is still selling, a holder cashes out for what their tokens
+    /// were paid for. After that every lunch's rulesets tax cash outs at 100%, so no holder can reclaim anything from
+    /// the balance. Fair Lunch cashing out zero tokens is how `burn` takes the balance without a fee:
     /// reporting the whole supply as the cash out count reclaims the whole balance. Once served, the buyback hook
     /// sells a holder's cash out into the pool instead. A cash out it wouldn't sell reverts, because the terminal
     /// would burn the tokens for nothing.
@@ -84,10 +87,40 @@ contract FairLunchDataHook is IJBRulesetDataHook {
             return (0, context.totalSupply, context.totalSupply, context.surplus.value, hookSpecifications);
         }
 
-        uint256 servedAt = FAIR_LUNCH.recordOf(context.projectId).servedAt;
+        FairLunchRecord memory record = FAIR_LUNCH.recordOf(context.projectId);
 
         // Before serving, and everywhere but the host, there's no pool to sell into.
-        if (servedAt == 0) {
+        if (record.servedAt == 0) {
+            if (record.hostChainId == block.chainid) {
+                // Once the deadline passes the raise is settled, and a cash out would burn the tokens for nothing.
+                if (block.timestamp > record.deadline) {
+                    revert FairLunchDataHook_Closed({projectId: context.projectId, deadline: record.deadline});
+                }
+
+                // Until then a holder takes back what the tokens were paid for. Money that reached the balance any
+                // other way isn't theirs, so the count is scaled down to leave it out. It's rounded up: the terminal
+                // rounds what it pays down, and rounding both ways down could pay nothing for a small cash out.
+                uint256 sold = mulDiv({
+                    x: context.totalSupply,
+                    y: 10 ** context.surplus.decimals,
+                    denominator: FAIR_LUNCH.TOKENS_PER_UNIT() * 1e18
+                });
+                return (
+                    0,
+                    context.surplus.value > sold
+                        ? Math.mulDiv({
+                            x: context.cashOutCount,
+                            y: sold,
+                            denominator: context.surplus.value,
+                            rounding: Math.Rounding.Ceil
+                        })
+                        : context.cashOutCount,
+                    context.totalSupply,
+                    context.surplus.value,
+                    hookSpecifications
+                );
+            }
+
             return (
                 context.cashOutTaxRate,
                 context.cashOutCount,

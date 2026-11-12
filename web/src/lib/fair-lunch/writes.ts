@@ -191,6 +191,13 @@ export async function quoteSwapFor(lunch: Pick<Lunch, 'chainId' | 'poolKey' | 'p
  * buyback hook does the swap and refuses less than `minimumOut`. Selling needs no approval, since the terminal burns
  * the seller's own tokens.
  */
+/** Hands tokens back for what they were paid for. Only while the fundraise is open: after the deadline it reverts.
+ * `minimum` is the least money it will take: Juicebox can take a 2.5% fee where another project paid into the lunch. */
+export async function refundTx(lunch: Pick<Lunch, 'chainId' | 'projectId' | 'money'>, count: bigint, minimum: bigint, account: Address): Promise<TxRequest> {
+  const { terminal } = await wiringOn(lunch.chainId)
+  return { chainId: lunch.chainId, address: terminal, abi: jbMultiTerminalAbi as Abi, functionName: 'cashOutTokensOf', args: [account, BigInt(lunch.projectId), count, lunch.money.address, minimum, account, '0x'], label: 'Refund' }
+}
+
 export async function tradeTx(lunch: Pick<Lunch, 'chainId' | 'projectId' | 'money'>, amount: bigint, minimumOut: bigint, account: Address, selling: boolean): Promise<TxRequest> {
   const { terminal, buyback } = await wiringOn(lunch.chainId)
   const id = BigInt(lunch.projectId)

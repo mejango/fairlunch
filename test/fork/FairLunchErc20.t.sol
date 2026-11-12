@@ -198,6 +198,35 @@ abstract contract FairLunchErc20 is Test {
     }
 
     /// @notice The creator gets the keep, the rest is pooled at the price payers paid, and nothing is left behind.
+    /// @notice A payer takes back exactly what they paid, in the lunch's money, until the deadline.
+    function test_refund_duringTheRaise() public {
+        uint256 id = _create(0, 0, 0);
+        uint256 tokens = _pay(id, alice, 3 * unit, "");
+        uint256 before = money.balanceOf(alice);
+
+        vm.prank(alice);
+        TERMINAL.cashOutTokensOf(alice, id, tokens / 3, address(money), 0, payable(alice), "");
+        assertEq(money.balanceOf(alice) - before, unit, "a third back");
+        assertEq(_balance(id), 2 * unit, "the rest stays");
+    }
+
+    /// @notice Money sent in by someone else doesn't round the smallest refund down to nothing.
+    function test_refund_ofTheSmallestPayment() public {
+        uint256 id = _create(0, 0, 0);
+        uint256 tokens = _pay(id, alice, 1, "");
+        _pay(id, alice, 1, "");
+        vm.prank(alice);
+        TERMINAL.addToBalanceOf(id, address(money), 1, false, "", "");
+        uint256 before = money.balanceOf(alice);
+
+        for (uint256 i; i < 2; i++) {
+            vm.prank(alice);
+            TERMINAL.cashOutTokensOf(alice, id, tokens, address(money), 0, payable(alice), "");
+        }
+        assertEq(money.balanceOf(alice) - before, 2, "both back");
+        assertEq(_balance(id), 1, "the rest stays");
+    }
+
     function test_serve_splitsTheRaise() public {
         uint256 id = _served(uint32(200_000_000), uint104(1500 * unit), uint32(100_000_000));
 

@@ -56,7 +56,7 @@ describe('LunchView', () => {
     // Half the fundraise's time is gone.
     const bar = document.querySelector<HTMLProgressElement>('progress[aria-label="Time gone of the fundraise"]')
     expect([bar?.value, bar?.max]).toEqual([3600, 7200])
-    expect(text).toContain('No refunds')
+    expect(text).toContain('Refunds until the fundraise ends')
     expect(buttons()).toEqual(['Fund'])
   })
 

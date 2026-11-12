@@ -147,6 +147,12 @@ export async function readReleasable(lunch: Pick<Lunch, 'chainId' | 'vestingWall
   return jbCenterPublicClient(lunch.chainId, signal).readContract({ address: lunch.vestingWallet, abi: vestingAbi, functionName: 'releasable', args: [lunch.token] })
 }
 
+/** The lunch's tokens an account holds, claimed or not. */
+export async function readHeld(lunch: Pick<Lunch, 'chainId' | 'projectId'>, account: Address, signal?: AbortSignal): Promise<bigint> {
+  const { tokens } = await wiringOn(lunch.chainId)
+  return jbCenterPublicClient(lunch.chainId, signal).readContract({ address: tokens, abi: jbTokensAbi, functionName: 'totalBalanceOf', args: [account, BigInt(lunch.projectId)] })
+}
+
 /** Sending the chef the tokens that have vested. Anyone can send it. */
 export const releaseCall = (lunch: Pick<Lunch, 'chainId' | 'vestingWallet' | 'token'>) =>
   ({ chainId: lunch.chainId, address: lunch.vestingWallet, abi: vestingAbi, functionName: 'release', args: [lunch.token] }) as const

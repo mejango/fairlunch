@@ -15,7 +15,9 @@ Nobody can change a lunch after it's created, including its creator.
 
 ## By design
 
-- **No refunds and no cash outs.** Money paid in stays in. Before `serve`, tokens can't be redeemed. After, the only exit is selling into the pool.
+- **Refunds end at the deadline.** Until the deadline a holder can cash tokens out on the host chain for what they were paid for, less a wei of rounding at most. After it money paid in stays in: a cash out between the deadline and `serve` reverts, and once served the only exit is selling into the pool.
+- **A refund can come back 2.5% short.** Juicebox takes its fee on a refund up to the amount another project has paid into the lunch from the same terminal. Someone has to give the lunch that much money to cause it, and the money stays in the lunch for `burn`.
+- **A raise can shrink at the last second.** Whoever paid can take it back until the deadline, so the raise and projected market cap a payer sees may be gone by the time the lunch is served. A large payer can fund early and refund in the last block, and nobody else can react. If everyone refunds, the lunch is unfunded and dead.
 - **Liquidity is locked forever.** There is no function that removes it.
 - **The creator's ETH is paid at `serve` in full.** Only their tokens vest.
 - **A creator and their list can get almost all of the supply.** The only limit is that the creator's share and the list's share add up to under 100%; payers and the pool share what's left, so read a lunch's split before paying. The creator's own share vests. A list of addresses the creator fixes at creation (`claimsPercent`, `claimsRoot`) gets its share at serve, and those tokens don't vest: anyone can send a listed address its tokens from `serve` on. Funders can see both shares before paying. They can't see who is on the list unless the creator publishes it, and a creator can list themselves.

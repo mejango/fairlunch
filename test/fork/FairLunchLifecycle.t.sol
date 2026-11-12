@@ -530,18 +530,6 @@ contract FairLunchLifecycle is Test {
         TERMINAL.pay{value: 1 ether}(id, JBConstants.NATIVE_TOKEN, 1 ether, alice, 0, "", "");
     }
 
-    function test_cashOut_reclaimsNothingBeforeServing() public {
-        uint256 id = _create(FIFTH, 5 ether, TENTH);
-        _pay(id, alice, 10 ether);
-
-        assertEq(_sell(id, alice, 1_000_000e18, ""), 0, "cooking");
-        assertEq(_balance(id), 10 ether);
-
-        vm.warp(deadline + 1);
-        assertEq(_sell(id, alice, 1_000_000e18, ""), 0, "ready to serve");
-        assertEq(_balance(id), 10 ether);
-    }
-
     function test_cashOut_sellsIntoThePoolOnceServed() public {
         uint256 id = _served(0, 0, 0);
         uint256 supply = TOKENS.totalSupplyOf(id);
@@ -578,6 +566,35 @@ contract FairLunchLifecycle is Test {
         }
         assertEq(_token(id).balanceOf(alice), held, "kept their tokens");
         assertEq(_balance(id), waiting, "and what waits is nobody's to cash out");
+    }
+
+    /// @notice Until the deadline a payer can take back what they paid, and no more than that.
+    function test_refund_duringTheRaise() public {
+        uint256 id = _create(0, 0, 0);
+        _pay(id, alice, 2 ether);
+        _pay(id, bob, 1 ether);
+
+        // Money that reached the balance another way isn't a payer's to take.
+        TERMINAL.addToBalanceOf{value: 5 ether}(id, JBConstants.NATIVE_TOKEN, 5 ether, false, "", "");
+
+        vm.warp(deadline);
+        // Leaving that money out rounds down, by a wei at most.
+        assertApproxEqAbs(_sell(id, alice, 500_000e18, ""), 0.5 ether, 1, "half a unit back");
+        assertEq(_token(id).balanceOf(alice), 1_500_000e18, "tokens burned");
+        assertApproxEqAbs(_sell(id, bob, 1_000_000e18, ""), 1 ether, 1, "all of it back");
+        assertApproxEqAbs(_balance(id), 6.5 ether, 2, "the rest stays");
+
+        // After the deadline the raise is settled.
+        vm.warp(deadline + 1);
+        vm.expectRevert(
+            abi.encodeWithSelector(FairLunchDataHook.FairLunchDataHook_Closed.selector, id, uint256(deadline))
+        );
+        vm.prank(alice);
+        TERMINAL.cashOutTokensOf(alice, id, 500_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
+
+        // What's left of the raise is served as usual.
+        lunch.serve(id);
+        assertEq(_token(id).balanceOf(alice), 1_500_000e18, "kept the rest");
     }
 
     function test_unlockCallback_onlyPoolManager() public {

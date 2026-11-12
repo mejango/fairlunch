@@ -520,3 +520,13 @@ Codex pass 16 said hold: Medium, the raise follows the supply, so payers burning
 Review. Full suite 112 of 112. Site 22 of 22. A lunch nobody funded on the host can't be served, as before, and money paid on its copies after the deadline stays there; RISKS.md says so.
 
 Testnet. `0x9770a2cae790e496a449b38e18f8778ce2737860` on Arbitrum Sepolia and Sepolia, from the testnet key, with everything through `de65473`. Lunch 20 with copy 20, a 60% airdrop: the copy refused a payment during the raise (`FairLunchDataHook_NotOpenYet`), took 0.004 ETH after the deadline and sent it home, `serve` minted 35,600 tokens for the list from a 0.01 ETH raise (10,000 sold, 7,800 pooled, 60% of the final supply), and a proof from the site's `claimProofOf` delivered one listed address its 40%. The bridged 0.004 ETH was still on its way at the end of the walk.
+
+## Refunds during the fundraise
+
+jango: "allow user refunds during the fund period only. this makes sense as they reassess the market cap".
+
+- [x] `FairLunchDataHook.beforeCashOutRecordedWith`: on the host, before `serve`, a cash out up to the deadline pays back the fixed price with no tax. The count is scaled down when the balance holds more than the tokens were sold for, so donated money isn't refundable. After the deadline and before `serve` it reverts `FairLunchDataHook_Closed` instead of burning for nothing.
+- [x] Tests: `test_refund_duringTheRaise` for ETH and the three ERC-20 setups.
+- [x] Site: "You hold" row with a Refund button on the funding card, copy changed from "No refunds".
+- [x] README and RISKS: refunds end at the deadline, a raise can shrink at the last second.
+- [x] Codex review, pass 17: HOLD for two Mediums and a stale test. Fixed: a refund count rounded down twice could pay nothing with donated money in the balance (now rounded up, `test_refund_ofTheSmallestPayment`), and the stale test is gone. Accepted and written into RISKS.md: Juicebox's 2.5% fee on refunds up to the fee-free surplus another project pays in. The site's refund asks for at least 97% of the price.
