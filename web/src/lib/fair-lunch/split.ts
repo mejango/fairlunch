@@ -4,10 +4,12 @@ export const TOKENS_PER_UNIT = 1_000_000n
 export const RAISE_PRICE = 1 / Number(TOKENS_PER_UNIT)
 /** The tokens an amount of money buys during the fundraise. Tokens have 18 decimals. */
 export const tokensFor = (amount: bigint, decimals: number) => (amount * TOKENS_PER_UNIT * 10n ** 18n) / 10n ** BigInt(decimals)
+/** What an amount of tokens is worth at the fundraise's price, which is also the price the pool opens at. */
+export const moneyFor = (tokens: bigint, decimals: number) => (tokens * 10n ** BigInt(decimals)) / (TOKENS_PER_UNIT * 10n ** 18n)
 export const PERCENT_TOTAL = 1_000_000_000n
 /** The raise: what payers paid for the tokens they hold. Money that reached the balance any other way isn't in it. */
 export const raisedOf = (balance: bigint, supply: bigint, decimals: number) => {
-  const sold = (supply * 10n ** BigInt(decimals)) / (TOKENS_PER_UNIT * 10n ** 18n)
+  const sold = moneyFor(supply, decimals)
   return balance < sold ? balance : sold
 }
 /** Juicebox's fee on the raise as it's paid out: 2.5%. */

@@ -12,7 +12,7 @@ import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { claimCallOf, readServed, readClaimed, readClaimList, readCopies, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
 import { SHARES_TOTAL } from '@/lib/fair-lunch/claims'
-import { PERCENT_TOTAL, raisedOf, splitOf, tokensFor } from '@/lib/fair-lunch/split'
+import { moneyFor, PERCENT_TOTAL, raisedOf, splitOf, tokensFor } from '@/lib/fair-lunch/split'
 import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
 import { chainName, projectPath } from '@/lib/urn'
@@ -302,6 +302,7 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
     <>
       <dl className="grid grid-cols-2 gap-4">
         <Stat label="Current price" value={lunch.price ? `${formatPrice(lunch.price)} ${lunch.money.symbol}` : '…'} />
+        <Stat label="Market cap" value={lunch.price ? `${formatPrice(Number(formatUnits(lunch.supply, 18)) * lunch.price)} ${lunch.money.symbol}` : '…'} />
         <Stat label="Supply" value={formatTokens(lunch.supply)} />
         <Stat label="In the pool" value={lunch.pooled === null ? '…' : moneyText(lunch, lunch.pooled)} />
         <Stat label="Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
@@ -480,6 +481,9 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
             <>
               <p className="text-sm text-muted">Raised</p>
               <p className="text-4xl font-bold tabular-nums">{moneyText(lunch, raised)}</p>
+              <dl className="mt-3">
+                <Stat label="Projected initial market cap" value={moneyText(lunch, moneyFor(lunch.supply + split.poolTokens + split.creatorTokens + split.claimsTokens, lunch.money.decimals))} />
+              </dl>
               <div className="mt-4 flex items-center gap-5">
                 {raised > 0n ? (
                   <div role="img" aria-label="Where the raise goes" className="h-24 w-24 shrink-0 rounded-full border border-line"
