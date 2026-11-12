@@ -41,6 +41,19 @@ function Stat({ label, value, action }: { label: ReactNode; value: string; actio
   )
 }
 
+/** One line of a served lunch's numbers: the label, its value across from it, and the button that acts on it. */
+function Row({ label, value, action }: { label: ReactNode; value: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2.5 first:pt-0">
+      <dt className="text-sm text-muted">{label}</dt>
+      <div className="ml-auto flex items-center gap-3">
+        <dd className="whitespace-pre-line text-right text-lg font-bold tabular-nums">{value}</dd>
+        {action ? <dd>{action}</dd> : null}
+      </div>
+    </div>
+  )
+}
+
 /** The pie's colors: where a raise goes. */
 const POOL = '#2e7d32', CREATOR = '#f5b942', FUNDERS = '#2f6fed'
 const Swatch = ({ color }: { color: string }) => <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />
@@ -156,20 +169,20 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
   const uniswap = UNISWAP_CHAIN[lunch.chainId]
   return (
     <>
-      <dl className="grid grid-cols-2 gap-4">
-        <Stat label="Current price" value={lunch.price ? `${formatPrice(lunch.price)} ETH` : '…'} />
-        <Stat label="Supply" value={formatTokens(lunch.supply)} />
-        <Stat label="Waiting to buy and burn" value={`${formatEth(lunch.balance)} ETH`} action={phase === 'eating' && lunch.balance > 0n ? (
+      <dl className="divide-y divide-line">
+        <Row label="Current price" value={lunch.price ? `${formatPrice(lunch.price)} ETH` : '…'} />
+        <Row label="Supply" value={formatTokens(lunch.supply)} />
+        <Row label="Waiting to buy and burn" value={`${formatEth(lunch.balance)} ETH`} action={phase === 'eating' && lunch.balance > 0n ? (
           <TxAction chainId={lunch.chainId} className={SMALL} label="🔥 Buy and burn" title="Buy and burn" doneTitle="Burned"
             prepare={upkeep(lunch, 'burn', `Buys ${lunch.symbol} from the pool and burns it`)} />
         ) : null} />
-        <Stat label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
-        <Stat label="🔒 In the pool" value={lunch.pooledEth === null ? '…' : `${formatEth(lunch.pooledEth)} ETH`} />
-        <Stat label="🧾 Pool fees" value={fees ? `${formatEth(fees.eth)} ETH\n${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} action={fees && (fees.eth > 0n || fees.tokens > 0n) ? (
+        <Row label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
+        <Row label="🔒 In the pool" value={lunch.pooledEth === null ? '…' : `${formatEth(lunch.pooledEth)} ETH`} />
+        <Row label="🧾 Pool fees" value={fees ? `${formatEth(fees.eth)} ETH\n${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} action={fees && (fees.eth > 0n || fees.tokens > 0n) ? (
           <TxAction chainId={lunch.chainId} className={SMALL} label="Collect" title="Collect pool fees" doneTitle="Collected"
             prepare={upkeep(lunch, 'collect', `Burns the pool's ${lunch.symbol} fees, pays its ETH fees into JBP6 for the creator`)} />
         ) : null} />
-        <Stat label="👩‍🍳 Creator tokens unlocked" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
+        <Row label="👩‍🍳 Chef tokens vested" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
       </dl>
       {uniswap ? (
         <p className="mt-4 text-sm">
