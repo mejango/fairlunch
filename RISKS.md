@@ -40,6 +40,8 @@ Nobody can change a lunch after it's created, including its creator.
 - **Pool fees in ETH are paid into JBP6**, and the JBP6 tokens go to the creator. Pool fees in the token are burned.
 - **ETH or tokens sent straight to the contract are lost.** It has no way to return them.
 - **A lunch raises one kind of money: ETH or an ERC-20.** The price is 1,000,000 tokens per whole unit of it, whatever its decimals. Everything this file says about ETH goes for an ERC-20 lunch's money too, except where it says otherwise below.
+- **A lunch's money is only as dependable as its token.** `createFor` takes any ERC-20. One whose transfers can be paused, blocked per address or changed by an upgrade can lock a lunch at `serve` or after, and whoever controls that token controls that. Check what a lunch raises before paying it.
+- **A pool opens with at most about 1.3 trillion whole units of money.** That's the most Uniswap V4 can always account for at 1,000,000 tokens per unit. A bigger raise pools that much and the rest waits in the balance for `burn`.
 - **Tokens that take a fee on transfer, rebase, or have more than 24 decimals aren't supported.** `createFor` can't tell, and a lunch that raises one can get stuck. JBP6 itself can't be a lunch's money.
 - **Paying in another token is a swap.** The router terminal prices its swap from the pools it finds unless the payer names a minimum for it. Name one.
 - **An ERC-20 lunch's token stays on its host chain.** `serve` opens the bridges to holders only for ETH lunches. Copies still send their money home.

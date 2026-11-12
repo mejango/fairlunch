@@ -141,13 +141,18 @@ contract FairLunchPool is IUnlockCallback, IERC721Receiver {
         // token gets cheaper. The pool's own ticks run that way when the money is currency0, and the other way when
         // it isn't.
         int24 boundTick = _boundTickOf({key: key, moneyIs0: moneyIs0, twapWindow: twapWindow}) - maxDeviation;
-        uint160 sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(moneyIs0 ? boundTick : -boundTick);
 
-        // Buy only while the token is cheaper than the bound.
-        // slither-disable-next-line unused-return
-        (uint160 sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
-        if (moneyIs0 ? sqrtPriceX96 > sqrtPriceLimitX96 : sqrtPriceX96 < sqrtPriceLimitX96) {
-            (spent,) = _swap({key: key, zeroForOne: moneyIs0, amountIn: amount, sqrtPriceLimitX96: sqrtPriceLimitX96});
+        // A bound past the dearest price a pool can have leaves nothing to buy.
+        if (boundTick > TickMath.MIN_TICK) {
+            uint160 sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(moneyIs0 ? boundTick : -boundTick);
+
+            // Buy only while the token is cheaper than the bound.
+            // slither-disable-next-line unused-return
+            (uint160 sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
+            if (moneyIs0 ? sqrtPriceX96 > sqrtPriceLimitX96 : sqrtPriceX96 < sqrtPriceLimitX96) {
+                (spent,) =
+                    _swap({key: key, zeroForOne: moneyIs0, amountIn: amount, sqrtPriceLimitX96: sqrtPriceLimitX96});
+            }
         }
 
         _returnAll(key);
@@ -196,9 +201,11 @@ contract FairLunchPool is IUnlockCallback, IERC721Receiver {
         returns (uint256 positionId)
     {
         // The pool's price is its currency1 per currency0. Its square root, as a Q64.96, at the fundraise's price:
-        uint160 raiseSqrtPriceX96 = (Math.sqrt(
-                    moneyIs0 ? Math.mulDiv(tokens, 1 << 128, money) : Math.mulDiv(money, 1 << 128, tokens)
-                ) << 32)
+        // A price of at most 1 keeps all 96 fractional bits; a higher one would overflow that way.
+        (uint256 amount1Per, uint256 amount0Per) = moneyIs0 ? (tokens, money) : (money, tokens);
+        uint160 raiseSqrtPriceX96 = (amount1Per <= amount0Per
+                ? Math.sqrt(Math.mulDiv(amount1Per, 1 << 192, amount0Per))
+                : Math.sqrt(Math.mulDiv(amount1Per, 1 << 128, amount0Per)) << 32)
         .toUint160();
 
         // The prices where the token is 1% cheaper and 1% dearer than the fundraise's, each rounded toward it.

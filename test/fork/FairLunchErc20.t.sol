@@ -260,6 +260,46 @@ abstract contract FairLunchErc20 is Test {
         _assertHoldsNothing(id);
     }
 
+    /// @notice A token so dear its bound falls off the end of the price range leaves the burn with nothing to buy.
+    function test_burn_spendsNothingPastTheDearestPrice() public {
+        uint256 id = _served(0, 0, 0);
+        vm.warp(_servedAt() + 1 minutes);
+        _pay(id, bob, 100 * unit, "");
+        vm.warp(_servedAt() + 31 minutes);
+
+        // History that says the token sat at the dearest price a pool can have.
+        int56 dearest = _moneyIs0(id) ? int56(-887_272) : int56(887_272);
+        int56[] memory tickCumulatives = new int56[](3);
+        tickCumulatives[1] = dearest * 1799;
+        tickCumulatives[2] = dearest * 1800;
+        vm.mockCall(
+            address(ORACLE),
+            abi.encodeWithSelector(ORACLE.observe.selector),
+            abi.encode(tickCumulatives, new uint160[](3))
+        );
+
+        uint256 balance = _balance(id);
+        (uint256 spent,) = lunch.burn(id);
+        assertEq(spent, 0, "nothing to buy");
+        assertEq(_balance(id), balance, "it all waits");
+        _assertHoldsNothing(id);
+    }
+
+    /// @notice A raise bigger than a pool can account for pools what it can and leaves the rest for burns.
+    function test_serve_poolsWhatFitsOfAHugeRaise() public {
+        uint256 id = _create(0, 0, 0);
+        uint256 raised = 200e12 * unit;
+        deal(address(money), alice, raised);
+        _pay(id, alice, raised, "");
+        vm.warp(deadline + 1);
+        lunch.serve(id);
+
+        uint256 pooled = uint256(type(uint120).max) * unit / 1e24;
+        assertApproxEqRel(_balance(id), raised * 975 / 1000 - pooled, 1e12, "the rest waits");
+        assertApproxEqRel(_tokensPerUnit(id), 1_000_000e18, 1e12, "opens at the fundraise's price");
+        _assertHoldsNothing(id);
+    }
+
     /// @notice Trading around a burn never pays, whichever way the push goes.
     /// forge-config: default.fuzz.runs = 64
     function testFuzz_burn_sandwichNeverProfits(uint256 push, uint256 waiting, bool moneyFirst) public {
@@ -343,6 +383,28 @@ abstract contract FairLunchErc20 is Test {
         } else {
             assertEq(_balance(id), balance + paid, "waits for the burn");
         }
+        _assertHoldsNothing(id);
+    }
+
+    /// @notice Fees JBP6 won't take wait in the lunch's balance instead of blocking the tokens' burn.
+    function test_collect_keepsTheMoneyIfJbp6RefusesIt() public {
+        uint256 id = _served(0, 0, 0);
+        PoolProbe trader = new PoolProbe(POSITION_MANAGER, PERMIT2);
+        deal(address(money), address(trader), 100 * unit);
+        trader.swap(lunch.poolKeyOf(id), _moneyIs0(id), 100 * unit);
+        uint256 balance = _balance(id);
+
+        vm.mockCall(
+            address(lunch.DIRECTORY()),
+            abi.encodeCall(lunch.DIRECTORY().primaryTerminalOf, (1, address(money))),
+            abi.encode(TERMINAL)
+        );
+        vm.mockCallRevert(address(TERMINAL), abi.encodeWithSelector(TERMINAL.pay.selector, 1), "closed");
+
+        (, uint256 paid) = lunch.collect(id);
+        assertGt(paid, 0, "fees collected");
+        assertEq(_balance(id), balance + paid, "waits for the burn");
+        assertEq(money.allowance(address(lunch), address(TERMINAL)), 0, "no allowance left");
         _assertHoldsNothing(id);
     }
 }

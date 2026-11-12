@@ -28,8 +28,8 @@ contract Rehearse is Deploy {
         // One that's served soon, one that keeps cooking.
         uint256[2] memory raises = [uint256(3 ether), 1.25 ether];
         uint48[2] memory deadlines = [uint48(block.timestamp + 10 minutes), uint48(block.timestamp + 7 days)];
-        string[2] memory names = ["Sandwich", "Dumpling"];
-        string[2] memory symbols = ["SAND", "DUMP"];
+        string[2] memory names = ["Sandwich", "Bagel"];
+        string[2] memory symbols = ["SAND", "BAGEL"];
         for (uint256 i; i < 2; i++) {
             FairLunchConfig memory config;
             config.name = names[i];

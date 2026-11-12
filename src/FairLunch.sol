@@ -125,6 +125,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @notice The ID of the project that takes fees, whose token is JBP6.
     uint256 internal constant _FEE_PROJECT_ID = 1;
 
+    /// @notice The most tokens a lunch's pool is opened with: about 1.3 trillion whole units of money's worth.
+    uint256 internal constant _MAX_POOL_TOKENS = type(uint120).max;
+
     /// @notice How many times the local supply `sendHome` mints, so its pro rata cash out carries all but a millionth
     /// of the balance.
     uint256 internal constant _SEND_HOME_MULTIPLE = 1_000_000;
@@ -330,13 +333,16 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
         paid = _holdingOf(token) - before;
         if (paid != 0) {
+            // Whether the money stays in the lunch's balance.
+            bool kept = true;
             if (
                 DIRECTORY.primaryTerminalOf({projectId: _FEE_PROJECT_ID, token: token})
                     == IJBTerminal(address(TERMINAL))
             ) {
                 // Pay the money side into JBP6, which mints JBP6 to the creator.
+                // If JBP6 won't take it, the lunch's balance does.
                 // slither-disable-next-line unused-return
-                TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: paid})}({
+                try TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: paid})}({
                     projectId: _FEE_PROJECT_ID,
                     token: token,
                     amount: paid,
@@ -344,10 +350,11 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                     minReturnedTokens: 0,
                     memo: "",
                     metadata: ""
-                });
-            } else {
-                _addToBalanceOf({projectId: projectId, token: token, amount: paid});
+                }) {
+                    kept = false;
+                } catch {}
             }
+            if (kept) _addToBalanceOf({projectId: projectId, token: token, amount: paid});
         }
 
         emit Collect({projectId: projectId, tokensBurned: tokensBurned, paid: paid, caller: _msgSender()});
@@ -603,18 +610,18 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         TERMINAL.sendPayoutsOf({
             projectId: projectId, token: token, amount: raised, currency: uint32(uint160(token)), minTokensPaidOut: 0
         });
-        uint256 poolAmount = _holdingOf(token) - before;
+        // The pool takes at most what `_MAX_POOL_TOKENS` matches, an amount Uniswap V4 can always account for. Any more
+        // stays in the balance for `burn`.
+        uint256 perToken = TOKENS_PER_UNIT * 1e18;
+        uint256 unit = 10 ** TERMINAL.accountingContextForTokenOf({projectId: projectId, token: token}).decimals;
+        uint256 poolAmount = _min(_holdingOf(token) - before, mulDiv(_MAX_POOL_TOKENS, unit, perToken));
 
         // The payout's fee minted JBP6 to this contract as the project's owner. It belongs to the creator.
         _sendFeeTokensTo(record.creator);
 
         // Mint the other side of the market: as many tokens as the pool's money would have bought during the
         // fundraise, so the pool opens at the price payers paid.
-        uint256 poolTokens = mulDiv(
-            poolAmount,
-            TOKENS_PER_UNIT * 1e18,
-            10 ** TERMINAL.accountingContextForTokenOf({projectId: projectId, token: token}).decimals
-        );
+        uint256 poolTokens = mulDiv(poolAmount, perToken, unit);
 
         _mintTokensOf({projectId: projectId, tokenCount: poolTokens, beneficiary: address(POOL)});
 
