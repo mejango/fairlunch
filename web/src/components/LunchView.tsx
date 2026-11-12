@@ -12,7 +12,7 @@ import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { claimCallOf, readServed, readClaimed, readClaimList, readCopies, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
 import { SHARES_TOTAL } from '@/lib/fair-lunch/claims'
-import { moneyFor, PERCENT_TOTAL, raisedOf, splitOf, tokensFor } from '@/lib/fair-lunch/split'
+import { PERCENT_TOTAL, projectedCapOf, raisedOf, splitOf, tokensFor } from '@/lib/fair-lunch/split'
 import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
 import { chainName, projectPath } from '@/lib/urn'
@@ -104,6 +104,7 @@ function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
       </label>
       <p className="text-sm text-muted">
         {routed ? `Swapped to ${lunch.money.symbol} first, then 1M ${lunch.symbol} per ${lunch.money.symbol}. No refunds.` : `You get ${formatTokens(tokens)} ${lunch.symbol}. No refunds.`}
+        {amount > 0n && !routed ? ` Projected initial market cap becomes ${moneyText(lunch, projectedCapOf(raisedOf(lunch.balance, lunch.supply, lunch.money.decimals) + amount, lunch.supply + tokens, lunch, lunch.money.decimals))}.` : null}
       </p>
       <div className="flex flex-col items-end gap-2">
         {short > 0n ? <Allow lunch={lunch} amount={short} paying={paying} /> : <TxAction chainId={lunch.chainId} label="Fund" title={`Fund ${lunch.name}`} doneTitle="Funded" onDone={() => setText('')}
@@ -481,7 +482,7 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
             <>
               <dl className="grid grid-cols-2 items-end gap-4">
                 <Stat label="Raised" value={moneyText(lunch, raised)} />
-                <Stat label="Projected initial market cap" value={moneyText(lunch, moneyFor(lunch.supply + split.poolTokens + split.creatorTokens + split.claimsTokens, lunch.money.decimals))} />
+                <Stat label="Projected initial market cap" value={moneyText(lunch, projectedCapOf(raised, lunch.supply, lunch, lunch.money.decimals))} />
               </dl>
               <div className="mt-4 flex items-center gap-5">
                 {raised > 0n ? (

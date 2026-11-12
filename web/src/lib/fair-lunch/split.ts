@@ -36,3 +36,9 @@ export function splitOf(raised: bigint, supply: bigint, terms: Terms, decimals =
   const claimsTokens = claimsPercent ? (granted * claimsPercent) / (terms.tokenPercent + claimsPercent) : 0n
   return { creatorEth, poolEth, fee: raised - creatorEth - poolEth, poolTokens, creatorTokens: granted - claimsTokens, claimsTokens }
 }
+
+/** Every token there'd be if a raise were served now, valued at the price the pool opens at. */
+export function projectedCapOf(raised: bigint, supply: bigint, terms: Terms, decimals = 18): bigint {
+  const split = splitOf(raised, supply, terms, decimals)
+  return moneyFor(supply + split.poolTokens + split.creatorTokens + split.claimsTokens, decimals)
+}
