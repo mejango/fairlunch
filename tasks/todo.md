@@ -540,4 +540,8 @@ jango: "can we move the clock into the rulesets too?" then "do it".
 - [x] Hook: an untaxed ruleset means refund, a priced one means sell, and anything else is closed unless served. A cash out on a copy now reverts where it burned for nothing.
 - [x] Site: `readClock` derives started, deadline and served times from the current ruleset. Cooking ends at the deadline's own second.
 - [x] Tests updated, duration bound test added. 108 non-fuzz tests passed on first run.
-- [ ] Full suite, Codex review, local fork rebuild, testnet redeploy.
+- [x] Codex pass 18: DO NOT MERGE for a Medium in the refund count (rounding up could hand a 24-decimal lunch's single token the whole balance), a Low (a one-second fundraise couldn't be served in its first second) and stale record docs. Fixed in `eb4decb`: the count is the largest that pays no more than the price, a refund of nothing reverts, host deadlines are two seconds out at least. Ruleset mechanics verified against the pinned core.
+- [x] Codex pass 19: HOLD for a Medium (a same-terminal payout buys tokens fee-free and the next refund pays its fee). Fixed in `80be76c`: a selling lunch refuses payouts.
+- [x] Codex pass 20: no findings, MERGE, 121 tests passed in its run. Verdict only: the PR stays unmerged until jango approves.
+- [x] Local fork rebuilt on the new contract. Refund of 1M tokens returned exactly 1 ETH, copy payment refused by the pause, pages render.
+- [ ] Testnet redeploy and walk.
