@@ -423,3 +423,15 @@ Hostile lunches, pool made before `serve`:
 | Medium, already there: liquidity added just ahead of a `burn` and removed after sells into it and earns its fee. 0.0004 ETH from a burn that spent 0.1 | Reproduced in `test_burn_liquidityAddedAheadTakesNoMoreThanTheBound`, which holds it under 2% of the burn's spend. Not fixed: any LP earns a burn's fee, and the bound is what limits the rest. In RISKS.md. **Open for jango:** tighten the 200 tick bound, or leave it |
 
 - [x] Testnet recheck on the fixed contract (`0x3c4baf80021d73fba39d31b5d1abc065cd964ba1`, Arbitrum Sepolia only, projects 15 and 16). The same 30,000 offered tokens: `serve` bought none, and all 30,000 came back to the attacker with no ETH. That pool opened 0.4% cheap. The pool started 100x too cheap opened 1.1% cheap, with 0.00017 of 0.0156 ETH left for burns.
+
+Testnet recheck of the exact limits (`0xb0444b7cb03dc5926a441a6967845cd22f0310cb`, Arbitrum Sepolia only, projects 17 and 18):
+
+| Case | Result |
+|---|---|
+| Pool started 100x too cheap | Opened at 1,010,037 tokens per ETH, the cheap limit. 0.000156 of 0.0156 ETH left for burns |
+| Pool started exactly at the dear limit | Opened there, 989,937 tokens per ETH, nothing left over |
+| Buy 0.001 ETH from the cheap-limit pool | 939.8 tokens, under the fundraise's 1,000 |
+| Sell 1,000 fundraise tokens into the dear-limit pool | 0.00094 ETH, under the 0.001 they cost |
+| Liquidity added ahead of a `burn` on project 10, removed after | Attacker put in 0.000614 ETH and took out 0.000623: 0.000009 gained from a burn that spent 0.00102 (0.9%) |
+
+- [ ] Codex pass 10 on the exact limits.
