@@ -355,3 +355,16 @@ Codex pass 7 (2026-11-12):
 | Test: the wrapped-ETH mapping test accepts any revert | Kept | The CCIP sucker refuses the mapping first on every fork, so Fair Lunch's check can't be reached there. Said so in the test |
 
 This changes what jango approved in one way: a payment without a minimum is not a purchase. It waits and is burned by the next `burn`, as before the rework. A payment with a minimum is a purchase for the payer. `FairLunch` is 23,766 bytes (810 spare), the hook 5,113. 52 tests pass.
+
+Codex pass 8, on the fix: the High is closed, no new actionable finding, **MERGE for the rework as a whole** (468e7f0 through 2df4f87). One informational note, dismissed: a caller who writes both a registry-keyed and a hook-keyed entry into their own metadata can shadow their own minimum, which is the same as naming a careless one.
+
+Testnet, reworked contract at `0xa309e08ddc1098f67d6a6cb6e4ef4b2b1a9bef5e` on Arbitrum Sepolia and Sepolia, from the throwaway key. Host project 10, copy project 18 (`~/.config/fair-lunch/walk3.json`). `script/Deploy.s.sol` now reuses a vesting deployer that's already at its address.
+
+| Step | Result |
+|---|---|
+| Create on both, pay, `sendHome`, `serve` | Went through. `serve` took 2.24M gas |
+| Buy 0.002 ETH with a minimum of 1,856.6 tokens | The payer got 1,894.5 tokens. Nothing reached the balance |
+| Sell 1,000 tokens with a minimum, no approval | The seller got 0.00104 ETH |
+| Pay 0.01 ETH without a minimum | Waits in the balance |
+
+Local site on a rebuilt Base fork: the trade card quotes a buy and a sell, shows one Buy or Sell button with no approval step, and logs no errors at 390px.
