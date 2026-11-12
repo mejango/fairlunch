@@ -375,8 +375,44 @@ jango: "thoroughly test LPing and buybacks and everything related to pools on te
 
 The permissionless calls that touch a pool are `serve`, `burn`, `collect`, and payments and cash outs through the buyback hook. One tool measures all of them: `test/PoolProbe.sol`, an attacker that trades ahead of any call and back out after it in one transaction, and that can make a pool early with its own liquidity. The fork tests use it as a gate, and it is deployed to Arbitrum Sepolia for real transactions. Evidence is the attacker's round-trip result per case.
 
-- [ ] `PoolProbe` replaces the test-only `Trader`. No behavior change, tests green.
-- [ ] Fork gates: a fuzzed atomic sandwich of `burn` never profits, a sandwich of `serve` over the attacker's own early pool loses, sandwiched quoted buys and sells past their minimum revert, `collect` gives a sandwich nothing.
-- [ ] Testnet, clean lunch: burn, collect, claim, oversized burn in parts, then each sandwich as a real transaction (same block, and across blocks).
-- [ ] Testnet, hostile lunches: pool made early too high, too low, and with the attacker's liquidity in the way. Serve, then buy, sell, burn and collect on each.
-- [ ] Record results. Fix what the tests find before anything else.
+- [x] `PoolProbe` replaces the test-only `Trader`. No behavior change, tests green.
+- [x] Fork gates: `testFuzz_burn_sandwichNeverProfits` (push either way, same block or a block ahead; fails when the bound is loosened to 2,000 ticks), `testFuzz_serve_earlyPoolNeverProfits` (bids or offers, any depth and range, with a fundraise stake), `test_serve_buysNoTokenOverTheRaisePrice`, `test_serve_sellsNoTokenUnderTheRaisePrice`. Quoted trades past their minimum already had a test. `collect` doesn't trade in the lunch's pool, so it's measured on testnet only.
+- [x] Testnet, clean lunch (project 10 on `0xa309…ef5e`, Arbitrum Sepolia, probe `0xa64b7C7Ab98368037E03081Cb4ddFda7a17Ed237`).
+- [x] Testnet, hostile lunches (projects 11 to 14).
+- [x] Found and fixed: `serve` paid early liquidity above the raise price. See below.
+
+### Results
+
+Clean lunch, real transactions:
+
+| Case | Result |
+|---|---|
+| Bridge claim | 0.02 ETH sent from Sepolia arrived and was claimed into the balance |
+| `collect` | Burned 12.3 tokens of fees, paid 0.000123 ETH into JBP6 |
+| `burn` with the price pushed 36% above the average | Spent nothing, the ETH kept waiting |
+| `burn` after the price came back | Spent 0.00047 ETH and stopped at its bound. The next block's burn did the same |
+| Same-block sandwich of `burn`, 0.003 ETH push | Burn spent nothing. Attacker lost 0.000058 ETH |
+| Same-block sandwich of `burn`, 0.0002 ETH push | Burn spent 0.00027 ETH inside its bound. Attacker lost 0.0000017 ETH |
+| Buy a block ahead of `burn`, sell after | Burn spent nothing. Attacker lost 0.000039 ETH |
+| Token-first sandwich of `burn`, 500 tokens | Burn bought 901 tokens cheap. Attacker lost 31 tokens |
+| Sandwich of `collect`, 0.002 ETH push | Attacker lost 0.000039 ETH, the two pool fees |
+| Sandwich of a quoted 0.005 ETH buy, push inside its 2% minimum | Attacker made 0.000055 ETH. This is the ordinary sandwich of a trade that moves the price more than the fees. RISKS.md says so now |
+| Same, push past the minimum | Reverts, `JBBuybackHook_SpecifiedSlippageExceeded` |
+| Sandwich of a quoted 200 token sale, push inside its minimum | Attacker lost 0.2 tokens |
+| Same, push past the minimum | Reverts the same way |
+
+Hostile lunches, pool made before `serve`:
+
+| Case | Result |
+|---|---|
+| Pool started 100x too cheap, no liquidity | Opened at the raise price |
+| Pool started 100x too dear, no liquidity | Opened at the raise price |
+| 0.02 ETH of bids across the raise price | Opened 0.8% dear with 0.0156 ETH left for burns. Attacker lost 0.0039 of 0.02 ETH |
+| 30,000 fundraise tokens offered just under the raise price | **`serve` bought 5,721 of them for 0.005768 ETH, 0.82% more than they cost.** The 1% pool fee goes to the offerer. Selling the rest still lost money overall |
+
+### The fix
+
+`serve` now stops its price-moving swap 110 ticks (1.1%) short of the raise price on either side, so the fee it pays early liquidity never makes the trade worse than the fundraise's price. A pool someone started off-price opens 1.1% beside the raise price instead of on it, and about 1% of the pool's ETH (or tokens) is left for burns. `FairLunch` is 24,514 bytes, 62 spare. 56 contract tests pass.
+
+- [ ] Codex pass 9 on the fix.
+- [x] Testnet recheck on the fixed contract (`0x3c4baf80021d73fba39d31b5d1abc065cd964ba1`, Arbitrum Sepolia only, projects 15 and 16). The same 30,000 offered tokens: `serve` bought none, and all 30,000 came back to the attacker with no ETH. That pool opened 0.4% cheap. The pool started 100x too cheap opened 1.1% cheap, with 0.00017 of 0.0156 ETH left for burns.
