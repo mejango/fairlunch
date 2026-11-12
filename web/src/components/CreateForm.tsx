@@ -156,39 +156,39 @@ export function CreateForm() {
 
   return (
     <form onSubmit={event => void submit(event)} className="card mx-auto max-w-xl space-y-4 p-5">
-      <h1 className="text-2xl font-bold">🍞 Lunch ingredients 🥬🍅🧀🥓</h1>
+      <h1 className="text-2xl font-bold">🥪 Lunch ingredients</h1>
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="field">Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
-        <label className="field">Ticker<input name="symbol" className="input uppercase" maxLength={10} required placeholder="SAND" /></label>
+        <label className="field">🍞 Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
+        <label className="field">🏷️ Ticker<input name="symbol" className="input uppercase" maxLength={10} required placeholder="SAND" /></label>
       </div>
-      <label className="field">Logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="input py-2" /></label>
+      <label className="field">🖼️ Logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="input py-2" /></label>
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="field">Chain
+        <label className="field">⛓️ Chain
           <select name="host" className="input select-caret" value={hostId} onChange={event => setHostId(Number(event.target.value))}>
             {CHAINS.map(chain => <option key={chain.id} value={chain.id}>{chainName(chain.id)}</option>)}
           </select>
         </label>
-        <label className="field">Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
+        <label className="field">⏲️ Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
       </div>
       {others.length ? (
         <fieldset className="text-sm">
-          <legend className="font-semibold">Also collect on</legend>
+          <legend className="font-semibold">🧺 Also collect on</legend>
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
             {others.map(chain => <label key={chain.id} className="flex min-h-[44px] items-center gap-2"><input type="checkbox" name={`also-${chain.id}`} /> {chainName(chain.id)}</label>)}
           </div>
         </fieldset>
       ) : null}
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="field">You keep, % of the raise<input name="keep" className="input" inputMode="numeric" defaultValue="10" required /></label>
-        <label className="field">But no more than, ETH<input name="cap" className="input" inputMode="decimal" defaultValue="10" required /></label>
-        <label className="field">Your tokens, % of supply<input name="share" className="input" inputMode="numeric" defaultValue="10" required /></label>
-        <label className="field">Unlocking over
+        <label className="field">🧀 You keep, % of the raise<input name="keep" className="input" inputMode="numeric" defaultValue="10" required /></label>
+        <label className="field">🧢 But no more than, ETH<input name="cap" className="input" inputMode="decimal" defaultValue="10" required /></label>
+        <label className="field">🥬 Your tokens, % of supply<input name="share" className="input" inputMode="numeric" defaultValue="10" required /></label>
+        <label className="field">🔓 Unlocking over
           <select name="vesting" className="input select-caret" defaultValue="52">
             {VESTING_WEEKS.map(weeks => <option key={weeks} value={weeks}>{weeks >= 52 ? `${weeks / 52} ${weeks === 52 ? 'year' : 'years'}` : '6 months'}</option>)}
           </select>
         </label>
       </div>
-      <label className="field">Pay your share to
+      <label className="field">👩‍🍳 Pay your share to
         <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
       </label>
       <p className="text-sm text-muted">🔒 Everything else goes into a pool nobody can pull. Nothing can be changed after.</p>
