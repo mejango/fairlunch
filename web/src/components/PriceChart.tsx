@@ -4,14 +4,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { formatChange, formatPrice, formatTokens } from '@/lib/format'
 import { readPriceHistory, type Lunch } from '@/lib/fair-lunch/reads'
-import { TOKENS_PER_ETH } from '@/lib/fair-lunch/split'
+import { RAISE_PRICE } from '@/lib/fair-lunch/split'
 
 export type Burn = { time: number; amount: string; txHash: string }
 
 const RANGES = [['1H', 3600], ['1D', 86400], ['1W', 604800], ['1M', 2592000], ['All', 0]] as const
 const POINTS = 120
 const W = 800, H = 320, PAD = 8
-const RAISE_PRICE = 1 / Number(TOKENS_PER_ETH)
 
 const clock = (time: number, long: boolean) => new Date(time * 1000).toLocaleString('en-US',
   long ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { hour: 'numeric', minute: '2-digit' })

@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { ChainIcon } from '@/components/ChainIcon'
-import { assetUrl, formatEth } from '@/lib/format'
+import { assetUrl, formatChange, formatEth, formatPrice } from '@/lib/format'
+import { RAISE_PRICE } from '@/lib/fair-lunch/split'
 import { listLunches } from '@/lib/fair-lunch/indexed'
 import { countdown, PHASE_LABEL, phaseOf } from '@/lib/fair-lunch/phase'
 import { projectPath } from '@/lib/urn'
@@ -28,7 +29,7 @@ export default async function Home() {
             return (
               <li key={`${lunch.chainId}:${lunch.projectId}`}>
                 <Link href={projectPath(lunch.chainId, lunch.projectId)} className="card block p-4 hover:border-ink">
-                  <Card name={lunch.name ?? `Lunch ${lunch.projectId}`} chainId={lunch.chainId} status={statusOf(lunch, paidIn, now)} raised={`${formatEth(paidIn)} ETH`}
+                  <Card name={lunch.name ?? `Lunch ${lunch.projectId}`} chainId={lunch.chainId} status={statusOf(lunch, paidIn, now)} {...figureOf(lunch.price, `${formatEth(paidIn)} ETH`)}
                     logo={logo ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={logo} alt="" className="h-12 w-12 rounded-lg border border-line object-cover" />
@@ -52,29 +53,36 @@ export default async function Home() {
 
 /** What an empty list shows instead: made-up lunches, labeled as examples and going nowhere. */
 const EXAMPLES = [
-  { logo: '🌯', name: 'Burrito', chainId: 8453, status: '🧑‍🍳 Cooking, 3d 4h left', raised: '12.5 ETH' },
-  { logo: '🥟', name: 'Dumpling', chainId: 1, status: '🍽️ Ready to serve', raised: '48 ETH' },
-  { logo: '🍜', name: 'Ramen', chainId: 42161, status: '🥪 Served 12d ago', raised: '7.2 ETH' },
+  { logo: '🌯', name: 'Burrito', chainId: 8453, status: 'Cooking, 3d 4h left', ...figureOf(null, '12.5 ETH') },
+  { logo: '🥟', name: 'Dumpling', chainId: 1, status: 'Served 2d ago', ...figureOf(0.00000137, '') },
+  { logo: '🍜', name: 'Ramen', chainId: 42161, status: 'Served 12d ago', ...figureOf(0.00000092, '') },
 ]
 
 /** A card's line for where its lunch is: time left while cooking, how long ago it was served after. */
 function statusOf(lunch: { deadline: number; servedAt: number }, raised: bigint, now: number): string {
   const phase = phaseOf(lunch, raised, now)
-  if (phase === 'cooking') return `🧑‍🍳 Cooking, ${countdown(lunch.deadline - now)} left`
-  if (phase === 'ready') return '🍽️ Ready to serve'
+  if (phase === 'cooking') return `Cooking, ${countdown(lunch.deadline - now)} left`
+  if (phase === 'ready') return 'Ready to serve'
   if (phase === 'empty') return PHASE_LABEL.empty
-  return `🥪 Served ${countdown(now - lunch.servedAt)} ago`
+  return `Served ${countdown(now - lunch.servedAt)} ago`
 }
 
-function Card({ logo, name, chainId, status, raised }: { logo: ReactNode; name: string; chainId: number; status: string; raised: string }) {
+/** A card's number: the market price and how far it is from the fundraise's once there's a pool, the raise before. */
+function figureOf(price: number | null, raised: string): { figure: ReactNode; note: string } {
+  if (price === null) return { figure: raised, note: 'raised' }
+  const change = price / RAISE_PRICE - 1
+  return { figure: <span className={change >= 0 ? 'text-[#2e7d32]' : 'text-accent'}>{formatChange(change)}</span>, note: `${formatPrice(price)} ETH` }
+}
+
+function Card({ logo, name, chainId, status, figure, note }: { logo: ReactNode; name: string; chainId: number; status: string; figure: ReactNode; note: string }) {
   return (
     <span className="flex items-center gap-3">
       {typeof logo === 'string' ? <span className="flex h-12 w-12 items-center justify-center rounded-lg border border-line text-xl">{logo}</span> : logo}
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5 font-bold"><span className="truncate">{name}</span> <ChainIcon chainId={chainId} /></span>
-        <span className="block text-sm text-muted">{status}</span>
+        <span className="block whitespace-nowrap text-sm text-muted">{status}</span>
       </span>
-      <span className="text-right"><span className="block font-bold tabular-nums">{raised}</span><span className="block text-sm text-muted">raised</span></span>
+      <span className="shrink-0 text-right"><span className="block font-bold tabular-nums">{figure}</span><span className="block text-xs tabular-nums text-muted">{note}</span></span>
     </span>
   )
 }

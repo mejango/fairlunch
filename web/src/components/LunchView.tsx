@@ -42,7 +42,7 @@ function Stat({ label, value, action }: { label: ReactNode; value: string; actio
 }
 
 /** The pie's colors: where a raise goes. */
-const POOL = '#2e7d32', CREATOR = '#f5b942'
+const POOL = '#2e7d32', CREATOR = '#f5b942', FUNDERS = '#2f6fed'
 const Swatch = ({ color }: { color: string }) => <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />
 
 /** Uniswap's own page for a lunch's pool, on the chains its app shows. */
@@ -265,6 +265,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
   const logo = assetUrl(logoUri)
   // Each part of the raise as a percent of it, for the pie.
   const slice = (wei: bigint) => (lunch.balance > 0n ? Number((wei * 10_000n) / lunch.balance) / 100 : 0)
+  const tokenTotal = lunch.supply + split.poolTokens + split.creatorTokens
+  const part = (tokens: bigint) => (tokenTotal > 0n ? Number((tokens * 10_000n) / tokenTotal) / 100 : 0)
   const timer =
     phase === 'cooking' ? `${countdown(lunch.deadline - now)} left`
     : phase === 'resting' ? `buybacks start in ${countdown(lunch.servedAt + REST_SECONDS - now)}`
@@ -329,6 +331,21 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
                   <Stat label={<><Swatch color={CREATOR} />👩‍🍳 To the creator and fees</>} value={`${formatEth(split.creatorEth + split.fee)} ETH`} />
                 </dl>
               </div>
+              {tokenTotal > 0n ? (
+                <>
+                  <p className="mt-5 text-sm text-muted">Tokens if served now</p>
+                  <p className="text-2xl font-bold tabular-nums">{formatTokens(tokenTotal)} {lunch.symbol}</p>
+                  <div className="mt-3 flex items-center gap-5">
+                    <div role="img" aria-label="Who gets the tokens" className="h-24 w-24 shrink-0 rounded-full border border-line"
+                      style={{ background: `conic-gradient(${FUNDERS} 0 ${part(lunch.supply)}%, ${POOL} 0 ${part(lunch.supply + split.poolTokens)}%, ${CREATOR} 0)` }} />
+                    <dl className="space-y-2">
+                      <Stat label={<><Swatch color={FUNDERS} />🥬 Funders</>} value={formatTokens(lunch.supply)} />
+                      <Stat label={<><Swatch color={POOL} />🔒 The pool</>} value={formatTokens(split.poolTokens)} />
+                      <Stat label={<><Swatch color={CREATOR} />👩‍🍳 The creator, unlocking</>} value={formatTokens(split.creatorTokens)} />
+                    </dl>
+                  </div>
+                </>
+              ) : null}
             </>
           )}
           <p className="mt-4 text-sm text-muted">

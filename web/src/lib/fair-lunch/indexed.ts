@@ -3,12 +3,15 @@ import { PRODUCTION_CHAINS, TESTNET_CHAINS } from '@/lib/chains'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
 import { deploymentOn } from './deployments'
+import { readLunch } from './reads'
 
 /** A lunch as the home page lists it. Server only: Bendystraw is read here and nowhere in the browser. */
 export type ListedLunch = {
   chainId: number; projectId: number; name: string | null; symbol: string | null; logoUri: string | null
   /** Everything ever paid in, in wei. */
   paidIn: string; deadline: number; servedAt: number
+  /** The pool's price in ETH per token, once served and readable. */
+  price: number | null
 }
 
 const LIST = `query FairLunches($owners: [String!]) {
@@ -34,8 +37,9 @@ export async function listLunches(network: 'mainnet' | 'testnet'): Promise<Liste
       address: deployment.address, abi: fairLunchAbi, functionName: 'recordOf', args: [BigInt(row.projectId)],
     }).catch(() => null)
     if (!record || Number(record.hostChainId) !== row.chainId) return null
+    const price = record.servedAt ? (await readLunch(row.chainId, row.projectId).catch(() => null))?.price ?? null : null
     return { chainId: row.chainId, projectId: row.projectId, name: row.name, symbol: row.tokenSymbol, logoUri: row.logoUri,
-      paidIn: row.volume, deadline: record.deadline, servedAt: record.servedAt }
+      paidIn: row.volume, deadline: record.deadline, servedAt: record.servedAt, price }
   }))
   return listed.filter(lunch => lunch !== null)
 }

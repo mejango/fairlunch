@@ -1,5 +1,7 @@
 /** How a raise divides at `serve`, mirroring `FairLunch.serve` step for step. All amounts in wei. */
 export const TOKENS_PER_ETH = 1_000_000n
+/** The fundraise's price, in ETH per token. */
+export const RAISE_PRICE = 1 / Number(TOKENS_PER_ETH)
 export const PERCENT_TOTAL = 1_000_000_000n
 /** Half: the most a creator can keep of the ETH or take of the tokens. */
 export const MAX_CREATOR_PERCENT = PERCENT_TOTAL / 2n
