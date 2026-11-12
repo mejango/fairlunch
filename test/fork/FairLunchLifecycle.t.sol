@@ -35,6 +35,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {FairLunchPool} from "../../src/FairLunchPool.sol";
 import {FairLunch} from "../../src/FairLunch.sol";
+import {FairLunchClaims} from "../../src/FairLunchClaims.sol";
 import {FairLunchDataHook} from "../../src/FairLunchDataHook.sol";
 import {FairLunchVestingDeployer} from "../../src/FairLunchVestingDeployer.sol";
 import {IFairLunch} from "../../src/interfaces/IFairLunch.sol";
@@ -375,6 +376,150 @@ contract FairLunchLifecycle is Test {
         vm.mockCall(address(USDC), abi.encodeWithSignature("decimals()"), abi.encode(uint8(25)));
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(config);
+    }
+
+    //*********************************************************************//
+    // ------------------------------ claims ----------------------------- //
+    //*********************************************************************//
+
+    function _leaf(address account, uint256 shares) internal pure returns (bytes32) {
+        return keccak256(bytes.concat(keccak256(abi.encode(account, shares))));
+    }
+
+    /// @notice A two-entry list: `first` and `second`, with their shares.
+    function _root(
+        address first,
+        uint256 firstShares,
+        address second,
+        uint256 secondShares
+    )
+        internal
+        pure
+        returns (bytes32)
+    {
+        (bytes32 a, bytes32 b) = (_leaf(first, firstShares), _leaf(second, secondShares));
+        return a < b ? keccak256(abi.encode(a, b)) : keccak256(abi.encode(b, a));
+    }
+
+    function _proof(address other, uint256 otherShares) internal pure returns (bytes32[] memory proof) {
+        proof = new bytes32[](1);
+        proof[0] = _leaf(other, otherShares);
+    }
+
+    /// @notice A lunch that gives `claimsPercent` of its supply to alice (75%) and bob (25%), served.
+    function _servedWithClaims(uint32 tokenPercent, uint32 claimsPercent) internal returns (uint256 id) {
+        FairLunchConfig memory config = _config(creator, 0, 0, tokenPercent);
+        config.claimsPercent = claimsPercent;
+        config.claimsRoot = _root(alice, 0.75e18, bob, 0.25e18);
+        id = lunch.createFor{value: PROJECTS.creationFee()}(config);
+        _pay(id, address(0xFEED), 10 ether);
+        vm.warp(deadline + 1);
+        lunch.serve(id);
+    }
+
+    function test_claims_getTheirShareOfSupply() public {
+        vm.deal(address(0xFEED), 10 ether);
+        uint256 id = _servedWithClaims(TENTH, 6 * TENTH);
+        FairLunchClaims claims = lunch.CLAIMS();
+        uint256 supply = TOKENS.totalSupplyOf(id);
+
+        assertApproxEqRel(claims.tokenCountOf(id), supply * 6 / 10, 1e9, "60% for the list");
+        assertEq(_token(id).balanceOf(address(claims)), claims.tokenCountOf(id), "held for the list");
+        assertApproxEqRel(_token(id).balanceOf(lunch.recordOf(id).vestingWallet), supply / 10, 1e9, "10% vesting");
+
+        // Anyone sends alice hers.
+        vm.prank(bob);
+        uint256 sent = claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
+        assertEq(sent, claims.tokenCountOf(id) * 3 / 4);
+        assertEq(_token(id).balanceOf(alice), sent);
+
+        claims.claim(id, bob, 0.25e18, _proof(alice, 0.75e18));
+        assertLe(_token(id).balanceOf(address(claims)), 1, "all handed out");
+    }
+
+    function test_claims_onlyOnceAndOnlyAsListed() public {
+        vm.deal(address(0xFEED), 10 ether);
+        uint256 id = _servedWithClaims(0, 8 * TENTH);
+        FairLunchClaims claims = lunch.CLAIMS();
+        assertEq(lunch.recordOf(id).vestingWallet, address(0), "no chef tokens");
+
+        // More than listed, or someone unlisted.
+        vm.expectRevert(
+            abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NotListed.selector, id, alice, uint256(1e18))
+        );
+        claims.claim(id, alice, 1e18, _proof(bob, 0.25e18));
+        vm.expectRevert(
+            abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NotListed.selector, id, creator, uint256(0.75e18))
+        );
+        claims.claim(id, creator, 0.75e18, _proof(bob, 0.25e18));
+
+        claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_AlreadyClaimed.selector, id, alice));
+        claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
+    }
+
+    function test_claims_waitForServe() public {
+        FairLunchConfig memory config = _config(creator, 0, 0, 0);
+        config.claimsPercent = 5 * TENTH;
+        config.claimsRoot = _root(alice, 0.75e18, bob, 0.25e18);
+        uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(config);
+        FairLunchClaims claims = lunch.CLAIMS();
+        assertEq(claims.percentOf(id), 5 * TENTH);
+
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NotServed.selector, id));
+        claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
+    }
+
+    function test_claims_onlyFairLunchSetsAndFunds() public {
+        FairLunchClaims claims = lunch.CLAIMS();
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_Unauthorized.selector, address(this)));
+        claims.setTermsOf(1, TENTH, bytes32(uint256(1)));
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_Unauthorized.selector, address(this)));
+        claims.fund(1, IERC20(address(1)), 1);
+    }
+
+    function test_createFor_revertsOnBadClaims() public {
+        uint256 fee = PROJECTS.creationFee();
+
+        // The chef and the list can't get more than 90% together.
+        FairLunchConfig memory config = _config(creator, 0, 0, 5 * TENTH);
+        config.claimsPercent = 4 * TENTH + 1;
+        config.claimsRoot = bytes32(uint256(1));
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(config);
+
+        // A share with no list, and a list with no share.
+        config.claimsPercent = TENTH;
+        config.claimsRoot = bytes32(0);
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(config);
+        config.claimsPercent = 0;
+        config.claimsRoot = bytes32(uint256(1));
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(config);
+    }
+
+    /// @notice Whatever the shares, the chef and the list get their percents of the supply and the list is never short.
+    /// forge-config: default.fuzz.runs = 64
+    function testFuzz_claims_anySplit(uint32 tokenPercent, uint32 claimsPercent, uint256 aliceShares) public {
+        tokenPercent = uint32(bound(tokenPercent, 0, 5 * TENTH));
+        claimsPercent = uint32(bound(claimsPercent, 1, 9 * TENTH - tokenPercent));
+        aliceShares = bound(aliceShares, 0, 1e18);
+
+        FairLunchConfig memory config = _config(creator, 0, 0, tokenPercent);
+        config.claimsPercent = claimsPercent;
+        config.claimsRoot = _root(alice, aliceShares, bob, 1e18 - aliceShares);
+        uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(config);
+        _pay(id, alice, 1 ether);
+        vm.warp(deadline + 1);
+        lunch.serve(id);
+
+        FairLunchClaims claims = lunch.CLAIMS();
+        uint256 supply = TOKENS.totalSupplyOf(id);
+        assertApproxEqRel(claims.tokenCountOf(id), supply * claimsPercent / 1e9, 1e12, "the list's percent");
+        claims.claim(id, alice, aliceShares, _proof(bob, 1e18 - aliceShares));
+        claims.claim(id, bob, 1e18 - aliceShares, _proof(alice, aliceShares));
+        assertLe(_token(id).balanceOf(address(claims)), 1, "all handed out");
     }
 
     function test_pay_revertsAfterDeadline() public {

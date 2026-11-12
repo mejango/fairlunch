@@ -42,6 +42,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
+import {FairLunchClaims} from "./FairLunchClaims.sol";
 import {FairLunchDataHook} from "./FairLunchDataHook.sol";
 import {FairLunchPool} from "./FairLunchPool.sol";
 import {FairLunchVestingDeployer} from "./FairLunchVestingDeployer.sol";
@@ -101,6 +102,10 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// `JBConstants.SPLITS_TOTAL_PERCENT`.
     uint256 public constant override MAX_CREATOR_PERCENT = JBConstants.SPLITS_TOTAL_PERCENT / 2;
 
+    /// @notice The most of the token supply the creator and the claims can get together, out of
+    /// `JBConstants.SPLITS_TOTAL_PERCENT`.
+    uint256 public constant override MAX_GRANTED_PERCENT = uint256(JBConstants.SPLITS_TOTAL_PERCENT) * 9 / 10;
+
     /// @notice The fee of every lunch's pool, in hundredths of a basis point (1%).
     uint24 public constant override POOL_FEE = 10_000;
 
@@ -153,6 +158,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
     /// @notice The deployer every lunch is launched through, which wires up its suckers.
     IJBOmnichainDeployer public immutable override OMNICHAIN_DEPLOYER;
+
+    /// @notice The holder of the tokens each lunch gives to a list of addresses.
+    FairLunchClaims public immutable override CLAIMS;
 
     /// @notice The holder of every lunch's liquidity, which trades in its pool.
     FairLunchPool public immutable override POOL;
@@ -243,6 +251,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         TOKENS = terminal.TOKENS();
         SUCKER_REGISTRY = suckerRegistry;
         POOL = new FairLunchPool(permit2);
+        CLAIMS = new FairLunchClaims();
         VESTING_DEPLOYER = vestingDeployer;
         _DEPLOYER = deployer;
     }
@@ -386,6 +395,8 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                 || (config.token == JBConstants.NATIVE_TOKEN) != (token == JBConstants.NATIVE_TOKEN)
                 || token == address(TOKENS.tokenOf(_FEE_PROJECT_ID)) || config.keepPercent > MAX_CREATOR_PERCENT
                 || config.tokenPercent > MAX_CREATOR_PERCENT
+                || uint256(config.tokenPercent) + config.claimsPercent > MAX_GRANTED_PERCENT
+                || (config.claimsPercent == 0) != (config.claimsRoot == bytes32(0))
         ) revert FairLunch_InvalidConfig();
 
         // A lunch needs this chain's Uniswap addresses.
@@ -405,7 +416,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                 config.keepPercent,
                 config.keepCap,
                 config.tokenPercent,
-                config.vestingDuration
+                config.vestingDuration,
+                config.claimsPercent,
+                config.claimsRoot
             )
         );
 
@@ -504,6 +517,11 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         record.keepCap = config.keepCap;
         record.tokenPercent = config.tokenPercent;
         record.vestingDuration = config.vestingDuration;
+
+        // The host hands out the claims.
+        if (isHost && config.claimsPercent != 0) {
+            CLAIMS.setTermsOf({projectId: projectId, percent: config.claimsPercent, root: config.claimsRoot});
+        }
 
         emit Create({
             projectId: projectId,
@@ -650,11 +668,25 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         uint256 left = _holdingOf(token) - before;
         if (left != 0) _addToBalanceOf({projectId: projectId, token: token, amount: left});
 
-        // Mint the creator's share of the total supply, now that it's settled, into a wallet that vests it linearly
-        // from now.
-        uint256 creatorTokens = mulDiv(
-            TOKENS.totalSupplyOf(projectId), record.tokenPercent, JBConstants.SPLITS_TOTAL_PERCENT - record.tokenPercent
+        // Mint the creator's and the claims' shares of the total supply, now that the rest of it is settled.
+        uint256 claimsPercent = CLAIMS.percentOf(projectId);
+        uint256 granted = mulDiv(
+            TOKENS.totalSupplyOf(projectId),
+            record.tokenPercent + claimsPercent,
+            JBConstants.SPLITS_TOTAL_PERCENT - record.tokenPercent - claimsPercent
         );
+        uint256 claimsTokens = mulDiv(granted, claimsPercent, record.tokenPercent + claimsPercent);
+        uint256 creatorTokens = granted - claimsTokens;
+
+        // The claims' tokens wait in `CLAIMS` for whoever sends each listed address its part.
+        if (claimsTokens != 0) {
+            _mintTokensOf({projectId: projectId, tokenCount: claimsTokens, beneficiary: address(CLAIMS)});
+            CLAIMS.fund({
+                projectId: projectId, token: IERC20(address(TOKENS.tokenOf(projectId))), tokenCount: claimsTokens
+            });
+        }
+
+        // The creator's tokens go into a wallet that vests them linearly from now.
         if (creatorTokens != 0) {
             record.vestingWallet = VESTING_DEPLOYER.deployFor({
                 beneficiary: record.creator,

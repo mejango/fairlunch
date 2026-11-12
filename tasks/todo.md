@@ -478,3 +478,22 @@ Review so far (2026-11-12):
 - Not in the site: buying a served lunch's token with another token (two swaps, two minimums). Uniswap's own page covers it.
 - Found on the way: where JBP6's router can't swap a lunch's money, the 2.5% fee on the raise sits in the router gateway for three days of failed retries before it can be refunded into the lunch's balance. RISKS.md says so.
 
+
+
+## Airdrop claims by merkle root (2026-11-12)
+
+jango: "we should make it easy for someone to upload a merklee root for claims that get distributed at the start of the lunch is served phase."
+
+Refinement record. Objective: a chef names a share of the supply and a list of addresses at creation; at `serve` that share is minted for the list, and anyone can deliver an address its part. System fit: one more mint beside the chef's vested one, sized from the same settled supply, so the pool, the fixed price and the burns don't change. Reuse: OpenZeppelin `MerkleProof`, the vesting mint's place in `serve`, Center's `pinJson` for the list. Evidence: `serve` already mints the chef's share from the final supply; `FairLunch` is 20,021 bytes with 4,555 spare, so the claims live in their own small contract as the vesting deployer does. Unknowns: how large a list the site can pin and read comfortably. Verification: fork tests for create, serve and claim (valid, repeated, wrong proof, unlisted), a fuzz over shares, a JS tree test whose root and proofs the contract accepts on the local fork, one Codex pass, the site tests. Budget: contract first, site after the ABI settles.
+
+Decisions taken, open to jango's correction:
+
+- The airdrop is its own share (`claimsPercent`), apart from the chef's vested tokens. The chef's cap stays 50%. Chef plus airdrop can be up to 90% of supply.
+- A list entry is an address and its share of the airdrop out of 1e18. The site turns a CSV of `address,amount` into shares. The root is fixed at creation and is part of the terms that set the token's address.
+- Claims are on the host chain, open from `serve`, never expire, and anyone can send one: the tokens go to the listed address. Nobody can change or reclaim the list.
+- The list is pinned to IPFS and named in the lunch's metadata so the site can build proofs.
+
+- [ ] `FairLunchClaims` and the `claimsPercent`, `claimsRoot` terms; `serve` mints and funds; tests.
+- [ ] RISKS.md and README; Codex pass.
+- [ ] Site: CSV on the create form, the airdrop in the token pie, a claim row on the served page; tests.
+- [ ] Local fork check with a real list.

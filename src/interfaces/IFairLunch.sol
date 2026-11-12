@@ -13,6 +13,7 @@ import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomean
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
+import {FairLunchClaims} from "../FairLunchClaims.sol";
 import {FairLunchDataHook} from "../FairLunchDataHook.sol";
 import {FairLunchPool} from "../FairLunchPool.sol";
 import {FairLunchVestingDeployer} from "../FairLunchVestingDeployer.sol";
@@ -83,6 +84,9 @@ interface IFairLunch {
     /// @notice The controller every lunch is launched with.
     function CONTROLLER() external view returns (IJBController);
 
+    /// @notice The holder of the tokens each lunch gives to a list of addresses.
+    function CLAIMS() external view returns (FairLunchClaims);
+
     /// @notice The data hook of every lunch, which holds the rules for its payments and cash outs.
     function DATA_HOOK() external view returns (FairLunchDataHook);
 
@@ -92,6 +96,10 @@ interface IFairLunch {
     /// @notice The most the creator can keep of the raise or of the token supply, out of
     /// `JBConstants.SPLITS_TOTAL_PERCENT`.
     function MAX_CREATOR_PERCENT() external view returns (uint256);
+
+    /// @notice The most of the token supply the creator and the claims can get together, out of
+    /// `JBConstants.SPLITS_TOTAL_PERCENT`.
+    function MAX_GRANTED_PERCENT() external view returns (uint256);
 
     /// @notice The deployer every lunch is launched through, which wires up its suckers.
     function OMNICHAIN_DEPLOYER() external view returns (IJBOmnichainDeployer);
