@@ -19,8 +19,6 @@ pragma solidity ^0.8.0;
 struct FairLunchRecord {
     uint64 hostChainId;
     address token;
-    uint48 deadline;
-    uint48 servedAt;
     address creator;
     uint32 keepPercent;
     uint104 keepCap;

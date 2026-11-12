@@ -139,6 +139,11 @@ interface IFairLunch {
     /// @return key The pool's key.
     function poolKeyOf(uint256 projectId) external view returns (PoolKey memory key);
 
+    /// @notice When a lunch was served.
+    /// @param projectId The ID of the lunch's project.
+    /// @return servedAt The timestamp the lunch was served at, or zero if it hasn't been, or is served elsewhere.
+    function servedAtOf(uint256 projectId) external view returns (uint256 servedAt);
+
     /// @notice What Fair Lunch remembers about a lunch.
     /// @param projectId The ID of the lunch's project.
     /// @return record The lunch's record.

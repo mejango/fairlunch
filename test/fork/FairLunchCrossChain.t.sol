@@ -438,12 +438,10 @@ contract FairLunchCrossChain is Test {
 
         vm.deal(alice, 1 ether);
         vm.prank(alice);
-        vm.expectRevert(
-            abi.encodeWithSelector(FairLunchDataHook.FairLunchDataHook_NotOpenYet.selector, id, uint256(deadline))
-        );
+        vm.expectRevert();
         TERMINAL.pay{value: 1 ether}(id, JBConstants.NATIVE_TOKEN, 1 ether, alice, 0, "", "");
 
-        vm.warp(uint256(deadline) + 1);
+        vm.warp(deadline);
         assertEq(_pay(id, 1 ether), 0, "taken once the fundraise is over");
     }
 

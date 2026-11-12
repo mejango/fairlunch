@@ -17,6 +17,7 @@ import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingCo
 import {JBCurrencyAmount} from "@bananapus/core-v6/src/structs/JBCurrencyAmount.sol";
 import {JBFundAccessLimitGroup} from "@bananapus/core-v6/src/structs/JBFundAccessLimitGroup.sol";
 import {JBRulesetConfig} from "@bananapus/core-v6/src/structs/JBRulesetConfig.sol";
+import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {JBRulesetMetadata} from "@bananapus/core-v6/src/structs/JBRulesetMetadata.sol";
 import {JBSplit} from "@bananapus/core-v6/src/structs/JBSplit.sol";
 import {JBSplitGroup} from "@bananapus/core-v6/src/structs/JBSplitGroup.sol";
@@ -274,11 +275,12 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         FairLunchRecord storage record = _recordOf[projectId];
 
         // Only a served lunch buys back.
-        if (record.servedAt == 0) revert FairLunch_NotServed(projectId);
+        uint256 servedAt = servedAtOf(projectId);
+        if (servedAt == 0) revert FairLunch_NotServed(projectId);
 
         // Wait for a window of the served pool's own price history.
-        if (block.timestamp < uint256(record.servedAt) + TWAP_WINDOW) {
-            revert FairLunch_TooEarly({projectId: projectId, readyAt: uint256(record.servedAt) + TWAP_WINDOW});
+        if (block.timestamp < servedAt + TWAP_WINDOW) {
+            revert FairLunch_TooEarly({projectId: projectId, readyAt: servedAt + TWAP_WINDOW});
         }
 
         // Take the lunch's whole balance. The data hook lets this contract, and only it, cash out everything for free.
@@ -324,7 +326,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         FairLunchRecord storage record = _recordOf[projectId];
 
         // Only a served lunch has a position.
-        if (record.servedAt == 0) revert FairLunch_NotServed(projectId);
+        if (servedAtOf(projectId) == 0) revert FairLunch_NotServed(projectId);
 
         address token = record.token;
         uint256 before = _holdingOf(token);
@@ -386,7 +388,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         // takes JBP6: this contract passes on all the JBP6 it holds as fee proceeds.
         if (
             config.creator == address(0) || config.hostChainId == 0 || (isHost && config.deadline <= block.timestamp)
-                || config.token == address(0)
+                || config.deadline > block.timestamp + type(uint32).max || config.token == address(0)
                 || (config.token == JBConstants.NATIVE_TOKEN) != (token == JBConstants.NATIVE_TOKEN)
                 || token == address(TOKENS.tokenOf(_FEE_PROJECT_ID)) || config.keepPercent > MAX_CREATOR_PERCENT
                 || uint256(config.tokenPercent) + config.claimsPercent >= JBConstants.SPLITS_TOTAL_PERCENT
@@ -433,11 +435,26 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             }
         }
 
-        // Only the host sells tokens. Everywhere else, payments mint nothing and wait to be sent home.
-        JBRulesetConfig[] memory rulesetConfigurations = new JBRulesetConfig[](1);
-        rulesetConfigurations[0] = _rulesetConfigOf({
+        // The rulesets are the lunch's clock. The host sells tokens until the deadline, then takes no payments until
+        // it's served. Everywhere else takes no payments until the deadline, since a payer there would get no tokens,
+        // and after it payments mint nothing and wait to be sent home.
+        bool beforeDeadline = config.deadline > block.timestamp;
+        JBRulesetConfig[] memory rulesetConfigurations = new JBRulesetConfig[](beforeDeadline ? 2 : 1);
+        if (beforeDeadline) {
+            rulesetConfigurations[0] = _rulesetConfigOf({
+                token: token,
+                duration: uint32(config.deadline - block.timestamp),
+                weight: isHost ? uint112(TOKENS_PER_UNIT * 1e18) : 0,
+                pausePay: !isHost,
+                splitGroups: new JBSplitGroup[](0),
+                fundAccessLimitGroups: new JBFundAccessLimitGroup[](0)
+            });
+        }
+        rulesetConfigurations[beforeDeadline ? 1 : 0] = _rulesetConfigOf({
             token: token,
-            weight: isHost ? uint112(TOKENS_PER_UNIT * 1e18) : 0,
+            duration: 0,
+            weight: 0,
+            pausePay: isHost,
             splitGroups: new JBSplitGroup[](0),
             fundAccessLimitGroups: new JBFundAccessLimitGroup[](0)
         });
@@ -505,7 +522,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         FairLunchRecord storage record = _recordOf[projectId];
         record.hostChainId = config.hostChainId;
         record.token = token;
-        record.deadline = config.deadline;
         record.creator = config.creator;
         record.keepPercent = config.keepPercent;
         record.keepCap = config.keepCap;
@@ -598,9 +614,14 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         if (record.hostChainId != block.chainid) {
             revert FairLunch_NotHost({projectId: projectId, hostChainId: record.hostChainId});
         }
-        if (record.servedAt != 0) revert FairLunch_AlreadyServed(projectId);
-        if (block.timestamp <= record.deadline) {
-            revert FairLunch_TooEarly({projectId: projectId, readyAt: uint256(record.deadline) + 1});
+
+        // The ruleset tells the time: still selling, waiting to be served, or served.
+        {
+            (JBRuleset memory ruleset, JBRulesetMetadata memory metadata) = CONTROLLER.currentRulesetOf(projectId);
+            if (ruleset.weight != 0) {
+                revert FairLunch_TooEarly({projectId: projectId, readyAt: uint256(ruleset.start) + ruleset.duration});
+            }
+            if (!metadata.pausePay) revert FairLunch_AlreadyServed(projectId);
         }
 
         address token = record.token;
@@ -616,9 +637,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             _balanceOf({projectId: projectId, token: token}), mulDiv(TOKENS.totalSupplyOf(projectId), unit, perToken)
         );
         if (raised == 0) revert FairLunch_NothingRaised(projectId);
-
-        // From here on the lunch is served: payments stop minting and start buying back.
-        record.servedAt = uint48(block.timestamp);
 
         // Anything this contract holds beyond this was sent to it by mistake and isn't the lunch's.
         uint256 before = _holdingOf(token);
@@ -756,6 +774,18 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     // -------------------------- public views --------------------------- //
     //*********************************************************************//
 
+    /// @notice When a lunch was served.
+    /// @dev A lunch's rulesets are its clock. On the host, the ruleset that sells tokens gives way at the deadline to
+    /// one that takes no payments, and `serve` replaces that with the one the lunch keeps forever, which started when
+    /// it was served.
+    /// @param projectId The ID of the lunch's project.
+    /// @return servedAt The timestamp the lunch was served at, or zero if it hasn't been, or is served elsewhere.
+    function servedAtOf(uint256 projectId) public view override returns (uint256 servedAt) {
+        if (_recordOf[projectId].hostChainId != block.chainid) return 0;
+        (JBRuleset memory ruleset, JBRulesetMetadata memory metadata) = CONTROLLER.currentRulesetOf(projectId);
+        return ruleset.weight != 0 || metadata.pausePay ? 0 : ruleset.start;
+    }
+
     /// @notice The Uniswap V4 pool of a lunch.
     /// @param projectId The ID of the lunch's project.
     /// @return key The pool's key.
@@ -847,7 +877,12 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
         JBRulesetConfig[] memory rulesetConfigurations = new JBRulesetConfig[](1);
         rulesetConfigurations[0] = _rulesetConfigOf({
-            token: token, weight: 0, splitGroups: splitGroups, fundAccessLimitGroups: fundAccessLimitGroups
+            token: token,
+            duration: 0,
+            weight: 0,
+            pausePay: false,
+            splitGroups: splitGroups,
+            fundAccessLimitGroups: fundAccessLimitGroups
         });
 
         // Queue through the omnichain deployer so the ruleset keeps the wrapper that serves the lunch's suckers.
@@ -942,16 +977,23 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         });
     }
 
-    /// @notice The ruleset every lunch uses: no reserved tokens, no cash outs, no owner powers beyond minting, and
-    /// `DATA_HOOK` deciding payments and cash outs.
+    /// @notice The ruleset every lunch uses: no reserved tokens, no owner powers beyond minting, and `DATA_HOOK`
+    /// deciding payments and cash outs. A ruleset that sells tokens doesn't tax cash outs, which is how a payer takes a
+    /// refund. Every other ruleset taxes them at 100%.
     /// @param token The lunch's money, which the ruleset counts in.
+    /// @param duration How long the ruleset lasts before the next one starts, in seconds. Zero lasts until another is
+    /// queued.
     /// @param weight The number of tokens minted per whole unit of money paid, as a fixed point number with 18
-    /// decimals. @param splitGroups The ruleset's splits.
+    /// decimals.
+    /// @param pausePay Whether the ruleset refuses payments.
+    /// @param splitGroups The ruleset's splits.
     /// @param fundAccessLimitGroups The ruleset's payout limits.
     /// @return config The ruleset's configuration.
     function _rulesetConfigOf(
         address token,
+        uint32 duration,
         uint112 weight,
+        bool pausePay,
         JBSplitGroup[] memory splitGroups,
         JBFundAccessLimitGroup[] memory fundAccessLimitGroups
     )
@@ -959,15 +1001,16 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         view
         returns (JBRulesetConfig memory config)
     {
+        config.duration = duration;
         config.weight = weight;
         config.approvalHook = IJBRulesetApprovalHook(address(0));
         config.splitGroups = splitGroups;
         config.fundAccessLimitGroups = fundAccessLimitGroups;
         config.metadata = JBRulesetMetadata({
             reservedPercent: 0,
-            cashOutTaxRate: JBConstants.MAX_CASH_OUT_TAX_RATE,
+            cashOutTaxRate: weight == 0 ? JBConstants.MAX_CASH_OUT_TAX_RATE : 0,
             baseCurrency: uint32(uint160(token)),
-            pausePay: false,
+            pausePay: pausePay,
             pauseCreditTransfers: false,
             allowOwnerMinting: true,
             allowSetCustomToken: false,

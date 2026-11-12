@@ -271,8 +271,7 @@ contract FairLunchLifecycle is Test {
         uint256 id = _create(FIFTH, 5 ether, TENTH);
         FairLunchRecord memory record = lunch.recordOf(id);
         assertEq(record.hostChainId, block.chainid);
-        assertEq(record.deadline, deadline);
-        assertEq(record.servedAt, 0);
+        assertEq(lunch.servedAtOf(id), 0);
         assertEq(record.creator, creator);
         assertEq(record.keepPercent, FIFTH);
         assertEq(record.keepCap, 5 ether);
@@ -301,6 +300,12 @@ contract FairLunchLifecycle is Test {
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(config);
 
+        // A fundraise longer than a ruleset can last.
+        config = _config(creator, 0, 0, 0);
+        config.deadline = uint48(block.timestamp + uint256(type(uint32).max) + 1);
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(config);
+
         config = _config(creator, 0, 0, 0);
         config.hostChainId = 0;
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
@@ -313,7 +318,7 @@ contract FairLunchLifecycle is Test {
         assertEq(_token(id).balanceOf(alice), 1_000_000e18, "paid as ERC-20");
 
         // Right up to the deadline.
-        vm.warp(deadline);
+        vm.warp(deadline - 1);
         assertEq(_pay(id, bob, 0.5 ether), 500_000e18);
     }
 
@@ -577,18 +582,16 @@ contract FairLunchLifecycle is Test {
         // Money that reached the balance another way isn't a payer's to take.
         TERMINAL.addToBalanceOf{value: 5 ether}(id, JBConstants.NATIVE_TOKEN, 5 ether, false, "", "");
 
-        vm.warp(deadline);
+        vm.warp(deadline - 1);
         // Leaving that money out rounds down, by a wei at most.
         assertApproxEqAbs(_sell(id, alice, 500_000e18, ""), 0.5 ether, 1, "half a unit back");
         assertEq(_token(id).balanceOf(alice), 1_500_000e18, "tokens burned");
         assertApproxEqAbs(_sell(id, bob, 1_000_000e18, ""), 1 ether, 1, "all of it back");
         assertApproxEqAbs(_balance(id), 6.5 ether, 2, "the rest stays");
 
-        // After the deadline the raise is settled.
-        vm.warp(deadline + 1);
-        vm.expectRevert(
-            abi.encodeWithSelector(FairLunchDataHook.FairLunchDataHook_Closed.selector, id, uint256(deadline))
-        );
+        // At the deadline the raise is settled.
+        vm.warp(deadline);
+        vm.expectRevert(abi.encodeWithSelector(FairLunchDataHook.FairLunchDataHook_Closed.selector, id));
         vm.prank(alice);
         TERMINAL.cashOutTokensOf(alice, id, 500_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
 
@@ -616,8 +619,8 @@ contract FairLunchLifecycle is Test {
 
         // Before the deadline.
         _pay(id, alice, 1 ether);
-        vm.warp(deadline);
-        vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_TooEarly.selector, id, uint256(deadline) + 1));
+        vm.warp(deadline - 1);
+        vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_TooEarly.selector, id, uint256(deadline)));
         lunch.serve(id);
 
         // Twice.
@@ -668,7 +671,7 @@ contract FairLunchLifecycle is Test {
         uint256 poolEth = 7.8 ether;
         assertApproxEqAbs(TOKENS.totalSupplyOf(id), supplyBefore + poolEth * 1_000_000, 1e12, "pool tokens");
         assertApproxEqAbs(_balance(id), 0, 1e9, "nothing left in the balance");
-        assertEq(lunch.recordOf(id).servedAt, _servedAt());
+        assertEq(lunch.servedAtOf(id), _servedAt());
         assertEq(
             IERC721Like(address(POSITION_MANAGER)).ownerOf(lunch.recordOf(id).positionId),
             address(lunch.POOL()),

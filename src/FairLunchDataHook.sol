@@ -14,12 +14,12 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import {IFairLunch} from "./interfaces/IFairLunch.sol";
-import {FairLunchRecord} from "./structs/FairLunchRecord.sol";
 
 /// @notice The rules for paying and cashing out a lunch.
 /// @dev Every lunch's rulesets name this contract as their data hook, wrapped by `JBOmnichainDeployer`. While a lunch
-/// is cooking it sells at the fixed price until the deadline. Once it's served, a payment or cash out that names the
-/// least it will take goes to the Juicebox buyback hook, which trades it in the lunch's pool. The hook's own price
+/// is cooking its ruleset sells at the fixed price, and its payers can cash out for what they paid. Once it's served, a
+/// payment or cash out that names the least it will take goes to the Juicebox buyback hook, which trades it in the
+/// lunch's pool. The hook's own price
 /// check is too loose to rely on here, since a served lunch has no issuance price under it. So a payment without a
 /// minimum lands in the balance for `FairLunch.burn`, and a cash out without one reverts. Deployed by `FairLunch`,
 /// which it reads each lunch's record from.
@@ -28,9 +28,8 @@ contract FairLunchDataHook is IJBRulesetDataHook {
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
 
-    error FairLunchDataHook_Closed(uint256 projectId, uint256 deadline);
+    error FairLunchDataHook_Closed(uint256 projectId);
     error FairLunchDataHook_NoSale(uint256 projectId);
-    error FairLunchDataHook_NotOpenYet(uint256 projectId, uint256 deadline);
 
     //*********************************************************************//
     // --------------- public immutable stored properties ---------------- //
@@ -87,48 +86,35 @@ contract FairLunchDataHook is IJBRulesetDataHook {
             return (0, context.totalSupply, context.totalSupply, context.surplus.value, hookSpecifications);
         }
 
-        FairLunchRecord memory record = FAIR_LUNCH.recordOf(context.projectId);
-
-        // Before serving, and everywhere but the host, there's no pool to sell into.
-        if (record.servedAt == 0) {
-            if (record.hostChainId == block.chainid) {
-                // Once the deadline passes the raise is settled, and a cash out would burn the tokens for nothing.
-                if (block.timestamp > record.deadline) {
-                    revert FairLunchDataHook_Closed({projectId: context.projectId, deadline: record.deadline});
-                }
-
-                // Until then a holder takes back what the tokens were paid for. Money that reached the balance any
-                // other way isn't theirs, so the count is scaled down to leave it out. It's rounded up: the terminal
-                // rounds what it pays down, and rounding both ways down could pay nothing for a small cash out.
-                uint256 sold = mulDiv({
-                    x: context.totalSupply,
-                    y: 10 ** context.surplus.decimals,
-                    denominator: FAIR_LUNCH.TOKENS_PER_UNIT() * 1e18
-                });
-                return (
-                    0,
-                    context.surplus.value > sold
-                        ? Math.mulDiv({
-                            x: context.cashOutCount,
-                            y: sold,
-                            denominator: context.surplus.value,
-                            rounding: Math.Rounding.Ceil
-                        })
-                        : context.cashOutCount,
-                    context.totalSupply,
-                    context.surplus.value,
-                    hookSpecifications
-                );
-            }
-
+        // Only the ruleset that sells tokens doesn't tax cash outs. While it lasts a holder takes back what the tokens
+        // were paid for. Money that reached the balance any other way isn't theirs, so the count is scaled down to
+        // leave it out. It's rounded up: the terminal rounds what it pays down, and rounding both ways down could pay
+        // nothing for a small cash out.
+        if (context.cashOutTaxRate == 0) {
+            uint256 sold = mulDiv({
+                x: context.totalSupply,
+                y: 10 ** context.surplus.decimals,
+                denominator: FAIR_LUNCH.TOKENS_PER_UNIT() * 1e18
+            });
             return (
-                context.cashOutTaxRate,
-                context.cashOutCount,
+                0,
+                context.surplus.value > sold
+                    ? Math.mulDiv({
+                        x: context.cashOutCount,
+                        y: sold,
+                        denominator: context.surplus.value,
+                        rounding: Math.Rounding.Ceil
+                    })
+                    : context.cashOutCount,
                 context.totalSupply,
                 context.surplus.value,
                 hookSpecifications
             );
         }
+
+        // Until a lunch is served, and everywhere but its host, there's no pool to sell into, and a cash out would burn
+        // the tokens for nothing.
+        if (FAIR_LUNCH.servedAtOf(context.projectId) == 0) revert FairLunchDataHook_Closed(context.projectId);
 
         (cashOutTaxRate, cashOutCount, totalSupply, effectiveSurplusValue, hookSpecifications) =
             BUYBACK_REGISTRY.beforeCashOutRecordedWith(context);
@@ -153,33 +139,20 @@ contract FairLunchDataHook is IJBRulesetDataHook {
         override
         returns (uint256 weight, JBPayHookSpecification[] memory hookSpecifications)
     {
-        FairLunchRecord memory record = FAIR_LUNCH.recordOf(context.projectId);
-
-        // Everywhere but the host, payments mint nothing and wait to be sent home. While the host is still selling
-        // tokens they're refused, since a payer here would get none.
-        if (record.hostChainId != block.chainid) {
-            if (block.timestamp <= record.deadline) {
-                revert FairLunchDataHook_NotOpenYet({projectId: context.projectId, deadline: record.deadline});
-            }
+        // The ruleset that sells tokens is the only one with a price. A lunch that isn't served yet, or is served
+        // elsewhere, mints nothing: its payments wait to be sent home. The rulesets refuse payments while a payer would
+        // expect tokens and get none.
+        if (context.weight != 0 || FAIR_LUNCH.servedAtOf(context.projectId) == 0) {
             return (context.weight, hookSpecifications);
         }
 
-        if (record.servedAt != 0) {
-            // A payment that doesn't name the fewest tokens it will take, `(uint256 amountToSwapWith, uint256
-            // minimumSwapAmountOut, bool skipSplits)`, lands in the balance for `burn`.
-            if (_minimumIn({metadata: context.metadata, purpose: "pay", word: 1}) == 0) {
-                return (0, hookSpecifications);
-            }
-
-            return BUYBACK_REGISTRY.beforePayRecordedWith(context);
+        // A payment that doesn't name the fewest tokens it will take, `(uint256 amountToSwapWith, uint256
+        // minimumSwapAmountOut, bool skipSplits)`, lands in the balance for `burn`.
+        if (_minimumIn({metadata: context.metadata, purpose: "pay", word: 1}) == 0) {
+            return (0, hookSpecifications);
         }
 
-        // The fundraise is over once the deadline passes.
-        if (block.timestamp > record.deadline) {
-            revert FairLunchDataHook_Closed({projectId: context.projectId, deadline: record.deadline});
-        }
-
-        return (context.weight, hookSpecifications);
+        return BUYBACK_REGISTRY.beforePayRecordedWith(context);
     }
 
     /// @notice Lets a lunch's buyback hook mint its tokens: it mints what it buys to a payment's beneficiary, and
