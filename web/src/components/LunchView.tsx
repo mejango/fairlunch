@@ -206,8 +206,8 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
       <dl className="grid grid-cols-2 gap-4">
         <Stat label="Current price" value={lunch.price ? `${formatPrice(lunch.price)} ${lunch.money.symbol}` : '…'} />
         <Stat label="Supply" value={formatTokens(lunch.supply)} />
-        <Stat label="🔒 In the pool" value={lunch.pooled === null ? '…' : moneyText(lunch, lunch.pooled)} />
-        <Stat label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
+        <Stat label="In the pool" value={lunch.pooled === null ? '…' : moneyText(lunch, lunch.pooled)} />
+        <Stat label="Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
         <div className={ACTION_ROW}>
           <Stat label="Waiting to buy and burn" value={moneyText(lunch, lunch.balance)} />
           {phase === 'eating' && lunch.balance > 0n ? (
@@ -216,14 +216,14 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
           ) : null}
         </div>
         <div className={ACTION_ROW}>
-          <Stat label="🧾 Pool fees" value={fees ? `${moneyText(lunch, fees.money)} + ${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} />
+          <Stat label="Pool fees" value={fees ? `${moneyText(lunch, fees.money)} + ${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} />
           {fees && (fees.money > 0n || fees.tokens > 0n) ? (
             <TxAction chainId={lunch.chainId} className={SMALL} label="Collect" title="Collect pool fees" doneTitle="Collected"
               prepare={upkeep(lunch, 'collect', `Burns the pool's ${lunch.symbol} fees, pays its ${lunch.money.symbol} fees into JBP6 for the chef`)} />
           ) : null}
         </div>
         <div className={ACTION_ROW}>
-          <Stat label="👩‍🍳 Chef tokens vested" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
+          <Stat label="Chef tokens vested" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
           {lunch.tokenPercent === 0n ? null : (
             <TxAction chainId={lunch.chainId} className={SMALL} label="Release" title="Release vested tokens" doneTitle="Released" disabled={!releasable}
               prepare={async () => ({
