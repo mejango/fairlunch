@@ -178,9 +178,9 @@ export function CreateForm() {
         <li>Tokens go to funders, to the pool to match its money, and some to you.</li>
         <li>Later payments on any chain buy the token on the main chain and burn it.</li>
       </ul>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="field">🍞 Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
-        <label className="field">🥓 Ticker<input name="symbol" className="input uppercase" maxLength={10} required placeholder="SAND" /></label>
+      <div className="flex gap-4">
+        <label className="field min-w-0 flex-1">🍞 Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
+        <label className="field w-32 shrink-0">🥓 Ticker<input name="symbol" className="input uppercase" maxLength={10} required placeholder="SAND" /></label>
       </div>
       <label className="field">🍅 Logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif"
         className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
