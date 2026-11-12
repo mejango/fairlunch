@@ -328,7 +328,7 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
                 ) : null}
                 <dl className="space-y-2">
                   <Stat label={<><Swatch color={POOL} />🔒 To the pool</>} value={`${formatEth(split.poolEth)} ETH`} />
-                  <Stat label={<><Swatch color={CREATOR} />👩‍🍳 To the creator and fees</>} value={`${formatEth(split.creatorEth + split.fee)} ETH`} />
+                  <Stat label={<><Swatch color={CREATOR} />👩‍🍳 To the chef</>} value={`${formatEth(split.creatorEth + split.fee)} ETH`} />
                 </dl>
               </div>
               <p className="mt-3 text-sm text-muted">
@@ -344,7 +344,7 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
                     <dl className="space-y-2">
                       <Stat label={<><Swatch color={FUNDERS} />🥬 Funders</>} value={formatTokens(lunch.supply)} />
                       <Stat label={<><Swatch color={POOL} />🔒 The pool</>} value={formatTokens(split.poolTokens)} />
-                      <Stat label={<><Swatch color={CREATOR} />👩‍🍳 The creator, unlocking</>} value={formatTokens(split.creatorTokens)} />
+                      <Stat label={<><Swatch color={CREATOR} />👩‍🍳 The chef, vested</>} value={formatTokens(split.creatorTokens)} />
                     </dl>
                   </div>
                 </>
