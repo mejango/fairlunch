@@ -12,6 +12,13 @@ import {Deploy} from "./Deploy.s.sol";
 /// @dev `forge script script/Rehearse.s.sol --rpc-url <fork> --broadcast --unlocked --sender <account>`. Never run
 /// against a live chain: the broadcaster becomes the one-shot configurator.
 contract Rehearse is Deploy {
+    /// @notice Puts Fair Lunch alone on a second fork, at the same address, for a lunch with a copy there.
+    function deployOnly() external {
+        vm.startBroadcast();
+        _deploy({configurator: msg.sender});
+        vm.stopBroadcast();
+    }
+
     function rehearse() external {
         vm.startBroadcast();
         FairLunch lunch = _deploy({configurator: msg.sender});

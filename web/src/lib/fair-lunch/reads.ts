@@ -1,6 +1,7 @@
-import { jbControllerAbi, jbMultiTerminalAbi, jbTerminalStoreAbi, jbTokensAbi, NATIVE_TOKEN } from '@bananapus/nana-sdk-core'
+import { jbControllerAbi, jbMultiTerminalAbi, jbTerminalStoreAbi, jbTokensAbi, NATIVE_TOKEN, type JBChainId } from '@bananapus/nana-sdk-core'
 import { UNISWAP_V4_STATE_VIEW_ADDRESSES, uniswapV4PoolId, uniswapV4PriceAtTick, type UniswapV4PoolKey } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
-import { erc20Abi, parseAbi, type Address } from 'viem'
+import { claimFromSuckerMovement, getSuckerMovements, getV6SuckerPairs, type JBClaim } from '@bananapus/nana-sdk-core/v6'
+import { erc20Abi, isAddressEqual, parseAbi, type Address, type PublicClient } from 'viem'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
 import { deploymentOn } from './deployments'
@@ -114,4 +115,66 @@ export async function readPriceHistory(lunch: Pick<Lunch, 'chainId' | 'poolKey' 
     time: now - ago,
     price: 1.0001 ** -(Number(cumulatives[i + 1] - cumulatives[i]) / step),
   }))
+}
+
+/** A lunch's project on another chain. It mints nothing: what's paid there waits to be sent to the host. */
+export type Copy = {
+  chainId: number
+  projectId: number
+  /** ETH waiting there to be sent home. */
+  balance: bigint
+  /** ETH sent home that the bridge hasn't delivered yet. */
+  onTheWay: bigint
+  /** The host's sucker for this copy, and the delivered ETH it can bring in. */
+  hostSucker: Address
+  claims: JBClaim[]
+}
+
+const suckerAbi = parseAbi(['function projectId() view returns (uint256)', 'function peer() view returns (bytes32)'])
+const sameAddress = (word: `0x${string}`, address: Address) => isAddressEqual(`0x${word.slice(-40)}`, address)
+
+/**
+ * A lunch's copies on other chains, read from the host. A chain the creator hasn't made the lunch on yet has no
+ * sucker to answer, and is left out.
+ */
+export async function readCopies(lunch: Pick<Lunch, 'chainId' | 'projectId'>, signal?: AbortSignal): Promise<Copy[]> {
+  const host = jbCenterPublicClient(lunch.chainId, signal) as PublicClient
+  const { lunch: fairLunch } = await wiringOn(lunch.chainId)
+  const pairs = await getV6SuckerPairs(host, { chainId: lunch.chainId as JBChainId, projectId: BigInt(lunch.projectId) })
+  const copies = await Promise.all(pairs.map(async pair => {
+    const chainId = Number(pair.remoteChainId)
+    if (!deploymentOn(chainId)) return null
+    const client = jbCenterPublicClient(chainId, signal) as PublicClient
+    const there = { address: pair.remote, abi: suckerAbi } as const
+    const made = await Promise.all([client.readContract({ ...there, functionName: 'projectId' }), client.readContract({ ...there, functionName: 'peer' })]).catch(() => null)
+    // Only a sucker that points back at the host's is this lunch's copy.
+    if (!made || !sameAddress(made[1], pair.local)) return null
+    const { terminal, store } = await wiringOn(chainId)
+    const [balance, movements] = await Promise.all([
+      client.readContract({ address: store, abi: jbTerminalStoreAbi, functionName: 'balanceOf', args: [terminal, made[0], NATIVE_TOKEN] }),
+      getSuckerMovements(client, host, { sourceSucker: pair.remote, destinationSucker: pair.local, sourceToken: NATIVE_TOKEN as Address }),
+    ])
+    // Holders bridge through the same suckers. Only what was sent home to Fair Lunch is the lunch's.
+    const sentHome = movements.filter(movement => sameAddress(movement.leaf.beneficiary, fairLunch))
+    return {
+      chainId, projectId: Number(made[0]), balance, hostSucker: pair.local,
+      onTheWay: sentHome.filter(movement => movement.status === 'pending').reduce((sum, movement) => sum + movement.leaf.terminalTokenAmount, 0n),
+      claims: sentHome.filter(movement => movement.status === 'claimable').map(claimFromSuckerMovement),
+    }
+  }))
+  return copies.filter(copy => copy !== null)
+}
+
+/** The host lunch of a copy, or null when the project isn't a copy of one. */
+export async function readHostOf(chainId: number, projectId: number, signal?: AbortSignal): Promise<{ chainId: number; projectId: number } | null> {
+  const { lunch } = await wiringOn(chainId)
+  const client = jbCenterPublicClient(chainId, signal) as PublicClient
+  const record = await client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'recordOf', args: [BigInt(projectId)] })
+  const hostChainId = Number(record.hostChainId)
+  if (!hostChainId || hostChainId === chainId || !deploymentOn(hostChainId)) return null
+  const pairs = await getV6SuckerPairs(client, { chainId: chainId as JBChainId, projectId: BigInt(projectId) })
+  const pair = pairs.find(candidate => Number(candidate.remoteChainId) === hostChainId)
+  if (!pair) return null
+  const hostProjectId = await jbCenterPublicClient(hostChainId, signal).readContract({ address: pair.remote, abi: suckerAbi, functionName: 'projectId' }).catch(() => null)
+  return hostProjectId === null ? null : { chainId: hostChainId, projectId: Number(hostProjectId) }
 }

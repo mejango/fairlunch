@@ -1,10 +1,11 @@
 import { jbDirectoryAbi, jbMultiTerminalAbi, jbProjectsAbi, MappableAsset, NATIVE_TOKEN, parseSuckerDeployerConfig, type JBChainId } from '@bananapus/nana-sdk-core'
 import { buildPermit2ApproveTx, buildUniswapV4ExactInputSwapTx, quoteUniswapV4ExactInputSingle, UNISWAP_PERMIT2_ADDRESS, UNISWAP_V4_UNIVERSAL_ROUTER_ADDRESSES } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
+import { buildBridgeClaimTx, CCIP_SUCKER_TRANSPORT_VALUES, findSuckerTransportValue, type JBClaim } from '@bananapus/nana-sdk-core/v6'
 import { erc20Abi, maxUint256, pad, parseAbi, zeroHash, type Abi, type Address, type Hex } from 'viem'
 import type { TxRequest } from '@/hooks/useSafeTx'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
-import type { Lunch } from './reads'
+import type { Copy, Lunch } from './reads'
 import { wiringOn } from './reads'
 
 /** What a creator chooses. Percents are whole numbers, 0 to 50. */
@@ -56,10 +57,29 @@ export async function payTx(lunch: Pick<Lunch, 'chainId' | 'projectId'>, amount:
     args: [BigInt(lunch.projectId), NATIVE_TOKEN, amount, payer, 0n, '', '0x'], value: amount, label: 'Pay' }
 }
 
-/** One of the calls anyone can make for a lunch. `sendHome` carries the bridge's payment. */
-export async function upkeepTx(chainId: number, projectId: number, functionName: 'serve' | 'burn' | 'collect' | 'sendHome', value = 0n): Promise<TxRequest> {
+/** One of the calls anyone can make for a lunch on its host chain. */
+export async function upkeepTx(chainId: number, projectId: number, functionName: 'serve' | 'burn' | 'collect'): Promise<TxRequest> {
   const { lunch } = await wiringOn(chainId)
-  return { chainId, address: lunch, abi: fairLunchAbi as Abi, functionName, args: [BigInt(projectId)], value }
+  return { chainId, address: lunch, abi: fairLunchAbi as Abi, functionName, args: [BigInt(projectId)] }
+}
+
+/**
+ * Sending a copy's ETH to the host. The call carries the bridge's payment, and the contract returns what the bridge
+ * doesn't use, so this sends the smallest of the SDK's amounts that the call goes through with.
+ */
+export async function sendHomeTx(copy: Pick<Copy, 'chainId' | 'projectId'>, account: Address): Promise<TxRequest & { value: bigint }> {
+  const { lunch } = await wiringOn(copy.chainId)
+  const call = { address: lunch, abi: fairLunchAbi, functionName: 'sendHome', args: [BigInt(copy.projectId)] } as const
+  const client = jbCenterPublicClient(copy.chainId)
+  const value = await findSuckerTransportValue(CCIP_SUCKER_TRANSPORT_VALUES, amount => client.simulateContract({ ...call, account, value: amount }))
+  if (value === null) throw new Error("This can't be sent right now. Check you have ETH for the bridge.")
+  return { chainId: copy.chainId, ...call, abi: fairLunchAbi as Abi, value, label: 'Send home' }
+}
+
+/** Bringing delivered ETH into the host lunch. Anyone can; it goes to the lunch whoever calls. */
+export function claimTx(hostChainId: number, copy: Pick<Copy, 'hostSucker'>, claim: JBClaim): TxRequest {
+  const tx = buildBridgeClaimTx({ chainId: hostChainId as JBChainId, sucker: copy.hostSucker, claim })
+  return { ...tx, abi: tx.abi as Abi, label: 'Bring in' }
 }
 
 /** What `amountIn` swaps for in a lunch's pool right now: ETH for tokens, or tokens for ETH when `selling`. */

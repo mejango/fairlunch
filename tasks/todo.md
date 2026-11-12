@@ -124,12 +124,12 @@ File: `test/fork/FairLunchSpikes.t.sol`. Each test uses a throwaway harness cont
 
 ### Task 13: project page
 - [x] Phase and countdown, what was raised and how it splits, one card: Pay while cooking, Swap after serve (buy and sell, Permit2 approvals for sells), Serve, Burn and Collect buttons.
-- [ ] Send home button and a page for a lunch's other-chain copies. Left to the keeper job: it needs the bridge's fee quoted.
-- [ ] Component tests for card state per phase.
+- [x] Other chains on the lunch's page: what waits on each copy, Send home (the SDK's transport amounts, simulated; the contract refunds the rest), what's on the way, and Bring in for delivered ETH (the SDK's verified claim). A copy's own URL points at its host.
+- [x] Component tests for card state per phase (`web/test/lunch-view.test.tsx`).
 
 ### Task 14: chart
 - [x] Price from the pool's own oracle in one call (no indexer, no log scan), range buttons, crosshair, raise-price line, burn marks from Bendystraw.
-- [ ] Volume bars.
+- [ ] Volume bars. Not buildable in the site: Base RPCs cap `eth_getLogs` at 500 to 1,000 blocks and a day is 43,200, and Bendystraw records swaps only for registered buyback pools. Needs a Bendystraw handler for Fair Lunch pools once there is a deployed address.
 
 ### Task 15: web gates
 - [x] `npm run check`; copy pass.
@@ -216,4 +216,21 @@ Found on the way:
 - The copied lockfile pinned Next 16.3.8, which has critical advisories. Now 16.4.6, with `follow-redirects` and `zod` overridden to patched versions. Sticky and juicebox-money are still on 16.3.8.
 - The fork's default test account has a 7702 delegation on Base that forwards incoming ETH, so a sale from it looks like it paid nothing. Use a fresh funded account for sell checks.
 - Bendystraw doesn't index a fork, so the home list and burn marks are empty locally. Whether it indexes FairLunch's projects on a live chain is unchecked.
+
+### Phase B, other chains (2026-11-12)
+
+Checked on two local forks, Base as host and Optimism as copy, with Fair Lunch at the same address on both (`Rehearse.deployOnly()`), through `web/scripts/copy-check.mjs`.
+
+| Check | Result |
+|---|---|
+| Two-chain lunch made host first, copy paid 0.3 ETH | Host page lists Optimism with 0.3 ETH waiting and Send home; the copy's URL points at the host |
+| `sendHome` with the SDK's transport amounts | Went through offering 0.05 ETH. The bridge and sucker fee took 0.023 ETH, the rest came back. Copy balance 0, one pending movement of 0.3 ETH to Fair Lunch |
+| Bring in (the host's `claim`) | Not run: a fork can't deliver the bridge's message. The claim comes from the SDK's root-verified movements |
+| `npm run check` | Passes with 13 tests |
+
+Found on the way:
+
+- Sending 0.3 ETH home from Optimism cost 0.023 ETH on the fork. Small copies cost more to send than they hold; whoever automates `sendHome` needs a threshold.
+- A bare gas estimate for `createFor` ran out of gas every other run. The creation fee's JBP6 buyback writes an oracle slot once per second, so an estimate made in the same second as another JBP6 swap is 22,100 gas short of a later block. The site sends with the SDK's headroom, so it is covered; a script sending bare estimates is not.
+- The SDK's fallback log scan asks for 45,000 blocks, which the public Optimism RPC behind the fork rejects (10,000 cap). Center's RPC limit for the same scan is unchecked.
 

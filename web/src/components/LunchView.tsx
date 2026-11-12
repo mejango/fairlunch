@@ -8,11 +8,12 @@ import { PriceChart, type Burn } from '@/components/PriceChart'
 import { TxAction } from '@/components/TxAction'
 import { assetUrl, formatEth, formatPrice, formatTokens } from '@/lib/format'
 import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib/fair-lunch/phase'
-import { readLunch, type Lunch } from '@/lib/fair-lunch/reads'
+import { readCopies, readHostOf, readLunch, type Lunch } from '@/lib/fair-lunch/reads'
 import { PERCENT_TOTAL, splitOf, TOKENS_PER_ETH } from '@/lib/fair-lunch/split'
-import { payTx, quoteSwap, sellApprovalTx, swapTx, upkeepTx } from '@/lib/fair-lunch/writes'
+import { claimTx, payTx, quoteSwap, sellApprovalTx, sendHomeTx, swapTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import { useWallet } from '@/hooks/useWallet'
-import { chainName } from '@/lib/urn'
+import Link from 'next/link'
+import { chainName, projectPath } from '@/lib/urn'
 
 /** Refuse a buy that returns more than this much less than quoted. */
 const SLIPPAGE_BPS = 200n
@@ -155,6 +156,73 @@ function Upkeep({ lunch, phase }: { lunch: Lunch; phase: Phase }) {
   )
 }
 
+/** The lunch's other chains: what waits there, what's on the way, and the buttons anyone can press to move it. */
+function Copies({ lunch }: { lunch: Lunch }) {
+  const { data: copies } = useQuery({
+    queryKey: ['fair-lunch', 'copies', lunch.chainId, lunch.projectId],
+    queryFn: ({ signal }) => readCopies(lunch, signal),
+    refetchInterval: 60_000,
+  })
+  if (!copies?.length) return null
+  const host = chainName(lunch.chainId)
+  const secondary = 'btn-secondary min-h-[44px] px-4'
+  return (
+    <section className="card space-y-3 p-4">
+      <h2 className="text-lg font-bold">🚚 Other chains</h2>
+      <p className="text-sm text-muted">ETH paid on these chains gets no tokens. It goes to {host}.</p>
+      <ul className="divide-y divide-line">
+        {copies.map(copy => {
+          const arrived = copy.claims[0]
+          return (
+            <li key={copy.chainId} className="flex flex-wrap items-center justify-between gap-3 py-3">
+              <div>
+                <p className="flex items-center gap-1.5 font-semibold"><ChainIcon chainId={copy.chainId} /> {chainName(copy.chainId)}</p>
+                <p className="text-sm tabular-nums text-muted">
+                  {formatEth(copy.balance)} ETH waiting{copy.onTheWay > 0n ? `, ${formatEth(copy.onTheWay)} ETH on the way` : ''}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {copy.balance > 0n ? (
+                  <TxAction chainId={copy.chainId} className={secondary} label="Send home" title={`Send to ${host}`} doneTitle="Sent"
+                    prepare={async account => {
+                      const request = await sendHomeTx(copy, account)
+                      return { request, rows: [
+                        { label: 'Sends', value: `${formatEth(copy.balance)} ETH to ${lunch.name} on ${host}`, strong: true },
+                        { label: 'You pay up to', value: `${formatEth(request.value)} ETH for the bridge` },
+                        { label: 'You get back', value: "What the bridge doesn't use" },
+                      ] }
+                    }} />
+                ) : null}
+                {arrived ? (
+                  <TxAction chainId={lunch.chainId} className={secondary} label={`Bring in ${formatEth(arrived.leaf.terminalTokenAmount)} ETH`} title="Bring it in" doneTitle="Brought in"
+                    prepare={async () => ({ request: claimTx(lunch.chainId, copy, arrived), rows: [
+                      { label: 'Adds', value: `${formatEth(arrived.leaf.terminalTokenAmount)} ETH to ${lunch.name}`, strong: true },
+                      { label: 'Costs you', value: 'Network fee only' },
+                    ] })} />
+                ) : null}
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
+/** A project that isn't a lunch here may be one's copy: point at the lunch. */
+function NoLunch({ chainId, projectId }: { chainId: number; projectId: number }) {
+  const { data: host } = useQuery({
+    queryKey: ['fair-lunch', 'host-of', chainId, projectId],
+    queryFn: ({ signal }) => readHostOf(chainId, projectId, signal),
+  })
+  if (!host) return <p className="card p-6">🫙 No lunch here.</p>
+  return (
+    <p className="card p-6">
+      This lunch is on {chainName(host.chainId)}. <Link className="underline" href={projectPath(host.chainId, host.projectId)}>Go to it</Link>
+    </p>
+  )
+}
+
 const percent = (value: bigint) => `${Number((value * 1000n) / PERCENT_TOTAL) / 10}%`
 
 export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: number; projectId: number; burns: readonly Burn[]; logoUri: string | null }) {
@@ -166,7 +234,7 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
   })
   if (isPending) return <div className="card h-64 animate-pulse" aria-busy="true" />
   if (isError) return <p className="card p-6">This lunch couldn&apos;t load. It&apos;ll try again.</p>
-  if (!lunch) return <p className="card p-6">🫙 No lunch here.</p>
+  if (!lunch) return <NoLunch chainId={chainId} projectId={projectId} />
 
   const phase = phaseOf(lunch, lunch.balance, now)
   const split = splitOf(lunch.balance, lunch.supply, lunch)
@@ -225,6 +293,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
           <Upkeep lunch={lunch} phase={phase} />
         </div>
       </div>
+
+      <Copies lunch={lunch} />
     </div>
   )
 }
