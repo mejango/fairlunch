@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
-import { formatUnits, parseUnits } from 'viem'
+import { formatUnits, parseUnits, type Abi } from 'viem'
 import { useWallet } from '@/hooks/useWallet'
 import { ChainIcon } from '@/components/ChainIcon'
 import { PriceChart, type Burn } from '@/components/PriceChart'
@@ -10,7 +10,7 @@ import { TxAction } from '@/components/TxAction'
 import { assetUrl, formatEth, formatPrice, formatTokens } from '@/lib/format'
 import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib/fair-lunch/phase'
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
-import { readCopies, readHostOf, readLunch, readPoolFees, type Lunch } from '@/lib/fair-lunch/reads'
+import { readCopies, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
 import { PERCENT_TOTAL, splitOf, tokensFor } from '@/lib/fair-lunch/split'
 import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
@@ -186,13 +186,18 @@ const upkeep = (lunch: Lunch, functionName: 'serve' | 'burn' | 'collect', says: 
 const SMALL = 'btn-secondary min-h-[36px] px-3 text-sm'
 
 /** A number on its own row with the button that moves it at its right. */
-const ACTION_ROW = 'col-span-2 flex flex-wrap items-end justify-between gap-3'
+const ACTION_ROW = 'col-span-2 flex flex-wrap items-end justify-between gap-3 border-t border-line/50 pt-3'
 
 /** A served lunch's numbers, with the calls anyone can make beside what they'd move. */
 function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readonly Burn[]; now: number; phase: Phase }) {
   const { data: fees } = useQuery({
     queryKey: ['fair-lunch', 'pool-fees', lunch.chainId, lunch.projectId],
     queryFn: ({ signal }) => readPoolFees(lunch, signal),
+    refetchInterval: 60_000,
+  })
+  const { data: releasable } = useQuery({
+    queryKey: ['fair-lunch', 'releasable', lunch.chainId, lunch.projectId],
+    queryFn: ({ signal }) => readReleasable(lunch, signal),
     refetchInterval: 60_000,
   })
   const uniswap = UNISWAP_CHAIN[lunch.chainId]
@@ -217,7 +222,16 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
               prepare={upkeep(lunch, 'collect', `Burns the pool's ${lunch.symbol} fees, pays its ${lunch.money.symbol} fees into JBP6 for the chef`)} />
           ) : null}
         </div>
-        <Stat label="👩‍🍳 Chef tokens vested" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
+        <div className={ACTION_ROW}>
+          <Stat label="👩‍🍳 Chef tokens vested" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
+          {lunch.tokenPercent === 0n ? null : (
+            <TxAction chainId={lunch.chainId} className={SMALL} label="Release" title="Release vested tokens" doneTitle="Released" disabled={!releasable}
+              prepare={async () => ({
+                request: { ...releaseCall(lunch), abi: releaseCall(lunch).abi as Abi, label: `Sends the chef the ${lunch.symbol} that has vested` },
+                rows: [{ label: 'Sends', value: `${formatTokens(releasable ?? 0n)} ${lunch.symbol} to the chef`, strong: true }, { label: 'Costs you', value: 'Network fee only' }],
+              })} />
+          )}
+        </div>
       </dl>
       {uniswap ? (
         <p className="mt-4 text-sm">

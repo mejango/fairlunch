@@ -132,6 +132,18 @@ export async function readPoolFees(lunch: Pick<Lunch, 'chainId' | 'projectId'>, 
   return { tokens: result[0], money: result[1] }
 }
 
+const vestingAbi = parseAbi(['function releasable(address token) view returns (uint256)', 'function release(address token)'])
+
+/** How many of the chef's tokens have vested and not been released yet. */
+export async function readReleasable(lunch: Pick<Lunch, 'chainId' | 'vestingWallet' | 'token'>, signal?: AbortSignal): Promise<bigint> {
+  if (BigInt(lunch.vestingWallet) === 0n) return 0n
+  return jbCenterPublicClient(lunch.chainId, signal).readContract({ address: lunch.vestingWallet, abi: vestingAbi, functionName: 'releasable', args: [lunch.token] })
+}
+
+/** Sending the chef the tokens that have vested. Anyone can send it. */
+export const releaseCall = (lunch: Pick<Lunch, 'chainId' | 'vestingWallet' | 'token'>) =>
+  ({ chainId: lunch.chainId, address: lunch.vestingWallet, abi: vestingAbi, functionName: 'release', args: [lunch.token] }) as const
+
 export type PricePoint = { time: number; price: number }
 export type PriceHistory = { points: PricePoint[]; /** The oracle no longer keeps the whole range asked for. */ short: boolean }
 

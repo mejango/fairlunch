@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LunchView } from '@/components/LunchView'
 import type { Copy, Lunch } from '@/lib/fair-lunch/reads'
 
-const reads = vi.hoisted(() => ({ readLunch: vi.fn(), readCopies: vi.fn(), readHostOf: vi.fn(), readPoolFees: vi.fn() }))
+const reads = vi.hoisted(() => ({ readLunch: vi.fn(), readCopies: vi.fn(), readHostOf: vi.fn(), readPoolFees: vi.fn(), readReleasable: vi.fn().mockResolvedValue(0n), releaseCall: vi.fn() }))
 vi.mock('@/lib/fair-lunch/reads', () => reads)
 vi.mock('@/hooks/useWallet', () => ({ useWallet: () => ({ address: undefined, isConnected: false }) }))
 // The page's buttons and chart are their own units: a label is all the page decides about them.
@@ -77,19 +77,19 @@ describe('LunchView', () => {
     expect(text).toContain('Lunch is served')
     expect(text).toContain('buybacks start in 29m 0s')
     expect(text).toContain('See the pool on Uniswap')
-    expect(buttons()).toEqual(['↓', 'Buy SAND', 'Collect'])
+    expect(buttons()).toEqual(['↓', 'Buy SAND', 'Collect', 'Release'])
   })
 
   it('swaps, burns what waits and collects once eating', async () => {
     const text = await show(lunch({ deadline: NOW - 9000, servedAt: NOW - 7200, price: 0.000001, balance: ETH / 4n }))
     expect(text).toContain('Lunch is served')
     expect(text).toContain('0.01 ETH + 5 SAND')
-    expect(buttons()).toEqual(['↓', 'Buy SAND', '🔥 Buy and burn', 'Collect'])
+    expect(buttons()).toEqual(['↓', 'Buy SAND', '🔥 Buy and burn', 'Collect', 'Release'])
   })
 
   it('hides Burn and Collect when there is nothing for them to move', async () => {
     await show(lunch({ deadline: NOW - 9000, servedAt: NOW - 7200, price: 0.000001, balance: 0n }), [], { tokens: 0n, money: 0n })
-    expect(buttons()).toEqual(['↓', 'Buy SAND'])
+    expect(buttons()).toEqual(['↓', 'Buy SAND', 'Release'])
   })
 
   it('lists other chains with only the buttons that have something to move', async () => {
