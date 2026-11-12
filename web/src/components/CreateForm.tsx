@@ -199,7 +199,7 @@ export function CreateForm() {
       <label className="field">🥑 Pay your share to
         <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
       </label>
-      <p className="text-sm text-muted">🔒 Everything else goes into a pool nobody can pull. Nothing can be changed after.</p>
+      <p className="text-sm text-muted">🔒 Nothing can be changed after.</p>
       <TxError error={error} />
       <button type="submit" className="btn-primary min-h-[48px] px-5 text-lg" disabled={busy}>{busy ? 'Saving…' : 'Start cooking'}</button>
     </form>
