@@ -51,23 +51,7 @@ export function PriceChart({ lunch, burns }: { lunch: Lunch; burns: readonly Bur
 
   return (
     <section>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="text-3xl font-bold tabular-nums">{formatPrice(shown.price)} ETH</div>
-          <div className={`text-sm font-semibold ${up ? 'text-[#2e7d32]' : 'text-err'}`}>
-            {formatChange(change)} <span className="font-normal text-muted">{hover === null ? `past ${range[0] === 'All' ? 'all time' : range[0]}` : clock(shown.time, true)}</span>
-          </div>
-        </div>
-        <div className="flex gap-1" role="group" aria-label="Chart range">
-          {RANGES.map(option => (
-            <button key={option[0]} type="button" aria-pressed={option === range} onClick={() => { setRange(option); setHover(null) }}
-              className={`min-h-[44px] rounded-lg px-3 text-sm font-semibold ${option === range ? 'bg-ink text-bg' : 'text-muted hover:text-ink'}`}>
-              {option[0]}
-            </button>
-          ))}
-        </div>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="mt-3 h-auto w-full touch-none select-none" role="img" aria-label={`${lunch.symbol} price in ETH`}
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-auto w-full touch-none select-none" role="img" aria-label={`${lunch.symbol} price in ETH`}
         onPointerMove={event => {
           const box = event.currentTarget.getBoundingClientRect()
           const time = start + ((event.clientX - box.left) / box.width) * (end - start)
@@ -94,6 +78,21 @@ export function PriceChart({ lunch, burns }: { lunch: Lunch; burns: readonly Bur
         <span>{clock(start, end - start > 86400)}</span>
         <span>High {formatPrice(Math.max(...prices))}, low {formatPrice(Math.min(...prices))}</span>
         <span>{clock(end, end - start > 86400)}</span>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className={`text-sm font-semibold ${up ? 'text-[#2e7d32]' : 'text-err'}`}>
+            {formatChange(change)} <span className="font-normal text-muted">{hover === null ? `past ${range[0] === 'All' ? 'all time' : range[0]}` : `${formatPrice(shown.price)} ETH, ${clock(shown.time, true)}`}</span>
+          </div>
+        </div>
+        <div className="flex gap-1" role="group" aria-label="Chart range">
+          {RANGES.map(option => (
+            <button key={option[0]} type="button" aria-pressed={option === range} onClick={() => { setRange(option); setHover(null) }}
+              className={`min-h-[44px] rounded-lg px-3 text-sm font-semibold ${option === range ? 'bg-ink text-bg' : 'text-muted hover:text-ink'}`}>
+              {option[0]}
+            </button>
+          ))}
+        </div>
       </div>
       <p className="mt-2 text-sm text-muted">
         🔥 {inRange.length} {inRange.length === 1 ? 'burn' : 'burns'} in view. The dashed line is the raise price.{data?.short ? ' Older prices aren’t kept.' : ''}

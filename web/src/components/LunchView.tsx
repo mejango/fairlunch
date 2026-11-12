@@ -152,7 +152,7 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
   return (
     <>
       <dl className="grid grid-cols-2 gap-4">
-        <Stat label="Price" value={lunch.price ? `${formatPrice(lunch.price)} ETH` : '…'} />
+        <Stat label="Current price" value={lunch.price ? `${formatPrice(lunch.price)} ETH` : '…'} />
         <Stat label="Supply" value={formatTokens(lunch.supply)} />
         <Stat label="Waiting to burn" value={`${formatEth(lunch.balance)} ETH`} action={phase === 'eating' && lunch.balance > 0n ? (
           <TxAction chainId={lunch.chainId} className={SMALL} label="🔥 Burn" title="Buy and burn" doneTitle="Burned"
