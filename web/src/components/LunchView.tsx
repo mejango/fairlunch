@@ -207,11 +207,11 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
         <Stat label="Current price" value={lunch.price ? `${formatPrice(lunch.price)} ${lunch.money.symbol}` : '…'} />
         <Stat label="Supply" value={formatTokens(lunch.supply)} />
         <Stat label="🔒 In the pool" value={lunch.pooled === null ? '…' : moneyText(lunch, lunch.pooled)} />
-        <Stat label="Waiting to buy and burn" value={moneyText(lunch, lunch.balance)} />
+        <Stat label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
         <div className={ACTION_ROW}>
-          <Stat label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
+          <Stat label="Waiting to buy and burn" value={moneyText(lunch, lunch.balance)} />
           {phase === 'eating' && lunch.balance > 0n ? (
-            <TxAction chainId={lunch.chainId} className={SMALL} label="🔥 Buy and burn" title="Buy and burn" doneTitle="Burned"
+            <TxAction chainId={lunch.chainId} className={SMALL} label="Buy and burn" title="Buy and burn" doneTitle="Burned"
               prepare={upkeep(lunch, 'burn', `Buys ${lunch.symbol} from the pool and burns it`)} />
           ) : null}
         </div>

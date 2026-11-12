@@ -84,7 +84,7 @@ describe('LunchView', () => {
     const text = await show(lunch({ deadline: NOW - 9000, servedAt: NOW - 7200, price: 0.000001, balance: ETH / 4n }))
     expect(text).toContain('Lunch is served')
     expect(text).toContain('0.01 ETH + 5 SAND')
-    expect(buttons()).toEqual(['↓', 'Buy SAND', '🔥 Buy and burn', 'Collect', 'Release'])
+    expect(buttons()).toEqual(['↓', 'Buy SAND', 'Buy and burn', 'Collect', 'Release'])
   })
 
   it('hides Burn and Collect when there is nothing for them to move', async () => {
