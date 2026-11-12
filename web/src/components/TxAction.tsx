@@ -1,6 +1,7 @@
 'use client'
 
 import { useQueryClient } from '@tanstack/react-query'
+import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Address, Hex } from 'viem'
 import { TxConfirmDialog, type TxConfirmRow } from '@/components/ui/TxConfirmDialog'
@@ -33,6 +34,7 @@ export function TxAction({ chainId, label, title, doneTitle, prepare, onDone, di
   const { address, isConnected, openSignIn } = useWallet()
   const tx = useSafeTx(chainId)
   const client = useQueryClient()
+  const router = useRouter()
   const [review, setReview] = useState<Review | null>(null)
   const attempt = useRef(0)
   const current = review && review.account === address ? review : null
@@ -44,6 +46,8 @@ export function TxAction({ chainId, label, title, doneTitle, prepare, onDone, di
   useEffect(() => {
     if (!complete) return
     void client.invalidateQueries()
+    // What the server read for this page (the burn marks) is as stale as the client's reads.
+    router.refresh()
     done.current?.(tx.hash)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per confirmation, with the hash it confirmed
   }, [complete, client])

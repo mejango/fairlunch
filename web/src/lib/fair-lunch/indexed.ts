@@ -19,7 +19,8 @@ const LIST = `query FairLunches($owners: [String!]) {
 
 type Row = { chainId: number; projectId: number; name: string | null; tokenSymbol: string | null; logoUri: string | null; volume: string }
 
-/** Every lunch on its host chain, newest first. The index finds the projects Fair Lunch owns; the contract says which
+/** ponytail: the newest 200 projects Fair Lunch owns, copies included. Page through the index when there are more.
+ * Every lunch on its host chain, newest first. The index finds the projects Fair Lunch owns; the contract says which
  * chain hosts each and where it is in its life. */
 export async function listLunches(network: 'mainnet' | 'testnet'): Promise<ListedLunch[]> {
   const chains = (network === 'mainnet' ? PRODUCTION_CHAINS : TESTNET_CHAINS).filter(chain => deploymentOn(chain.id))
@@ -45,7 +46,8 @@ const BURNS = `query FairLunchBurns($chainId: Int!, $projectId: Int!, $from: Str
   }
 }`
 
-/** The burns Fair Lunch made of a lunch's token, newest first: the chart's 🔥 marks. */
+/** The burns Fair Lunch made of a lunch's token, newest first: the chart's 🔥 marks and the burned total.
+ * ponytail: the newest 500. A lunch with more needs a summed field in the index. */
 export async function burnsOf(chainId: number, projectId: number): Promise<{ time: number; amount: string; txHash: string }[]> {
   const deployment = deploymentOn(chainId)
   if (!deployment) return []

@@ -1,7 +1,7 @@
 import { jbControllerAbi, jbMultiTerminalAbi, jbTerminalStoreAbi, jbTokensAbi, NATIVE_TOKEN, type JBChainId } from '@bananapus/nana-sdk-core'
 import { UNISWAP_V4_STATE_VIEW_ADDRESSES, uniswapV4PoolId, uniswapV4PriceAtTick, type UniswapV4PoolKey } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { claimFromSuckerMovement, getSuckerMovements, getV6SuckerPairs, type JBClaim } from '@bananapus/nana-sdk-core/v6'
-import { erc20Abi, isAddressEqual, parseAbi, type Address, type PublicClient } from 'viem'
+import { encodeAbiParameters, encodePacked, erc20Abi, getContractAddress, isAddressEqual, keccak256, parseAbi, type Address, type Hex, type PublicClient } from 'viem'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
 import { deploymentOn } from './deployments'
@@ -29,12 +29,19 @@ export type Lunch = {
   poolKey: UniswapV4PoolKey
   /** The pool's price in ETH per token, once it exists. */
   price: number | null
+  /** The ETH in the pool at that price, once it exists. */
+  pooledEth: bigint | null
 }
 
-const stateViewAbi = parseAbi(['function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)'])
+const stateViewAbi = parseAbi([
+  'function getSlot0(bytes32 poolId) view returns (uint160 sqrtPriceX96, int24 tick, uint24 protocolFee, uint24 lpFee)',
+  'function getLiquidity(bytes32 poolId) view returns (uint128)',
+])
 const oracleAbi = [
   { type: 'function', name: 'observe', stateMutability: 'view', outputs: [{ type: 'int56[]' }, { type: 'uint160[]' }],
     inputs: [{ name: 'key', type: 'tuple', components: [{ name: 'currency0', type: 'address' }, { name: 'currency1', type: 'address' }, { name: 'fee', type: 'uint24' }, { name: 'tickSpacing', type: 'int24' }, { name: 'hooks', type: 'address' }] }, { name: 'secondsAgos', type: 'uint32[]' }] },
+  { type: 'function', name: 'observationCoverageOf', stateMutability: 'view', outputs: [{ type: 'uint32' }],
+    inputs: [{ name: 'key', type: 'tuple', components: [{ name: 'currency0', type: 'address' }, { name: 'currency1', type: 'address' }, { name: 'fee', type: 'uint24' }, { name: 'tickSpacing', type: 'int24' }, { name: 'hooks', type: 'address' }] }] },
 ] as const
 
 /** The token's price in ETH at a pool tick. The pool's currency0 is ETH. */
@@ -75,46 +82,82 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
   ])
   if (Number(record.hostChainId) !== chainId) return null
   const stateView = UNISWAP_V4_STATE_VIEW_ADDRESSES[chainId as keyof typeof UNISWAP_V4_STATE_VIEW_ADDRESSES]
-  const [name, symbol, slot0] = await Promise.all([
+  const pool = record.servedAt && stateView ? { address: stateView, abi: stateViewAbi, args: [uniswapV4PoolId(poolKey)] } as const : null
+  const [name, symbol, slot0, liquidity] = await Promise.all([
     client.readContract({ address: token, abi: erc20Abi, functionName: 'name' }),
     client.readContract({ address: token, abi: erc20Abi, functionName: 'symbol' }),
-    record.servedAt && stateView
-      ? client.readContract({ address: stateView, abi: stateViewAbi, functionName: 'getSlot0', args: [uniswapV4PoolId(poolKey)] })
-      : null,
+    pool ? client.readContract({ ...pool, functionName: 'getSlot0' }) : null,
+    pool ? client.readContract({ ...pool, functionName: 'getLiquidity' }) : null,
   ])
   return {
     chainId, projectId, hostChainId: Number(record.hostChainId), deadline: record.deadline, servedAt: record.servedAt,
     creator: record.creator, keepPercent: BigInt(record.keepPercent), keepCap: record.keepCap, tokenPercent: BigInt(record.tokenPercent),
     vestingDuration: record.vestingDuration, vestingWallet: record.vestingWallet, token, name, symbol, uri, balance, supply, poolKey,
     price: slot0 ? priceAt(slot0[1]) : null,
+    // The position spans every price, so its ETH (currency0) is its liquidity over the square root of the price.
+    pooledEth: slot0 && liquidity !== null && slot0[0] > 0n ? (liquidity << 96n) / slot0[0] : null,
   }
 }
 
 export type PricePoint = { time: number; price: number }
+export type PriceHistory = { points: PricePoint[]; /** The oracle no longer keeps the whole range asked for. */ short: boolean }
 
 /**
  * The pool's price over the last `seconds`, as `points` averages, from the pool's own oracle: one call, no indexer.
- * The oracle keeps the pool's whole life until it has traded in tens of thousands of separate blocks. Past that,
- * the oldest ranges fail to load and the chart says so.
+ * ponytail: the oracle keeps 1,801 observations, one per second the pool trades in, so a busy pool keeps as little as
+ * its last half hour. The range is cut to what's kept. Longer history needs the pool's swaps indexed.
  */
-export async function readPriceHistory(lunch: Pick<Lunch, 'chainId' | 'poolKey' | 'servedAt'>, seconds: number, points: number, signal?: AbortSignal): Promise<PricePoint[]> {
-  if (!lunch.servedAt) return []
+export async function readPriceHistory(lunch: Pick<Lunch, 'chainId' | 'poolKey' | 'servedAt'>, seconds: number, points: number, signal?: AbortSignal): Promise<PriceHistory> {
+  if (!lunch.servedAt) return { points: [], short: false }
   const client = jbCenterPublicClient(lunch.chainId, signal)
   const oracle = { address: lunch.poolKey.hooks, abi: oracleAbi } as const
   // The pool's history starts when the lunch was served, by the chain's clock.
-  const { timestamp } = await client.getBlock()
-  const span = Math.min(seconds, Number(timestamp) - lunch.servedAt)
+  const [{ timestamp }, kept] = await Promise.all([
+    client.getBlock(),
+    client.readContract({ ...oracle, functionName: 'observationCoverageOf', args: [lunch.poolKey] }),
+  ])
+  const asked = Math.min(seconds, Number(timestamp) - lunch.servedAt)
+  const span = Math.min(asked, kept)
+  const short = span < asked
   const step = Math.floor(span / points)
-  if (step < 1) return []
+  if (step < 1) return { points: [], short }
   const secondsAgos = Array.from({ length: points + 1 }, (_, i) => step * (points - i))
   const [cumulatives] = await client.readContract({ ...oracle, functionName: 'observe', args: [lunch.poolKey, secondsAgos] })
   const now = Number(timestamp)
   // An average tick is rarely whole. ETH is currency0 and both sides have 18 decimals, so a tick is tokens per ETH as
   // a power of 1.0001, and the token's price in ETH is its inverse.
-  return secondsAgos.slice(1).map((ago, i) => ({
+  return { short, points: secondsAgos.slice(1).map((ago, i) => ({
     time: now - ago,
     price: 1.0001 ** -(Number(cumulatives[i + 1] - cumulatives[i]) / step),
-  }))
+  })) }
+}
+
+export type MadeTerms = { salt: Hex; hostChainId: number; deadline: number; creator: Address; keepPercent: bigint; keepCap: bigint; tokenPercent: bigint; vestingDuration: number }
+
+/** Where `createFor` deploys a lunch's token: fixed by the terms and the wallet that sent them (the creator). */
+export function tokenAddressOf(terms: MadeTerms, on: { lunch: Address; controller: Address; tokens: Address; implementation: Address }): Address {
+  // FairLunch's salt, then the controller's, then the token store's: each scopes the one before to its caller.
+  const lunchSalt = keccak256(encodeAbiParameters(
+    [{ type: 'address' }, { type: 'bytes32' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
+    [terms.creator, terms.salt, BigInt(terms.hostChainId), BigInt(terms.deadline), terms.creator, terms.keepPercent, terms.keepCap, terms.tokenPercent, BigInt(terms.vestingDuration)]))
+  const controllerSalt = keccak256(encodePacked(['address', 'bytes32'], [on.lunch, lunchSalt]))
+  const salt = keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'bytes32' }], [on.controller, controllerSalt]))
+  // An ERC-1167 clone's creation code.
+  const bytecode = `0x3d602d80600a3d3981f3363d3d373d3d3d363d73${on.implementation.slice(2)}5af43d82803e903d91602b57fd5bf3` as Hex
+  return getContractAddress({ opcode: 'CREATE2', from: on.tokens, salt, bytecode })
+}
+
+/**
+ * The project a creator's terms already made on a chain, or null. The chain itself says whether a create went
+ * through, whatever this browser remembers of it.
+ */
+export async function findMade(terms: MadeTerms, chainId: number, signal?: AbortSignal): Promise<number | null> {
+  const { lunch, tokens, controller } = await wiringOn(chainId)
+  const client = jbCenterPublicClient(chainId, signal)
+  const implementation = await client.readContract({ address: tokens, abi: parseAbi(['function TOKEN() view returns (address)']), functionName: 'TOKEN' })
+  const token = tokenAddressOf(terms, { lunch, controller, tokens, implementation })
+  const projectId = await client.readContract({ address: tokens, abi: jbTokensAbi, functionName: 'projectIdOf', args: [token] })
+  return projectId ? Number(projectId) : null
 }
 
 /** A lunch's project on another chain. It mints nothing: what's paid there waits to be sent to the host. */
@@ -150,9 +193,10 @@ export async function readCopies(lunch: Pick<Lunch, 'chainId' | 'projectId'>, si
     // Only a sucker that points back at the host's is this lunch's copy.
     if (!made || !sameAddress(made[1], pair.local)) return null
     const { terminal, store } = await wiringOn(chainId)
+    // One chain's bridge history failing to load doesn't hide what waits there, or the other chains.
     const [balance, movements] = await Promise.all([
       client.readContract({ address: store, abi: jbTerminalStoreAbi, functionName: 'balanceOf', args: [terminal, made[0], NATIVE_TOKEN] }),
-      getSuckerMovements(client, host, { sourceSucker: pair.remote, destinationSucker: pair.local, sourceToken: NATIVE_TOKEN as Address }),
+      getSuckerMovements(client, host, { sourceSucker: pair.remote, destinationSucker: pair.local, sourceToken: NATIVE_TOKEN as Address }).catch(() => []),
     ])
     // Holders bridge through the same suckers. Only what was sent home to Fair Lunch is the lunch's.
     const sentHome = movements.filter(movement => sameAddress(movement.leaf.beneficiary, fairLunch))

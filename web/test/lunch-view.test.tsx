@@ -20,7 +20,7 @@ const lunch = (over: Partial<Lunch>): Lunch => ({
   keepPercent: 200_000_000n, keepCap: ETH, tokenPercent: 100_000_000n, vestingDuration: 52 * 604800, vestingWallet: '0x0000000000000000000000000000000000000002',
   token: '0x0000000000000000000000000000000000000003', name: 'Sandwich', symbol: 'SAND', uri: '', balance: 3n * ETH, supply: 3_000_000n * ETH,
   poolKey: { currency0: '0x0000000000000000000000000000000000000000', currency1: '0x0000000000000000000000000000000000000003', fee: 10000, tickSpacing: 200, hooks: '0x0000000000000000000000000000000000000004' },
-  price: null, ...over,
+  price: null, pooledEth: null, ...over,
 })
 
 let root: Root | null = null
@@ -71,7 +71,7 @@ describe('LunchView', () => {
     const text = await show(lunch({ deadline: NOW - 600, servedAt: NOW - 60, price: 0.000001 }))
     expect(text).toContain('Served')
     expect(text).toContain('buybacks start in 29m 0s')
-    expect(buttons()).toEqual(['Buy', 'Sell', 'Buy SAND'])
+    expect(buttons()).toEqual(['Buy', 'Sell', 'Buy SAND', '🧾 Collect pool fees'])
   })
 
   it('swaps, burns what waits and collects once eating', async () => {

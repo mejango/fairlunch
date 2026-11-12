@@ -7,7 +7,7 @@ import type { TxRequest } from '@/hooks/useSafeTx'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
 import type { Copy, Lunch } from './reads'
-import { wiringOn } from './reads'
+import { findMade, wiringOn } from './reads'
 import { TOKENS_PER_ETH } from './split'
 
 /** What a creator chooses. Percents are whole numbers, 0 to 50. */
@@ -22,6 +22,12 @@ export type LunchTerms = {
 /** The gas a bridged message needs on the other side, as `FairLunch` maps it at `serve`. */
 const SUCKER_MIN_GAS = 200_000
 const PERCENT = 10_000_000 // 1% of JBConstants.SPLITS_TOTAL_PERCENT
+
+/** The project these terms already made on a chain, or null: what a create that finished out of sight left behind. */
+export function madeOn(terms: LunchTerms, chainId: number, signal?: AbortSignal): Promise<number | null> {
+  return findMade({ salt: terms.salt, hostChainId: terms.hostChainId, deadline: terms.deadline, creator: terms.creator,
+    keepPercent: BigInt(terms.keepPercent * PERCENT), keepCap: terms.keepCapWei, tokenPercent: BigInt(terms.tokenPercent * PERCENT), vestingDuration: terms.vestingSeconds }, chainId, signal)
+}
 
 /** The `createFor` call for one of a lunch's chains. Every chain gets the same terms, or their bridges won't pair. */
 export async function createTx(terms: LunchTerms, chainId: number): Promise<TxRequest> {
@@ -62,13 +68,18 @@ export async function payTx(lunch: Pick<Lunch, 'chainId' | 'projectId'>, amount:
     args: [BigInt(lunch.projectId), NATIVE_TOKEN, amount, payer, amount * TOKENS_PER_ETH, '', '0x'], value: amount, label: 'Pay' }
 }
 
-/** One of the calls anyone can make for a lunch on its host chain. A collect with no fees to collect is refused. */
+/** One of the calls anyone can make for a lunch on its host chain. One that would do nothing is refused: a collect
+ * with no fees, or a burn the price limit stops before it buys anything. */
 export async function upkeepTx(chainId: number, projectId: number, functionName: 'serve' | 'burn' | 'collect', account: Address): Promise<TxRequest> {
   const { lunch } = await wiringOn(chainId)
   const call = { address: lunch, abi: fairLunchAbi, functionName, args: [BigInt(projectId)] } as const
   if (functionName === 'collect') {
     const { result } = await jbCenterPublicClient(chainId).simulateContract({ ...call, functionName, account })
     if (result[0] === 0n && result[1] === 0n) throw new Error('No pool fees to collect yet.')
+  }
+  if (functionName === 'burn') {
+    const { result } = await jbCenterPublicClient(chainId).simulateContract({ ...call, functionName, account })
+    if (result[0] === 0n && result[1] === 0n) throw new Error("The price is at its limit for now. Try again in a few minutes.")
   }
   return { chainId, ...call, abi: fairLunchAbi as Abi }
 }
@@ -101,21 +112,26 @@ export function quoteSwap(lunch: Pick<Lunch, 'chainId' | 'poolKey'>, amountIn: b
 }
 
 /** A swap with the pool through Uniswap's router, refusing less than `minimumOut`. A Safe gets the SDK's longer
- * deadline, since its owners sign one after another. */
-export function swapTx(lunch: Pick<Lunch, 'chainId' | 'poolKey'>, amountIn: bigint, minimumOut: bigint, recipient: Address, selling: boolean, isSafe: boolean): TxRequest {
-  const tx = buildUniswapV4ExactInputSwapTx({ chainId: lunch.chainId as JBChainId, poolKey: lunch.poolKey, zeroForOne: !selling, amountIn, minimumAmountOut: minimumOut, recipient, deadline: swapDeadline(isSafe) })
-  return { ...tx, abi: tx.abi as Abi, label: selling ? 'Sell' : 'Buy' }
+ * deadline, since its owners sign one after another. A sale can't run after its allowance ends (`until`), so its
+ * deadline never promises longer. */
+export function swapTx(lunch: Pick<Lunch, 'chainId' | 'poolKey'>, amountIn: bigint, minimumOut: bigint, recipient: Address, selling: boolean, isSafe: boolean, until?: number): TxRequest & { deadline: number } {
+  const deadline = Math.min(Number(swapDeadline(isSafe)), until ?? Infinity)
+  const tx = buildUniswapV4ExactInputSwapTx({ chainId: lunch.chainId as JBChainId, poolKey: lunch.poolKey, zeroForOne: !selling, amountIn, minimumAmountOut: minimumOut, recipient, deadline: BigInt(deadline) })
+  return { ...tx, abi: tx.abi as Abi, label: selling ? 'Sell' : 'Buy', deadline }
 }
 
 const permit2Abi = parseAbi(['function allowance(address owner, address token, address spender) view returns (uint160 amount, uint48 expiration, uint48 nonce)'])
 /** How long past a sale's own deadline the router may pull its tokens: the time to press Sell after allowing it. */
 const SALE_ALLOWANCE_SECONDS = 1200
+/** The least time an allowance must have left for a sale to use it. A Safe's owners need a day to sign. */
+const saleNeedsSeconds = (isSafe: boolean) => (isSafe ? 86_400 : 60)
 
 /**
- * The approval a sale of `amount` still needs from `owner`, or null when it can go. Uniswap pulls tokens through
- * Permit2: the token approves Permit2 once, then Permit2 lets the router take this sale's amount for a short while.
+ * The approval a sale of `amount` still needs from `owner` (`step`), or when the allowance it can go on ends
+ * (`until`). Uniswap pulls tokens through Permit2: the token approves Permit2 once, then Permit2 lets the router take
+ * this sale's amount for a while.
  */
-export async function sellApprovalTx(lunch: Pick<Lunch, 'chainId' | 'token'>, owner: Address, amount: bigint, isSafe: boolean): Promise<(TxRequest & { expiration?: number }) | null> {
+export async function sellApprovalTx(lunch: Pick<Lunch, 'chainId' | 'token'>, owner: Address, amount: bigint, isSafe: boolean): Promise<{ step: TxRequest & { expiration?: number } } | { step: null; until: number }> {
   const chainId = lunch.chainId as JBChainId
   const client = jbCenterPublicClient(chainId)
   const router = UNISWAP_V4_UNIVERSAL_ROUTER_ADDRESSES[chainId]
@@ -125,11 +141,11 @@ export async function sellApprovalTx(lunch: Pick<Lunch, 'chainId' | 'token'>, ow
     client.readContract({ address: UNISWAP_PERMIT2_ADDRESS, abi: permit2Abi, functionName: 'allowance', args: [owner, lunch.token, router] }),
   ])
   if (approved < amount) {
-    return { chainId, address: lunch.token, abi: erc20Abi as Abi, functionName: 'approve', args: [UNISWAP_PERMIT2_ADDRESS, maxUint256], label: 'Approve' }
+    return { step: { chainId, address: lunch.token, abi: erc20Abi as Abi, functionName: 'approve', args: [UNISWAP_PERMIT2_ADDRESS, maxUint256], label: 'Approve' } }
   }
   const now = Math.floor(Date.now() / 1000)
-  if (allowed >= amount && expiration > now + 60) return null
+  if (allowed >= amount && expiration > now + saleNeedsSeconds(isSafe)) return { step: null, until: expiration }
   const until = Number(swapDeadline(isSafe)) + SALE_ALLOWANCE_SECONDS
   const tx = buildPermit2ApproveTx({ chainId, token: lunch.token, amount, expiration: until })
-  return { ...tx, abi: tx.abi as Abi, label: 'Allow', expiration: until }
+  return { step: { ...tx, abi: tx.abi as Abi, label: 'Allow', expiration: until } }
 }

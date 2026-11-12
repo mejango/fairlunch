@@ -8,7 +8,9 @@ import { projectPath } from '@/lib/urn'
 export const dynamic = 'force-dynamic'
 
 export default async function Home() {
-  const lunches = (await Promise.all([listLunches('mainnet').catch(() => []), listLunches('testnet').catch(() => [])])).flat()
+  const lists = await Promise.allSettled([listLunches('mainnet'), listLunches('testnet')])
+  const lunches = lists.flatMap(list => (list.status === 'fulfilled' ? list.value : []))
+  const failed = lists.some(list => list.status === 'rejected')
   const now = Math.floor(Date.now() / 1000)
   return (
     <div className="space-y-6">
@@ -39,7 +41,7 @@ export default async function Home() {
             )
           })}
         </ul>
-      ) : <p className="card p-6 text-center text-muted">🍽️ Nothing cooking yet.</p>}
+      ) : <p className="card p-6 text-center text-muted">{failed ? 'The list couldn’t load. Try again soon.' : '🍽️ Nothing cooking yet.'}</p>}
     </div>
   )
 }

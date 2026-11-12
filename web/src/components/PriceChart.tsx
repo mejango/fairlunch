@@ -28,7 +28,7 @@ export function PriceChart({ lunch, burns }: { lunch: Lunch; burns: readonly Bur
   })
   // The live price closes the line, so the chart moves with the pool between reads of its history.
   const points = useMemo(() => {
-    const history = data ?? []
+    const history = data?.points ?? []
     return lunch.price ? [...history, { time: Math.floor(Date.now() / 1000), price: lunch.price }] : history
   }, [data, lunch.price])
 
@@ -61,7 +61,7 @@ export function PriceChart({ lunch, burns }: { lunch: Lunch; burns: readonly Bur
         <div className="flex gap-1" role="group" aria-label="Chart range">
           {RANGES.map(option => (
             <button key={option[0]} type="button" aria-pressed={option === range} onClick={() => { setRange(option); setHover(null) }}
-              className={`min-h-[36px] rounded-lg px-3 text-sm font-semibold ${option === range ? 'bg-ink text-bg' : 'text-muted hover:text-ink'}`}>
+              className={`min-h-[44px] rounded-lg px-3 text-sm font-semibold ${option === range ? 'bg-ink text-bg' : 'text-muted hover:text-ink'}`}>
               {option[0]}
             </button>
           ))}
@@ -95,7 +95,9 @@ export function PriceChart({ lunch, burns }: { lunch: Lunch; burns: readonly Bur
         <span>High {formatPrice(Math.max(...prices))}, low {formatPrice(Math.min(...prices))}</span>
         <span>{clock(end, end - start > 86400)}</span>
       </div>
-      <p className="mt-2 text-sm text-muted">🔥 {inRange.length} {inRange.length === 1 ? 'burn' : 'burns'} in view. The dashed line is the raise price.</p>
+      <p className="mt-2 text-sm text-muted">
+        🔥 {inRange.length} {inRange.length === 1 ? 'burn' : 'burns'} in view. The dashed line is the raise price.{data?.short ? ' Older prices aren’t kept.' : ''}
+      </p>
     </section>
   )
 }

@@ -24,9 +24,9 @@ export function formatChange(ratio: number): string {
   return `${ratio >= 0 ? '+' : ''}${(ratio * 100).toFixed(1)}%`
 }
 
-/** An image a project names, through Center's gateway when it's on IPFS. Anything but https or ipfs is not shown. */
+/** An image a project names, through Center's gateway. Only IPFS is shown: any other address would let whoever made
+ * the project see who looks at it. */
 export function assetUrl(uri: string | null | undefined): string | null {
-  if (!uri) return null
-  if (uri.startsWith('ipfs://')) return `https://juicebox.center/ipfs/${uri.slice(7)}`
-  return uri.startsWith('https://') ? uri : null
+  const path = uri?.startsWith('ipfs://') ? uri.slice(7) : ''
+  return /^[A-Za-z0-9]+(\/[\w.~%-]+)*$/.test(path) ? `https://juicebox.center/ipfs/${path}` : null
 }

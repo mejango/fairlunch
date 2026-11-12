@@ -93,7 +93,7 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
     queryFn: () => sellApprovalTx(lunch, address!, amount, isSafeConnection(wagmiConfig)),
     enabled: selling && amount > 0n && !!address,
   })
-  const step = selling ? approval.data?.label : undefined
+  const step = selling ? approval.data?.step?.label : undefined
   const verb = step === 'Approve' ? `Approve ${lunch.symbol}` : step === 'Allow' ? 'Allow this sale' : `${selling ? 'Sell' : 'Buy'} ${lunch.symbol}`
   return (
     <section className="card space-y-3 p-4">
@@ -102,7 +102,7 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
         <div className="flex gap-1" role="group" aria-label="Direction">
           {[false, true].map(sell => (
             <button key={String(sell)} type="button" aria-pressed={selling === sell} onClick={() => { setSelling(sell); setText('') }}
-              className={`min-h-[36px] rounded-lg px-3 text-sm font-semibold ${selling === sell ? 'bg-ink text-bg' : 'text-muted hover:text-ink'}`}>
+              className={`min-h-[44px] rounded-lg px-3 text-sm font-semibold ${selling === sell ? 'bg-ink text-bg' : 'text-muted hover:text-ink'}`}>
               {sell ? 'Sell' : 'Buy'}
             </button>
           ))}
@@ -119,9 +119,9 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
           if (amount === 0n) throw new Error('Enter an amount.')
           // Read once, as the send does: a Safe's owners sign one after another, so its deadlines are longer.
           const isSafe = isSafeConnection(wagmiConfig)
-          const found = selling ? await sellApprovalTx(lunch, account, amount, isSafe) : null
-          if (found) {
-            const { expiration, ...approve } = found
+          const sale = selling ? await sellApprovalTx(lunch, account, amount, isSafe) : null
+          if (sale?.step) {
+            const { expiration, ...approve } = sale.step
             return { request: approve, rows: [
               { label: 'Does', value: expiration ? `Lets this sale take ${format(amount, from)} until ${new Date(expiration * 1000).toLocaleString()}` : `Lets Uniswap move your ${lunch.symbol} when you sell` },
               { label: 'Costs you', value: 'Network fee only' },
@@ -129,9 +129,12 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
           }
           const out = await quoteSwap(lunch, amount, selling)
           const minimum = out - (out * SLIPPAGE_BPS) / 10_000n
-          return { request: swapTx(lunch, amount, minimum, account, selling, isSafe), rows: [
+          const { deadline, ...request } = swapTx(lunch, amount, minimum, account, selling, isSafe, sale?.until)
+          return { request, rows: [
             { label: 'You pay', value: format(amount, from), strong: true },
             { label: 'You get at least', value: format(minimum, to) },
+            // A Safe's owners sign over days: say when the swap stops being good.
+            ...(isSafe ? [{ label: 'Must run by', value: new Date(deadline * 1000).toLocaleString() }] : []),
           ] }
         }} />
     </section>
@@ -148,10 +151,10 @@ function Upkeep({ lunch, phase }: { lunch: Lunch; phase: Phase }) {
   if (phase === 'ready') {
     return <TxAction chainId={lunch.chainId} label="🍽️ Serve it" title="Serve lunch" doneTitle="Served" prepare={call('serve', 'Pays the creator, opens the pool, locks the liquidity')} />
   }
-  if (phase !== 'eating') return null
+  if (!lunch.servedAt) return null
   return (
     <div className="grid gap-2 sm:grid-cols-2">
-      {lunch.balance > 0n ? (
+      {phase === 'eating' && lunch.balance > 0n ? (
         <TxAction chainId={lunch.chainId} className={secondary} label={`🔥 Burn with ${formatEth(lunch.balance)} ETH`} title="Buy and burn" doneTitle="Burned"
           prepare={call('burn', `Buys ${lunch.symbol} from the pool and burns it`)} />
       ) : null}
@@ -244,6 +247,9 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
   const phase = phaseOf(lunch, lunch.balance, now)
   const split = splitOf(lunch.balance, lunch.supply, lunch)
   const logo = assetUrl(logoUri)
+  // The creator's share before the fee, as it fills toward its cap.
+  const uncapped = (lunch.balance * lunch.keepPercent) / PERCENT_TOTAL
+  const kept = uncapped < lunch.keepCap ? uncapped : lunch.keepCap
   const timer =
     phase === 'cooking' ? `${countdown(lunch.deadline - now)} left`
     : phase === 'resting' ? `buybacks start in ${countdown(lunch.servedAt + REST_SECONDS - now)}`
@@ -276,7 +282,9 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
               <Stat label="Price" value={lunch.price ? `${formatPrice(lunch.price)} ETH` : '…'} />
               <Stat label="Supply" value={formatTokens(lunch.supply)} />
               <Stat label="Waiting to burn" value={`${formatEth(lunch.balance)} ETH`} />
-              <Stat label="Burns" value={String(burns.length)} />
+              <Stat label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
+              <Stat label="🔒 In the pool" value={lunch.pooledEth === null ? '…' : `${formatEth(lunch.pooledEth)} ETH`} />
+              <Stat label="👩‍🍳 Creator tokens unlocked" value={lunch.tokenPercent === 0n ? 'None' : `${Math.min(100, Math.floor(((now - lunch.servedAt) * 100) / (lunch.vestingDuration || 1)))}%`} />
             </dl>
           ) : (
             <dl className="grid grid-cols-2 gap-4">
@@ -286,6 +294,10 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
               </div>
               <Stat label="🔒 To the pool" value={`${formatEth(split.poolEth)} ETH`} />
               <Stat label="👩‍🍳 To the creator" value={`${formatEth(split.creatorEth)} ETH`} />
+              {lunch.keepPercent > 0n && lunch.keepCap > 0n ? (
+                <progress className="col-span-2 h-2 w-full" aria-label="The creator's share, toward its cap"
+                  max={Number(formatUnits(lunch.keepCap, 18))} value={Number(formatUnits(kept, 18))} />
+              ) : null}
             </dl>
           )}
           <p className="mt-4 text-sm text-muted">

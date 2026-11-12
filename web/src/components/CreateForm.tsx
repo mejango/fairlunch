@@ -2,6 +2,7 @@
 
 import { JBCenterClient } from '@bananapus/nana-sdk-core/jbcenter'
 import { useRouter } from 'next/navigation'
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type FormEvent } from 'react'
 import { parseEther, parseEventLogs, toHex, type Hex } from 'viem'
 import { TxAction } from '@/components/TxAction'
@@ -10,7 +11,7 @@ import { useWallet } from '@/hooks/useWallet'
 import { environmentForChainIds, PRODUCTION_CHAINS, TESTNET_CHAINS } from '@/lib/chains'
 import { fairLunchAbi } from '@/lib/fair-lunch/abi'
 import { deploymentOn } from '@/lib/fair-lunch/deployments'
-import { createTx, type LunchTerms } from '@/lib/fair-lunch/writes'
+import { createTx, madeOn, type LunchTerms } from '@/lib/fair-lunch/writes'
 import { jbCenterBaseUrl } from '@/lib/jbcenter-config'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { chainName, projectPath } from '@/lib/urn'
@@ -53,6 +54,22 @@ export function CreateForm() {
     const finished = terms && [terms.hostChainId, ...terms.otherChainIds].every(chainId => chainId in made)
     saveAttempt(terms && !finished ? { terms, made, hostPath } : null)
   }, [restored, terms, made, hostPath])
+
+  // A create can finish while this page is closed, or in a Safe after its other owners sign. The chain knows.
+  const unmade = terms ? [terms.hostChainId, ...terms.otherChainIds].filter(chainId => !(chainId in made)) : []
+  const { data: found } = useQuery({
+    queryKey: ['fair-lunch', 'made', terms?.salt, unmade.join()],
+    queryFn: ({ signal }) => Promise.all(unmade.map(async chainId => [chainId, await madeOn(terms!, chainId, signal).catch(() => null)] as const)),
+    enabled: restored && unmade.length > 0,
+    refetchInterval: 15_000,
+  })
+  useEffect(() => {
+    for (const [chainId, projectId] of found ?? []) {
+      if (projectId === null) continue
+      setMade(before => (chainId in before ? before : { ...before, [chainId]: null }))
+      if (chainId === terms?.hostChainId) setHostPath(before => before ?? projectPath(chainId, projectId))
+    }
+  }, [found, terms?.hostChainId])
 
   if (!CHAINS.length) return <p className="card p-6">🧑‍🍳 Fair Lunch isn&apos;t live yet.</p>
   const others = CHAINS.filter(chain => chain.id !== hostId && environmentForChainIds([chain.id]) === environmentForChainIds([hostId]))
@@ -153,7 +170,7 @@ export function CreateForm() {
         <fieldset className="text-sm">
           <legend className="font-semibold">Also collect on</legend>
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
-            {others.map(chain => <label key={chain.id} className="flex min-h-[32px] items-center gap-2"><input type="checkbox" name={`also-${chain.id}`} /> {chainName(chain.id)}</label>)}
+            {others.map(chain => <label key={chain.id} className="flex min-h-[44px] items-center gap-2"><input type="checkbox" name={`also-${chain.id}`} /> {chainName(chain.id)}</label>)}
           </div>
         </fieldset>
       ) : null}
