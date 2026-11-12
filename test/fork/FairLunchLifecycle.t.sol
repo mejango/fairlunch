@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {IJBBuybackHook} from "@bananapus/buyback-hook-v6/src/interfaces/IJBBuybackHook.sol";
+import {IJBBuybackHookRegistry} from "@bananapus/buyback-hook-v6/src/interfaces/IJBBuybackHookRegistry.sol";
+import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminalStore} from "@bananapus/core-v6/src/interfaces/IJBTerminalStore.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
+import {JBMetadataResolver} from "@bananapus/core-v6/src/libraries/JBMetadataResolver.sol";
+import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {IJBOmnichainDeployer} from "@bananapus/omnichain-deployers-v6/src/interfaces/IJBOmnichainDeployer.sol";
 import {IJBSuckerRegistry} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerRegistry.sol";
 import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
@@ -28,6 +33,7 @@ import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
 
 import {FairLunch} from "../../src/FairLunch.sol";
+import {FairLunchDataHook} from "../../src/FairLunchDataHook.sol";
 import {FairLunchVestingDeployer} from "../../src/FairLunchVestingDeployer.sol";
 import {IFairLunch} from "../../src/interfaces/IFairLunch.sol";
 import {FairLunchConfig} from "../../src/structs/FairLunchConfig.sol";
@@ -126,6 +132,8 @@ contract FairLunchLifecycle is Test {
     IJBTerminalStore internal constant STORE = IJBTerminalStore(0x7497ae014A60561925B51C0A3B4adE7460B9927C);
     IJBTokens internal constant TOKENS = IJBTokens(0x1f80d8f057eE36b4C2656D107E4e4558B71bA7D9);
     IJBProjects internal constant PROJECTS = IJBProjects(0x6017d1FBa9DC279BFA0B03fD931C22E242AB3691);
+    IJBBuybackHookRegistry internal constant BUYBACK =
+        IJBBuybackHookRegistry(0x72F55a54CD53410a5Ff175508a5A384227081788);
     IJBSuckerRegistry internal constant REGISTRY = IJBSuckerRegistry(0x7903a854aE91eAf635430D120a1a434085cEf297);
     IPoolManager internal constant POOL_MANAGER = IPoolManager(0x498581fF718922c3f8e6A244956aF099B2652b2b);
     IPositionManager internal constant POSITION_MANAGER = IPositionManager(0x7C5f5A4bBd8fD63184577525326123B519429bDc);
@@ -149,6 +157,7 @@ contract FairLunchLifecycle is Test {
         vestingDeployer = new FairLunchVestingDeployer();
         lunch = new FairLunch({
             omnichainDeployer: OMNI,
+            buybackRegistry: BUYBACK,
             terminal: TERMINAL,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
@@ -232,6 +241,47 @@ contract FairLunchLifecycle is Test {
         lunch.serve(id);
     }
 
+    /// @notice What a payment tells the buyback hook: the fewest tokens it will take.
+    function _payMetadata(uint256 minimum) internal pure returns (bytes memory) {
+        return _metadata("pay", abi.encode(uint256(0), minimum, true));
+    }
+
+    /// @notice What a cash out tells the buyback hook: the least ETH it will take.
+    function _sellMetadata(uint256 minimum) internal pure returns (bytes memory) {
+        return _metadata("cashOut", abi.encode(minimum, false));
+    }
+
+    function _metadata(string memory purpose, bytes memory data) internal pure returns (bytes memory) {
+        bytes4[] memory ids = new bytes4[](1);
+        ids[0] = JBMetadataResolver.getId(purpose, address(BUYBACK));
+        bytes[] memory datas = new bytes[](1);
+        datas[0] = data;
+        return JBMetadataResolver.createMetadata(ids, datas);
+    }
+
+    /// @notice Pay a lunch with metadata. Returns the tokens the payer ended up with.
+    function _buy(uint256 id, address from, uint256 amount, bytes memory metadata) internal returns (uint256) {
+        uint256 before = _token(id).balanceOf(from);
+        vm.prank(from);
+        TERMINAL.pay{value: amount}(id, JBConstants.NATIVE_TOKEN, amount, from, 0, "", metadata);
+        return _token(id).balanceOf(from) - before;
+    }
+
+    /// @notice Cash a lunch's tokens out. Returns the ETH the holder ended up with.
+    function _sell(uint256 id, address from, uint256 count, bytes memory metadata) internal returns (uint256) {
+        uint256 before = from.balance;
+        vm.prank(from);
+        TERMINAL.cashOutTokensOf(from, id, count, JBConstants.NATIVE_TOKEN, 0, payable(from), metadata);
+        return from.balance - before;
+    }
+
+    /// @notice A first trade in a served lunch's pool, a minute after serving. The buyback hook prices from the pool's
+    /// history, and there's none to read until something has traded.
+    function _trade(uint256 id) internal {
+        vm.warp(_servedAt() + 1 minutes);
+        _buy(id, bob, 0.0001 ether, _payMetadata(1));
+    }
+
     function _assertHoldsNothing(uint256 id) internal view {
         assertEq(address(lunch).balance, 0, "lunch holds ETH");
         assertEq(TOKENS.totalBalanceOf(address(lunch), id), 0, "lunch holds tokens");
@@ -300,37 +350,65 @@ contract FairLunchLifecycle is Test {
         TERMINAL.pay{value: 1 ether}(id, JBConstants.NATIVE_TOKEN, 1 ether, alice, 0, "", "");
     }
 
-    function test_cashOut_reclaimsNothing_everyPhase() public {
+    function test_cashOut_reclaimsNothingBeforeServing() public {
         uint256 id = _create(FIFTH, 5 ether, TENTH);
         _pay(id, alice, 10 ether);
 
-        vm.prank(alice);
-        uint256 reclaimed =
-            TERMINAL.cashOutTokensOf(alice, id, 1_000_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
-        assertEq(reclaimed, 0, "cooking");
+        assertEq(_sell(id, alice, 1_000_000e18, ""), 0, "cooking");
         assertEq(_balance(id), 10 ether);
 
         vm.warp(deadline + 1);
-        vm.prank(alice);
-        reclaimed = TERMINAL.cashOutTokensOf(alice, id, 1_000_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
-        assertEq(reclaimed, 0, "ready to serve");
+        assertEq(_sell(id, alice, 1_000_000e18, ""), 0, "ready to serve");
         assertEq(_balance(id), 10 ether);
+    }
 
-        lunch.serve(id);
+    function test_cashOut_sellsIntoThePoolOnceServed() public {
+        uint256 id = _served(0, 0, 0);
+        uint256 supply = TOKENS.totalSupplyOf(id);
+        uint256 balance = _balance(id);
+
+        // Before the pool has its own price history, a sale has to name its minimum.
+        vm.expectRevert(abi.encodeWithSelector(FairLunchDataHook.FairLunchDataHook_NoSale.selector, id));
+        vm.prank(alice);
+        TERMINAL.cashOutTokensOf(alice, id, 10_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
+
+        // 10,000 tokens sell for just under 0.01 ETH after the 1% fee.
+        vm.warp(_servedAt() + 1 minutes);
+        assertApproxEqRel(_sell(id, alice, 10_000e18, _sellMetadata(0.0098 ether)), 0.0099 ether, 0.01e18, "sold");
+        assertEq(TOKENS.totalSupplyOf(id), supply, "the pool holds them now");
+        assertEq(_balance(id), balance, "the balance isn't touched");
+
+        // A minimum the pool can't pay stops the sale.
+        vm.expectRevert();
+        vm.prank(alice);
+        TERMINAL.cashOutTokensOf(
+            alice, id, 10_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), _sellMetadata(0.011 ether)
+        );
+
+        // With history, a sale without a minimum is held to the pool's average price.
+        vm.warp(_servedAt() + 30 minutes);
+        assertApproxEqRel(_sell(id, alice, 10_000e18, ""), 0.0099 ether, 0.01e18, "sold at the average");
+        _assertHoldsNothing(id);
+    }
+
+    function test_cashOut_neverReclaimsWhatWaitsInTheBalance() public {
+        uint256 id = _served(0, 0, 0);
         _pay(id, bob, 1 ether);
-
-        vm.prank(alice);
-        reclaimed = TERMINAL.cashOutTokensOf(alice, id, 1_000_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
-        assertEq(reclaimed, 0, "served");
-        assertApproxEqAbs(_balance(id), 1 ether, 1e9);
-
-        // Once buybacks can run, what waits for the next one is still nobody's to cash out.
-        vm.warp(_servedAt() + 31 minutes);
+        _trade(id);
+        vm.warp(_servedAt() + 30 minutes);
         uint256 waiting = _balance(id);
-        vm.prank(alice);
-        reclaimed = TERMINAL.cashOutTokensOf(alice, id, 1_000_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
-        assertEq(reclaimed, 0, "eating");
+
+        assertGt(_sell(id, alice, 10_000e18, ""), 0, "sold to the pool");
         assertEq(_balance(id), waiting);
+    }
+
+    /// @notice A pool nothing has traded in has no history to price a sale by, so a sale has to name its minimum.
+    function test_cashOut_withoutAMinimumNeedsPriceHistory() public {
+        uint256 id = _served(0, 0, 0);
+        vm.warp(_servedAt() + 60 minutes);
+        vm.expectRevert(abi.encodeWithSelector(FairLunchDataHook.FairLunchDataHook_NoSale.selector, id));
+        vm.prank(alice);
+        TERMINAL.cashOutTokensOf(alice, id, 10_000e18, JBConstants.NATIVE_TOKEN, 0, payable(alice), "");
     }
 
     function test_unlockCallback_onlyPoolManager() public {
@@ -540,59 +618,73 @@ contract FairLunchLifecycle is Test {
         lunch.burn(id);
     }
 
-    function test_pay_afterServe_waitsThirtyMinutes() public {
+    function test_pay_afterServe_withoutAMinimumWaitsThirtyMinutes() public {
         uint256 id = _served(0, 0, 0);
         uint256 supply = TOKENS.totalSupplyOf(id);
 
-        assertEq(_pay(id, bob, 1 ether), 0, "mints nothing");
-        assertEq(TOKENS.totalSupplyOf(id), supply, "nothing bought yet");
+        assertEq(_buy(id, bob, 1 ether, ""), 0, "buys nothing");
+        assertEq(TOKENS.totalSupplyOf(id), supply, "mints nothing");
         assertApproxEqAbs(_balance(id), 1 ether, 1e9, "the payment waits in the balance");
         _assertHoldsNothing(id);
     }
 
-    function test_pay_buysAndBurnsInTheSameTransaction() public {
+    function test_pay_afterServe_withAMinimumBuysRightAway() public {
         uint256 id = _served(0, 0, 0);
         uint256 supply = TOKENS.totalSupplyOf(id);
+        uint256 balance = _balance(id);
+
+        // 0.01 ETH buys just under 10,000 tokens after the 1% fee and a little slippage.
+        assertApproxEqRel(_buy(id, bob, 0.01 ether, _payMetadata(9800e18)), 9900e18, 0.01e18, "bought");
+        assertEq(TOKENS.totalSupplyOf(id), supply, "from the pool, not minted");
+        assertEq(_balance(id), balance, "nothing waits");
+
+        // A minimum the pool can't meet stops the payment.
+        vm.expectRevert();
+        vm.prank(bob);
+        TERMINAL.pay{value: 0.01 ether}(id, JBConstants.NATIVE_TOKEN, 0.01 ether, bob, 0, "", _payMetadata(10_000e18));
+    }
+
+    function test_pay_buysForThePayer() public {
+        uint256 id = _served(0, 0, 0);
+        uint256 supply = TOKENS.totalSupplyOf(id);
+        uint256 balance = _balance(id);
         vm.warp(_servedAt() + 30 minutes);
 
-        // A small payment against 9.75 ETH of liquidity fits under the bound.
-        vm.expectEmit(true, false, false, false, address(lunch));
-        emit IFairLunch.Burn(id, 0, 0, address(0));
-        assertEq(_pay(id, bob, 0.01 ether), 0, "mints nothing");
-
-        assertLt(TOKENS.totalSupplyOf(id), supply, "supply fell");
-        // 0.01 ETH buys just under 10,000 tokens after the 1% fee and a little slippage.
-        assertApproxEqRel(supply - TOKENS.totalSupplyOf(id), 9900e18, 0.01e18);
-        assertEq(_balance(id), 0, "all of it was spent");
-        assertEq(_token(id).balanceOf(bob), 0, "the payer gets nothing");
+        // With the pool's own history behind it, a plain payment buys at the average price or better.
+        assertApproxEqRel(_buy(id, bob, 0.01 ether, ""), 9900e18, 0.01e18, "bought");
+        assertEq(TOKENS.totalSupplyOf(id), supply, "from the pool, not minted");
+        assertEq(_balance(id), balance, "nothing waits");
         _assertHoldsNothing(id);
     }
 
-    function test_pay_oversized_stopsAtTheBound() public {
+    function test_serve_registersThePoolWithTheBuybackHook() public {
         uint256 id = _served(0, 0, 0);
-        int24 servedTick = _tick(id);
-        vm.warp(_servedAt() + 30 minutes);
+        IJBBuybackHook hook = IJBBuybackHook(address(BUYBACK.hookOf(id)));
 
-        // A hundred times the pool's ETH.
-        _pay(id, bob, 975 ether);
+        assertEq(
+            PoolId.unwrap(hook.poolKeyOf(id, address(0)).toId()),
+            PoolId.unwrap(lunch.poolKeyOf(id).toId()),
+            "the lunch's pool"
+        );
+        assertEq(hook.twapWindowOf(id, address(0)), 30 minutes);
 
-        // Buying lowers the tick. It stops 200 ticks past the average, which is the tick the pool opened at.
-        assertApproxEqAbs(_tick(id), servedTick - 200, 1, "stopped at the bound");
-        assertGt(_balance(id), 960 ether, "the rest waits");
-        _assertHoldsNothing(id);
+        // The hook, and nobody else, mints through the data hook.
+        IJBController controller = lunch.CONTROLLER();
+        (JBRuleset memory ruleset,) = controller.currentRulesetOf(id);
+        assertTrue(lunch.DATA_HOOK().hasMintPermissionFor(id, ruleset, address(hook)));
+        assertFalse(lunch.DATA_HOOK().hasMintPermissionFor(id, ruleset, creator));
+        vm.expectRevert();
+        vm.prank(creator);
+        controller.mintTokensOf(id, 1e18, creator, "", false);
+    }
 
-        // Nothing more to buy until the average follows.
-        uint256 balance = _balance(id);
-        (uint256 spent,) = lunch.burn(id);
-        assertEq(spent, 0);
-        assertEq(_balance(id), balance);
-
-        // As it follows, later calls spend more.
-        vm.warp(_servedAt() + 60 minutes);
-        (spent,) = lunch.burn(id);
-        assertGt(spent, 0, "spends more as the average follows");
-        assertLt(_tick(id), servedTick - 200);
-        _assertHoldsNothing(id);
+    /// @notice A lunch whose buyback hook couldn't take its pool could never be served, so it's never made.
+    function test_createFor_needsABuybackHookOnThePoolsOracle() public {
+        vm.mockCall(address(BUYBACK.defaultHook()), abi.encodeWithSignature("oracleHook()"), abi.encode(address(0xBAD)));
+        FairLunchConfig memory config = _config(creator, 0, 0, 0);
+        uint256 fee = PROJECTS.creationFee();
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(config);
     }
 
     function test_pay_succeedsWhilePoolManagerIsUnlocked() public {
@@ -603,58 +695,37 @@ contract FairLunchLifecycle is Test {
         LockedPayer payer = new LockedPayer(POOL_MANAGER, TERMINAL);
         payer.payWhileUnlocked{value: 0.01 ether}(id);
 
-        // The buyback couldn't take the lock, so the payment waits.
+        // The buy couldn't take the lock, so the payment waits.
         assertEq(TOKENS.totalSupplyOf(id), supply);
         assertApproxEqAbs(_balance(id), 0.01 ether, 1e9);
         _assertHoldsNothing(id);
 
-        // The next call spends it.
+        // The next burn spends it.
         (uint256 spent,) = lunch.burn(id);
         assertApproxEqAbs(spent, 0.01 ether, 1e9);
     }
 
-    /// @notice Whatever the pool's price is when a buyback runs, it never ends past the bound.
-    function testFuzz_burn_neverBuysPastTheBound(uint256 firstBuy, uint256 secondBuy) public {
-        firstBuy = bound(firstBuy, 0.001 ether, 500 ether);
-        secondBuy = bound(secondBuy, 0.001 ether, 500 ether);
-
+    /// @notice A payment that names its minimum and is sent with too little gas for its buy fails, so wallets estimate
+    /// enough for it.
+    function test_pay_withAMinimumRevertsRatherThanStarveTheBuy() public {
         uint256 id = _served(0, 0, 0);
-        int24 servedTick = _tick(id);
+        bytes memory metadata = _payMetadata(9800e18);
 
-        vm.warp(_servedAt() + 30 minutes);
-        _pay(id, bob, firstBuy);
-        assertGe(_tick(id), servedTick - 201, "first buy");
-
-        // Fifteen minutes on, the average is at most halfway to wherever the first buy left the price.
-        int24 afterFirst = _tick(id);
-        vm.warp(_servedAt() + 45 minutes);
-        _pay(id, bob, secondBuy);
-        assertGe(_tick(id), (servedTick + afterFirst) / 2 - 202, "second buy");
-        _assertHoldsNothing(id);
-    }
-
-    /// @notice A payment sent with too little gas for its buyback fails, so wallets estimate enough for it.
-    function test_pay_revertsRatherThanStarveTheBuyback() public {
-        uint256 id = _served(0, 0, 0);
-        vm.warp(_servedAt() + 30 minutes);
-
-        // What a whole payment and buyback use.
+        // What a whole payment and buy use.
         uint256 snapshot = vm.snapshotState();
         uint256 gasBefore = gasleft();
-        _pay(id, bob, 0.01 ether);
+        _buy(id, bob, 0.01 ether, metadata);
         uint256 used = gasBefore - gasleft();
-        assertLt(_balance(id), 1e9, "the buyback ran");
         vm.revertToState(snapshot);
 
-        // With enough for the payment alone, the payment doesn't quietly go through without it.
         vm.prank(bob);
         (bool ok,) = address(TERMINAL).call{value: 0.01 ether, gas: used * 6 / 10}(
-            abi.encodeCall(TERMINAL.pay, (id, JBConstants.NATIVE_TOKEN, 0.01 ether, bob, 0, "", ""))
+            abi.encodeCall(TERMINAL.pay, (id, JBConstants.NATIVE_TOKEN, 0.01 ether, bob, 0, "", metadata))
         );
         assertFalse(ok, "starved payment reverts");
     }
 
-    function test_pay_fromInsideAnotherLunchsCallWaits() public {
+    function test_pay_fromInsideAnotherLunchsCallBuys() public {
         ForwardingCreator forwarder = new ForwardingCreator(TERMINAL);
         uint256 a = _create(0, 0, 0);
         uint256 b = lunch.createFor{value: PROJECTS.creationFee()}(_config(address(forwarder), 200_000_000, 5 ether, 0));
@@ -663,19 +734,19 @@ contract FairLunchLifecycle is Test {
         _pay(b, alice, 10 ether);
         vm.warp(_servedAt());
         lunch.serve(a);
+        _trade(a);
         vm.warp(_servedAt() + 30 minutes);
 
-        // Serving B pays its creator, who pays A while this contract is mid-call. The payment lands and waits.
+        // Serving B pays its creator, who pays A while this contract is mid-call.
         lunch.serve(b);
 
         assertEq(address(forwarder).balance, 0, "the creator's payment went through");
-        assertGt(_balance(a), 1 ether, "it waits in A's balance");
-        (uint256 spent,) = lunch.burn(a);
-        assertGt(spent, 0, "the next burn uses it");
+        assertGt(_token(a).balanceOf(address(forwarder)), 0, "and bought A's token");
     }
 
-    function test_pay_goesThroughWhileJbp6CreditTransfersArePaused() public {
+    function test_burn_goesThroughWhileJbp6CreditTransfersArePaused() public {
         uint256 id = _served(0, 0, 0);
+        _pay(id, bob, 0.01 ether);
         vm.warp(_servedAt() + 30 minutes);
 
         // Someone parks JBP6 credits on the contract, then JBP6 pauses credit transfers.
@@ -692,7 +763,7 @@ contract FairLunchLifecycle is Test {
 
         IERC20 jbp6 = _token(1);
         uint256 before = jbp6.balanceOf(creator);
-        _pay(id, bob, 0.01 ether);
+        lunch.burn(id);
 
         assertGe(jbp6.balanceOf(creator) - before, credits, "the credits reached the creator as JBP6");
         assertEq(TOKENS.totalBalanceOf(address(lunch), 1), 0, "lunch holds JBP6");
@@ -708,14 +779,27 @@ contract FairLunchLifecycle is Test {
         (uint256 spent, uint256 burned) = lunch.burn(id);
 
         assertApproxEqAbs(spent, 0.01 ether, 1e9);
+        assertApproxEqRel(burned, 9900e18, 0.01e18);
         assertEq(supply - TOKENS.totalSupplyOf(id), burned);
+        assertEq(_balance(id), 0, "all of it was spent");
         _assertHoldsNothing(id);
     }
 
-    function test_afterPay_onlyTerminal() public {
+    /// @notice Whatever waits, a burn either spends it or leaves it in the balance, and keeps nothing.
+    function testFuzz_burn_spendsOrLeavesIt(uint256 waiting) public {
+        waiting = bound(waiting, 0.001 ether, 500 ether);
         uint256 id = _served(0, 0, 0);
-        vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));
-        lunch.afterPayRecordedWith(_emptyContext(id));
+        _pay(id, bob, waiting);
+        uint256 balance = _balance(id);
+        uint256 supply = TOKENS.totalSupplyOf(id);
+        vm.warp(_servedAt() + 30 minutes);
+
+        (uint256 spent, uint256 burned) = lunch.burn(id);
+
+        assertEq(_balance(id), balance - spent, "spent or left");
+        assertEq(TOKENS.totalSupplyOf(id), supply - burned);
+        assertEq(spent == 0, burned == 0);
+        _assertHoldsNothing(id);
     }
 
     function test_collect_burnsTokensAndPaysJbp6() public {
@@ -785,7 +869,7 @@ contract FairLunchLifecycle is Test {
     }
 
     /// @notice A stranger opens the pool long before the lunch is served, at a price where the token costs a hundred
-    /// times the fundraise's. That history must not reach the buyback: it would let the buyback pay that price.
+    /// times the fundraise's. That history must not price a buy: it would let the buy pay that price.
     function test_burn_ignoresPriceHistoryFromBeforeServing() public {
         uint256 id = _create(0, 0, 0);
         _pay(id, alice, 10 ether);
@@ -798,15 +882,17 @@ contract FairLunchLifecycle is Test {
 
         // Inside the first half hour the average still holds the stranger's price. Nothing is bought.
         vm.warp(_servedAt() + 30 minutes - 1);
-        _pay(id, bob, 5 ether);
-        assertEq(_tick(id), servedTick, "no buyback yet");
-        assertApproxEqAbs(_balance(id), 5 ether, 1e9, "the payment waits");
+        assertEq(_buy(id, bob, 0.01 ether, ""), 0, "no buy yet");
+        assertEq(_tick(id), servedTick);
+        assertApproxEqAbs(_balance(id), 0.01 ether, 1e9, "the payment waits");
+        vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_TooEarly.selector, id, _servedAt() + 30 minutes));
+        lunch.burn(id);
 
-        // After it, the average is the served price alone, and a buyback stops 200 ticks past it.
+        // After it, the average is the served price alone.
         vm.warp(_servedAt() + 30 minutes);
-        (uint256 spent,) = lunch.burn(id);
-        assertGt(spent, 0, "buys");
-        assertApproxEqAbs(_tick(id), servedTick - 200, 1, "bounded by the served price, not the stranger's");
+        (uint256 spent, uint256 burned) = lunch.burn(id);
+        assertApproxEqAbs(spent, 0.01 ether, 1e9, "buys");
+        assertApproxEqRel(burned, 9900e18, 0.01e18, "at the served price, not the stranger's");
         _assertHoldsNothing(id);
     }
 
@@ -858,38 +944,30 @@ contract FairLunchLifecycle is Test {
         assertApproxEqAbs(vested * 2, TOKENS.totalSupplyOf(id), 2, "half the supply");
     }
 
-    /// @notice A buy slipped in ahead of a buyback in the same block gets nothing out of it.
-    function test_burn_ignoresPriceMovedInItsOwnBlock() public {
+    /// @notice A buy slipped in ahead of a burn gets nothing out of it: the burn waits rather than pay the pushed
+    /// price.
+    function test_burn_doesntChaseAPushedPrice() public {
         uint256 id = _served(0, 0, 0);
         PoolKey memory key = lunch.poolKeyOf(id);
         Trader trader = new Trader(POOL_MANAGER);
         vm.deal(address(trader), 10 ether);
-
-        // A holder sells hard, and time passes with the price low: far under the average, a buyback has room.
-        IERC20 token = _token(id);
-        vm.prank(alice);
-        token.transfer(address(trader), 4_000_000e18);
+        _pay(id, bob, 0.1 ether);
         vm.warp(_servedAt() + 30 minutes);
-        trader.swap(key, false, 4_000_000e18);
-        vm.warp(_servedAt() + 31 minutes);
-        int24 lowTick = _tick(id);
 
-        // Front-run: push the price up 5% just ahead of a 1 ETH payment.
-        trader.swap(key, true, 0.15 ether);
-        assertLt(_tick(id), lowTick - 400, "front-run moved the price");
-        int24 frontRunTick = _tick(id);
-
-        _pay(id, bob, 1 ether);
-        assertEq(_tick(id), frontRunTick, "the buyback didn't chase it");
-        assertApproxEqAbs(_balance(id), 1 ether, 1e9, "the payment waits");
-
-        // A block later that price is the pool's last close, and a buyback moves it by the bound and no more: less
-        // than the two swap fees a round trip costs.
-        vm.warp(_servedAt() + 32 minutes);
+        // Front-run: push the price up by half just ahead of the burn.
+        uint256 snapshot = vm.snapshotState();
+        trader.swap(key, true, 2.5 ether);
+        int24 pushedTick = _tick(id);
         (uint256 spent,) = lunch.burn(id);
-        assertGt(spent, 0, "buys the next block");
-        assertApproxEqAbs(_tick(id), frontRunTick - 200, 1, "by the bound");
+        assertEq(spent, 0, "didn't buy");
+        assertEq(_tick(id), pushedTick);
+        assertApproxEqAbs(_balance(id), 0.1 ether, 1e9, "the ETH waits");
         _assertHoldsNothing(id);
+
+        // Left alone, it buys.
+        vm.revertToState(snapshot);
+        (spent,) = lunch.burn(id);
+        assertApproxEqAbs(spent, 0.1 ether, 1e9);
     }
 
     function test_sendHome_revertsOnHost() public {
@@ -906,6 +984,7 @@ contract FairLunchLifecycle is Test {
 
         FairLunch fresh = new FairLunch({
             omnichainDeployer: OMNI,
+            buybackRegistry: BUYBACK,
             terminal: TERMINAL,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
@@ -933,13 +1012,7 @@ contract FairLunchLifecycle is Test {
         vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));
         lunch.onERC721Received(address(0), address(0), 0, "");
     }
-
-    function _emptyContext(uint256 id) internal pure returns (JBAfterPayRecordedContext memory context) {
-        context.projectId = id;
-    }
 }
-
-import {JBAfterPayRecordedContext} from "@bananapus/core-v6/src/structs/JBAfterPayRecordedContext.sol";
 
 interface IERC721Like {
     function ownerOf(uint256 tokenId) external view returns (address);

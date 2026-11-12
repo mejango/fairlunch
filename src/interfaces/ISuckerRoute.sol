@@ -11,8 +11,9 @@ interface ISuckerRoute {
     /// @return enabled 1 if the token is mapped and sending it is on, 0 if not.
     /// @return emergencyHatch 1 if the token's emergency hatch is open, 0 if not.
     /// @return minGas The gas the sucker reserves on the remote chain for a claim of the token.
+    /// @return remoteToken The token it becomes on the remote chain, as a left-padded address.
     function remoteTokenFor(address token)
         external
         view
-        returns (uint256 enabled, uint256 emergencyHatch, uint256 minGas);
+        returns (uint256 enabled, uint256 emergencyHatch, uint256 minGas, uint256 remoteToken);
 }

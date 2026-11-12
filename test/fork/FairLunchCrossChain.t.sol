@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
+import {IJBBuybackHookRegistry} from "@bananapus/buyback-hook-v6/src/interfaces/IJBBuybackHookRegistry.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
 import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
@@ -40,6 +41,8 @@ contract FairLunchCrossChain is Test {
     IJBTerminalStore internal constant STORE = IJBTerminalStore(0x7497ae014A60561925B51C0A3B4adE7460B9927C);
     IJBTokens internal constant TOKENS = IJBTokens(0x1f80d8f057eE36b4C2656D107E4e4558B71bA7D9);
     IJBProjects internal constant PROJECTS = IJBProjects(0x6017d1FBa9DC279BFA0B03fD931C22E242AB3691);
+    IJBBuybackHookRegistry internal constant BUYBACK =
+        IJBBuybackHookRegistry(0x72F55a54CD53410a5Ff175508a5A384227081788);
     IJBSuckerRegistry internal constant REGISTRY = IJBSuckerRegistry(0x7903a854aE91eAf635430D120a1a434085cEf297);
     IAllowanceTransfer internal constant PERMIT2 = IAllowanceTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
     // The CCIP sucker deployer for the other chain of the pair has the same address on Base and Optimism.
@@ -81,6 +84,7 @@ contract FairLunchCrossChain is Test {
         FairLunchVestingDeployer vestingDeployer = new FairLunchVestingDeployer{salt: "lunch"}();
         return new FairLunch{salt: "lunch"}({
             omnichainDeployer: OMNI,
+            buybackRegistry: BUYBACK,
             terminal: TERMINAL,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
@@ -247,6 +251,14 @@ contract FairLunchCrossChain is Test {
         greedy.suckerDeploymentConfiguration.deployerConfigurations[0].mappings[0].minGas = type(uint32).max;
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(greedy);
+
+        // ETH that arrives on the host as wrapped ETH, which the host can't take. Today the bridge refuses the mapping
+        // itself; if it ever allowed it, Fair Lunch refuses.
+        FairLunchConfig memory wrapped = _config(true);
+        wrapped.suckerDeploymentConfiguration.deployerConfigurations[0].mappings[0].remoteToken =
+            bytes32(uint256(uint160(0x4200000000000000000000000000000000000006)));
+        vm.expectRevert();
+        lunch.createFor{value: fee}(wrapped);
 
         FairLunchConfig memory bridgeless = _config(true);
         bridgeless.suckerDeploymentConfiguration.deployerConfigurations = new JBSuckerDeployerConfig[](0);

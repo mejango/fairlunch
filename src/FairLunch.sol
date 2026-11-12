@@ -1,27 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {IJBBuybackHook} from "@bananapus/buyback-hook-v6/src/interfaces/IJBBuybackHook.sol";
+import {IJBBuybackHookRegistry} from "@bananapus/buyback-hook-v6/src/interfaces/IJBBuybackHookRegistry.sol";
 import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
-import {IJBPayHook} from "@bananapus/core-v6/src/interfaces/IJBPayHook.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
-import {IJBRulesetDataHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetDataHook.sol";
 import {IJBSplitHook} from "@bananapus/core-v6/src/interfaces/IJBSplitHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {JBConstants} from "@bananapus/core-v6/src/libraries/JBConstants.sol";
 import {JBPayerTrackerLib} from "@bananapus/core-v6/src/libraries/JBPayerTrackerLib.sol";
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
-import {JBAfterPayRecordedContext} from "@bananapus/core-v6/src/structs/JBAfterPayRecordedContext.sol";
-import {JBBeforeCashOutRecordedContext} from "@bananapus/core-v6/src/structs/JBBeforeCashOutRecordedContext.sol";
-import {JBBeforePayRecordedContext} from "@bananapus/core-v6/src/structs/JBBeforePayRecordedContext.sol";
-import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashOutHookSpecification.sol";
 import {JBCurrencyAmount} from "@bananapus/core-v6/src/structs/JBCurrencyAmount.sol";
 import {JBFundAccessLimitGroup} from "@bananapus/core-v6/src/structs/JBFundAccessLimitGroup.sol";
-import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
-import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {JBRulesetConfig} from "@bananapus/core-v6/src/structs/JBRulesetConfig.sol";
 import {JBRulesetMetadata} from "@bananapus/core-v6/src/structs/JBRulesetMetadata.sol";
 import {JBSplit} from "@bananapus/core-v6/src/structs/JBSplit.sol";
@@ -41,7 +35,6 @@ import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Recei
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {mulDiv} from "@prb/math/src/Common.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
@@ -49,7 +42,6 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -59,8 +51,10 @@ import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionMa
 import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 
+import {FairLunchDataHook} from "./FairLunchDataHook.sol";
 import {FairLunchVestingDeployer} from "./FairLunchVestingDeployer.sol";
 import {IFairLunch} from "./interfaces/IFairLunch.sol";
+import {IBuybackOracle} from "./interfaces/IBuybackOracle.sol";
 import {ISuckerRoute} from "./interfaces/ISuckerRoute.sol";
 import {FairLunchConfig} from "./structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "./structs/FairLunchRecord.sol";
@@ -76,19 +70,17 @@ import {FairLunchRecord} from "./structs/FairLunchRecord.sol";
 /// their cap, their token allocation starts vesting, and everything else becomes one full-range Uniswap V4 position
 /// that this contract holds forever.
 ///
-/// Eating: from then on the project's balance is a sink. Every payment lands in it, mints nothing, and is immediately
-/// used to buy the token from the pool and burn it, never paying more than a bound above the pool's time-weighted
-/// average price. Whatever a bounded buy can't spend waits in the balance for the next one. Revenue paid in on other
-/// chains is carried to the host chain's balance through the lunch's suckers.
+/// Eating: from then on the lunch's pool is the only place its token comes from. Payments and cash outs go through the
+/// Juicebox buyback hook: a payment buys the token from the pool for its beneficiary, and a cash out sells it there.
+/// Whatever reaches the project's balance some other way (revenue carried from other chains through the lunch's
+/// suckers, or a payment whose buy couldn't go through) is used by `burn` to buy the token and burn it.
 ///
-/// This contract is each lunch's owner, its data hook (wrapped by `JBOmnichainDeployer`), its pay hook, and the holder
-/// of its liquidity. It holds no ETH or tokens between calls.
+/// This contract is each lunch's owner and the holder of its liquidity. `FairLunchDataHook`, which it deploys, is each
+/// lunch's data hook (wrapped by `JBOmnichainDeployer`). This contract holds no ETH or tokens between calls.
 contract FairLunch is
     ERC2771Context,
     ReentrancyGuardTransient,
     IFairLunch,
-    IJBRulesetDataHook,
-    IJBPayHook,
     IJBPayerTracker,
     IUnlockCallback,
     IERC721Receiver
@@ -104,7 +96,6 @@ contract FairLunch is
 
     // A library that reads Uniswap V4 pool state.
     using StateLibrary for IPoolManager;
-    using TransientStateLibrary for IPoolManager;
 
     //*********************************************************************//
     // --------------------------- custom errors ------------------------- //
@@ -112,7 +103,6 @@ contract FairLunch is
 
     error FairLunch_AlreadyConfigured();
     error FairLunch_AlreadyServed(uint256 projectId);
-    error FairLunch_Closed(uint256 projectId, uint256 deadline);
     error FairLunch_HostMapsNoTokens();
     error FairLunch_InvalidConfig();
     error FairLunch_NoHostSucker(uint256 projectId, uint256 hostChainId);
@@ -142,11 +132,8 @@ contract FairLunch is
     /// @notice The number of tokens a payer receives per ETH during the fundraise, and the price the pool opens at.
     uint256 public constant override TOKENS_PER_ETH = 1_000_000;
 
-    /// @notice The farthest a buyback can push the price past its time-weighted average, in ticks (about 2%).
-    int24 public constant override TWAP_MAX_DEVIATION = 200;
-
-    /// @notice The number of seconds of price history a buyback is bounded by, and the wait after serving before the
-    /// first buyback.
+    /// @notice The number of seconds of price history the buyback hook prices with, and the wait after serving before
+    /// it's trusted: until then only payments and cash outs that name their own minimum go through the pool.
     uint32 public constant override TWAP_WINDOW = 30 minutes;
 
     //*********************************************************************//
@@ -171,8 +158,14 @@ contract FairLunch is
     // --------------- public immutable stored properties ---------------- //
     //*********************************************************************//
 
+    /// @notice The registry of the buyback hook that routes a served lunch's payments and cash outs through its pool.
+    IJBBuybackHookRegistry public immutable override BUYBACK_REGISTRY;
+
     /// @notice The controller every lunch is launched with.
     IJBController public immutable override CONTROLLER;
+
+    /// @notice The data hook of every lunch, which holds the rules for its payments and cash outs.
+    FairLunchDataHook public immutable override DATA_HOOK;
 
     /// @notice The directory of terminals and controllers.
     IJBDirectory public immutable override DIRECTORY;
@@ -245,6 +238,7 @@ contract FairLunch is
     /// @dev Every argument is the same address on every supported chain. The trusted forwarder is the one the
     /// omnichain deployer trusts, so relayed creations resolve the signer instead of the forwarder.
     /// @param omnichainDeployer The deployer every lunch is launched through.
+    /// @param buybackRegistry The registry of the buyback hook.
     /// @param terminal The terminal every lunch accepts ETH through.
     /// @param suckerRegistry The registry of every lunch's suckers.
     /// @param permit2 The Permit2 contract the position manager pulls tokens through.
@@ -252,6 +246,7 @@ contract FairLunch is
     /// @param deployer The address allowed to set the chain-specific constants, once.
     constructor(
         IJBOmnichainDeployer omnichainDeployer,
+        IJBBuybackHookRegistry buybackRegistry,
         IJBMultiTerminal terminal,
         IJBSuckerRegistry suckerRegistry,
         IAllowanceTransfer permit2,
@@ -261,6 +256,8 @@ contract FairLunch is
         ERC2771Context(ERC2771Context(address(omnichainDeployer)).trustedForwarder())
     {
         OMNICHAIN_DEPLOYER = omnichainDeployer;
+        BUYBACK_REGISTRY = buybackRegistry;
+        DATA_HOOK = new FairLunchDataHook({buybackRegistry: buybackRegistry, twapWindow: TWAP_WINDOW});
         CONTROLLER = omnichainDeployer.CONTROLLER();
         DIRECTORY = terminal.DIRECTORY();
         TERMINAL = terminal;
@@ -282,33 +279,12 @@ contract FairLunch is
     // ---------------------- external transactions ---------------------- //
     //*********************************************************************//
 
-    /// @notice Runs the buyback for a payment a served lunch just received.
-    /// @dev Part of `IJBPayHook`. The payment itself stays in the project's balance; this only triggers `burn`. A
-    /// buyback that can't run right now (the price history is too short, or the pool manager is mid-swap) never blocks
-    /// the payment: the ETH waits in the balance for the next attempt.
-    /// @param context The payment's context.
-    function afterPayRecordedWith(JBAfterPayRecordedContext calldata context) external payable override {
-        // Only a lunch's own terminal runs its buyback.
-        if (!DIRECTORY.isTerminalOf({projectId: context.projectId, terminal: IJBTerminal(msg.sender)})) {
-            revert FairLunch_Unauthorized(msg.sender);
-        }
-
-        // The price history is still too short, or the payment came from inside a swap: leave the ETH in the balance
-        // for the next call. Anything else runs the buyback now. It's deliberately not wrapped in a try: a wallet
-        // estimating a payment's gas would settle on an amount that starves a caught call, and every payment would
-        // quietly skip its buyback.
-        bool tooEarly = block.timestamp < uint256(_recordOf[context.projectId].servedAt) + TWAP_WINDOW;
-        if (tooEarly || POOL_MANAGER.isUnlocked() || _reentrancyGuardEntered()) return;
-
-        // slither-disable-next-line unused-return
-        this.burn(context.projectId);
-    }
-
     /// @notice Use a served lunch's whole balance to buy its token from the pool and burn it.
-    /// @dev Anyone can call this. The buy stops at a price `TWAP_MAX_DEVIATION` ticks above the pool's average over the
-    /// last `TWAP_WINDOW`, and whatever it couldn't spend goes back into the balance. The first buyback waits a full
-    /// `TWAP_WINDOW` after serving so that the average holds only prices from the served pool: anyone can create the
-    /// pool early and leave misleading history in it.
+    /// @dev Anyone can call this. The balance is paid back into the lunch through the buyback hook, which buys only if
+    /// the pool gives what its average price over the last `TWAP_WINDOW` says it should, and otherwise leaves the ETH
+    /// in
+    /// the balance for the next call. The first buyback waits a full `TWAP_WINDOW` after serving so that the average
+    /// holds only prices from the served pool: anyone can create the pool early and leave misleading history in it.
     /// @param projectId The ID of the lunch's project.
     /// @return spent The amount of ETH spent buying tokens.
     /// @return burned The number of tokens burned.
@@ -323,7 +299,7 @@ contract FairLunch is
             revert FairLunch_TooEarly({projectId: projectId, readyAt: uint256(record.servedAt) + TWAP_WINDOW});
         }
 
-        // Take the lunch's whole balance. This contract's data hook lets it, and only it, cash out everything for free.
+        // Take the lunch's whole balance. The data hook lets this contract, and only it, cash out everything for free.
         uint256 amount = TERMINAL.cashOutTokensOf({
             holder: address(this),
             projectId: projectId,
@@ -339,20 +315,19 @@ contract FairLunch is
             // belongs to the creator.
             _sendFeeTokensTo(record.creator);
 
-            PoolKey memory key = poolKeyOf(projectId);
-
-            // Buying the token lowers the pool's tokens-per-ETH price, so the bound sits below the reference.
-            uint160 sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(_boundTickOf(key) - TWAP_MAX_DEVIATION);
-
-            // Buy as much as the bound allows.
+            // Pay it back in with this contract as the beneficiary. The buyback hook buys with it, or returns it to
+            // the balance.
             // slither-disable-next-line unused-return
-            (uint160 sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
-            if (sqrtPriceX96 > sqrtPriceLimitX96) {
-                (spent,) = _swap({key: key, zeroForOne: true, amountIn: amount, sqrtPriceLimitX96: sqrtPriceLimitX96});
-            }
-
-            // Put back what the buy couldn't spend.
-            if (amount != spent) _addToBalanceOf({projectId: projectId, amount: amount - spent});
+            TERMINAL.pay{value: amount}({
+                projectId: projectId,
+                token: JBConstants.NATIVE_TOKEN,
+                amount: amount,
+                beneficiary: address(this),
+                minReturnedTokens: 0,
+                memo: "",
+                metadata: ""
+            });
+            spent = amount - _balanceOf(projectId);
         }
 
         // Burn everything bought, along with any tokens that arrived carrying revenue from other chains.
@@ -495,13 +470,24 @@ contract FairLunch is
 
         // Everywhere but the host, payments only ever leave through the bridge home. Without one that's ready to carry
         // ETH they'd be stuck, so there's no lunch. A mapping that was set and then switched off doesn't count, nor
-        // does one with any gas but the gas `serve` gives the host's: set too high, it could never send.
+        // does one with any gas but the gas `serve` gives the host's: set too high, it could never send. Nor does one
+        // that turns ETH into another token on the way: the host only takes ETH.
         if (!isHost) {
-            (uint256 enabled,, uint256 minGas) = ISuckerRoute(
+            (uint256 enabled,, uint256 minGas, uint256 remoteToken) = ISuckerRoute(
                     address(_hostSuckerOf({projectId: projectId, hostChainId: config.hostChainId}))
                 ).remoteTokenFor(JBConstants.NATIVE_TOKEN);
-            if (enabled == 0 || minGas != _SUCKER_MIN_GAS) revert FairLunch_InvalidConfig();
+            if (enabled == 0 || minGas != _SUCKER_MIN_GAS || remoteToken != uint160(JBConstants.NATIVE_TOKEN)) {
+                revert FairLunch_InvalidConfig();
+            }
         }
+
+        // The host's buyback hook has to price with the same oracle the lunch's pool uses, or `serve` couldn't register
+        // the pool and the raise would be stuck.
+        if (
+            isHost
+                && IBuybackOracle(address(BUYBACK_REGISTRY.hookOf(projectId))).oracleHook()
+                    != IHooks(address(ORACLE_HOOK))
+        ) revert FairLunch_InvalidConfig();
 
         // Deploy the token up front so payers hold a real ERC-20 from their first payment.
         // slither-disable-next-line unused-return
@@ -603,8 +589,7 @@ contract FairLunch is
             revert FairLunch_TooEarly({projectId: projectId, readyAt: uint256(record.deadline) + 1});
         }
 
-        uint256 raised = TERMINAL.STORE()
-            .balanceOf({terminal: address(TERMINAL), projectId: projectId, token: JBConstants.NATIVE_TOKEN});
+        uint256 raised = _balanceOf(projectId);
         if (raised == 0) revert FairLunch_NothingRaised(projectId);
 
         // From here on the lunch is served: payments stop minting and start buying back.
@@ -641,6 +626,16 @@ contract FairLunch is
 
         // Put the ETH and the tokens in the pool, forever.
         record.positionId = _openPoolOf({projectId: projectId, eth: poolEth, tokens: poolTokens});
+
+        // From here on the buyback hook routes the lunch's payments and cash outs through that pool.
+        IJBBuybackHook(address(BUYBACK_REGISTRY.hookOf(projectId)))
+            .setPoolFor({
+            projectId: projectId,
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING,
+            twapWindow: TWAP_WINDOW,
+            terminalToken: JBConstants.NATIVE_TOKEN
+        });
 
         // Whatever the pool's price didn't take: burn the tokens, and leave the ETH in the balance for the burn.
         // slither-disable-next-line unused-return
@@ -754,82 +749,6 @@ contract FairLunch is
     // ----------------------- external views ---------------------------- //
     //*********************************************************************//
 
-    /// @notice Lets this contract, and nobody else, cash out a lunch's whole balance for free.
-    /// @dev Part of `IJBRulesetDataHook`. Every lunch's rulesets tax cash outs at 100%, so no holder can ever reclaim
-    /// anything. This contract cashing out zero tokens is how `burn` moves the balance to the pool without a fee:
-    /// reporting the whole supply as the cash out count reclaims the whole balance.
-    /// @param context The cash out's context.
-    /// @return cashOutTaxRate The cash out tax rate to use.
-    /// @return cashOutCount The number of tokens to price the cash out with.
-    /// @return totalSupply The total supply to price the cash out with.
-    /// @return effectiveSurplusValue The surplus to price the cash out with.
-    /// @return hookSpecifications No cash out hooks are used.
-    function beforeCashOutRecordedWith(JBBeforeCashOutRecordedContext calldata context)
-        external
-        view
-        override
-        returns (
-            uint256 cashOutTaxRate,
-            uint256 cashOutCount,
-            uint256 totalSupply,
-            uint256 effectiveSurplusValue,
-            JBCashOutHookSpecification[] memory hookSpecifications
-        )
-    {
-        if (context.holder == address(this)) {
-            return (0, context.totalSupply, context.totalSupply, context.surplus.value, hookSpecifications);
-        }
-
-        return
-            (
-                context.cashOutTaxRate,
-                context.cashOutCount,
-                context.totalSupply,
-                context.surplus.value,
-                hookSpecifications
-            );
-    }
-
-    /// @notice Sells tokens at the fixed price while a lunch is cooking, and turns payments into buybacks once it's
-    /// served.
-    /// @dev Part of `IJBRulesetDataHook`.
-    /// @param context The payment's context.
-    /// @return weight The number of tokens to mint per ETH paid, as a fixed point number with 18 decimals.
-    /// @return hookSpecifications This contract as a pay hook, once the lunch is served.
-    function beforePayRecordedWith(JBBeforePayRecordedContext calldata context)
-        external
-        view
-        override
-        returns (uint256 weight, JBPayHookSpecification[] memory hookSpecifications)
-    {
-        FairLunchRecord storage record = _recordOf[context.projectId];
-
-        // Everywhere but the host, payments mint nothing and wait to be sent home.
-        if (record.hostChainId != block.chainid) return (context.weight, hookSpecifications);
-
-        // Once served, payments mint nothing and trigger the buyback. The payment itself stays in the balance.
-        if (record.servedAt != 0) {
-            hookSpecifications = new JBPayHookSpecification[](1);
-            hookSpecifications[0] =
-                JBPayHookSpecification({hook: IJBPayHook(address(this)), noop: false, amount: 0, metadata: ""});
-            return (0, hookSpecifications);
-        }
-
-        // The fundraise is over once the deadline passes.
-        if (block.timestamp > record.deadline) {
-            revert FairLunch_Closed({projectId: context.projectId, deadline: record.deadline});
-        }
-
-        return (context.weight, hookSpecifications);
-    }
-
-    /// @notice Nobody gets to mint a lunch's tokens through this hook.
-    /// @dev Part of `IJBRulesetDataHook`. This contract mints as the project's owner, and suckers mint through the
-    /// omnichain deployer.
-    function hasMintPermissionFor(uint256, JBRuleset calldata, address) external pure override returns (bool) {
-        return false;
-    }
-
     /// @notice What Fair Lunch remembers about a lunch.
     /// @param projectId The ID of the lunch's project.
     /// @return record The lunch's record.
@@ -853,16 +772,6 @@ contract FairLunch is
             tickSpacing: TICK_SPACING,
             hooks: IHooks(address(ORACLE_HOOK))
         });
-    }
-
-    /// @notice Indicates if this contract adheres to the specified interface.
-    /// @dev See `IERC165.supportsInterface`.
-    /// @param interfaceId The ID of the interface to check for adherence to.
-    /// @return A flag indicating if the provided interface ID is supported.
-    function supportsInterface(bytes4 interfaceId) public pure override returns (bool) {
-        return interfaceId == type(IFairLunch).interfaceId || interfaceId == type(IJBRulesetDataHook).interfaceId
-            || interfaceId == type(IJBPayHook).interfaceId || interfaceId == type(IERC721Receiver).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
     }
 
     //*********************************************************************//
@@ -1107,28 +1016,11 @@ contract FairLunch is
         revert FairLunch_NoHostSucker({projectId: projectId, hostChainId: hostChainId});
     }
 
-    /// @notice The tick a buyback's price bound is measured from: the pool's average tick over the last `TWAP_WINDOW`,
-    /// or its tick a second ago if that's higher (cheaper tokens).
-    /// @dev The average keeps a buyback from chasing a price that was pushed up over several blocks. The tick a second
-    /// ago is the price before anything traded in this block, which keeps a buyback from chasing a price that was
-    /// pushed up just ahead of it. Reverts if the pool's history doesn't reach `TWAP_WINDOW` back.
-    /// @param key The pool's key.
-    /// @return tick The reference tick, rounded toward negative infinity.
-    function _boundTickOf(PoolKey memory key) internal view returns (int24 tick) {
-        uint32[] memory secondsAgos = new uint32[](3);
-        secondsAgos[0] = TWAP_WINDOW;
-        secondsAgos[1] = 1;
-
-        // slither-disable-next-line unused-return
-        (int56[] memory tickCumulatives,) = ORACLE_HOOK.observe({key: key, secondsAgos: secondsAgos});
-
-        int56 delta = tickCumulatives[2] - tickCumulatives[0];
-        tick = int24(delta / int56(uint56(TWAP_WINDOW)));
-        if (delta < 0 && delta % int56(uint56(TWAP_WINDOW)) != 0) tick--;
-
-        // Over one second the cumulative's change is the tick itself.
-        int24 lastTick = int24(tickCumulatives[2] - tickCumulatives[1]);
-        if (lastTick > tick) tick = lastTick;
+    /// @notice The ETH in a lunch's balance.
+    /// @param projectId The ID of the lunch's project.
+    function _balanceOf(uint256 projectId) internal view returns (uint256) {
+        return TERMINAL.STORE()
+            .balanceOf({terminal: address(TERMINAL), projectId: projectId, token: JBConstants.NATIVE_TOKEN});
     }
 
     /// @notice The smaller of two numbers.
@@ -1136,8 +1028,8 @@ contract FairLunch is
         return a < b ? a : b;
     }
 
-    /// @notice The ruleset every lunch uses: no reserved tokens, no cash outs, no owner powers beyond minting, and this
-    /// contract as the data hook for payments and cash outs.
+    /// @notice The ruleset every lunch uses: no reserved tokens, no cash outs, no owner powers beyond minting, and
+    /// `DATA_HOOK` deciding payments and cash outs.
     /// @param weight The number of tokens minted per ETH paid, as a fixed point number with 18 decimals.
     /// @param splitGroups The ruleset's splits.
     /// @param fundAccessLimitGroups The ruleset's payout limits.
@@ -1173,7 +1065,7 @@ contract FairLunch is
             scopeCashOutsToLocalBalances: true,
             useDataHookForPay: true,
             useDataHookForCashOut: true,
-            dataHook: address(this),
+            dataHook: address(DATA_HOOK),
             metadata: 0
         });
     }

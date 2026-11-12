@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import {IJBBuybackHookRegistry} from "@bananapus/buyback-hook-v6/src/interfaces/IJBBuybackHookRegistry.sol";
 import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
@@ -13,6 +14,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
+import {FairLunchDataHook} from "../FairLunchDataHook.sol";
 import {FairLunchVestingDeployer} from "../FairLunchVestingDeployer.sol";
 import {FairLunchConfig} from "../structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "../structs/FairLunchRecord.sol";
@@ -75,8 +77,14 @@ interface IFairLunch {
         address caller
     );
 
+    /// @notice The registry of the buyback hook that routes a served lunch's payments and cash outs through its pool.
+    function BUYBACK_REGISTRY() external view returns (IJBBuybackHookRegistry);
+
     /// @notice The controller every lunch is launched with.
     function CONTROLLER() external view returns (IJBController);
+
+    /// @notice The data hook of every lunch, which holds the rules for its payments and cash outs.
+    function DATA_HOOK() external view returns (FairLunchDataHook);
 
     /// @notice The directory of terminals and controllers.
     function DIRECTORY() external view returns (IJBDirectory);
@@ -117,9 +125,6 @@ interface IFairLunch {
 
     /// @notice The number of tokens a payer receives per ETH during the fundraise, and the price the pool opens at.
     function TOKENS_PER_ETH() external view returns (uint256);
-
-    /// @notice The farthest a buyback can push the price past its time-weighted average, in ticks.
-    function TWAP_MAX_DEVIATION() external view returns (int24);
 
     /// @notice The number of seconds of price history a buyback is bounded by, and the wait after serving before the
     /// first buyback.

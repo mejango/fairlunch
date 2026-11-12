@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {IJBBuybackHookRegistry} from "@bananapus/buyback-hook-v6/src/interfaces/IJBBuybackHookRegistry.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
 import {IJBOmnichainDeployer} from "@bananapus/omnichain-deployers-v6/src/interfaces/IJBOmnichainDeployer.sol";
 import {IJBSuckerRegistry} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerRegistry.sol";
@@ -66,6 +67,9 @@ contract Deploy is Script, Sphinx {
         lunch = new FairLunch{salt: _SALT}({
             omnichainDeployer: IJBOmnichainDeployer(
                 _deployed({package: "omnichain-deployers-v6", chain: chain, name: "JBOmnichainDeployer"})
+            ),
+            buybackRegistry: IJBBuybackHookRegistry(
+                _deployed({package: "buyback-hook-v6", chain: chain, name: "JBBuybackHookRegistry"})
             ),
             terminal: IJBMultiTerminal(_deployed({package: "core-v6", chain: chain, name: "JBMultiTerminal"})),
             suckerRegistry: IJBSuckerRegistry(
