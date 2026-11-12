@@ -1,5 +1,6 @@
 // Makes a lunch on two local forks (host first, then its copy), pays the copy, and sends that home, with the builders
 // the site uses: node scripts/copy-check.mjs <hostRpc> <copyRpc> <fairLunch>
+// LUNCH_ACCOUNT, LUNCH_NAME, LUNCH_SYMBOL, LUNCH_MINUTES (on the host's clock) and LUNCH_RAISE dress it for a local look.
 import { jbDirectoryAbi, jbMultiTerminalAbi, jbProjectsAbi, jbTerminalStoreAbi, MappableAsset, NATIVE_TOKEN, parseSuckerDeployerConfig } from '@bananapus/nana-sdk-core'
 import { CCIP_SUCKER_TRANSPORT_VALUES, findSuckerTransportValue, getSuckerMovements, getV6SuckerPairs } from '@bananapus/nana-sdk-core/v6'
 import { createPublicClient, createWalletClient, http, pad, parseEther, zeroHash } from 'viem'
@@ -7,7 +8,7 @@ import { base, optimism } from 'viem/chains'
 import { fairLunchAbi } from '../src/lib/fair-lunch/abi.ts'
 
 const [hostRpc, copyRpc, lunch] = process.argv.slice(2)
-const account = '0x1234567890123456789012345678901234567890'
+const account = process.env.LUNCH_ACCOUNT ?? '0x1234567890123456789012345678901234567890'
 const sides = [[base, hostRpc], [optimism, copyRpc]].map(([chain, rpc]) => ({
   chain, client: createPublicClient({ chain, transport: http(rpc) }), wallet: createWalletClient({ chain, transport: http(rpc), account }),
 }))
@@ -24,7 +25,7 @@ const send = async (side, tx) => {
 }
 const times = await Promise.all(sides.map(async ({ client }) => Number((await client.getBlock()).timestamp)))
 const chainIds = sides.map(side => side.chain.id)
-const terms = { deadline: Math.max(...times) + 3600, salt: pad(`0x${Date.now().toString(16)}`, { size: 32 }) }
+const terms = { deadline: process.env.LUNCH_MINUTES ? times[0] + Number(process.env.LUNCH_MINUTES) * 60 : Math.max(...times) + 3600, salt: pad(`0x${Date.now().toString(16)}`, { size: 32 }) }
 
 const ids = []
 for (const side of sides) {
@@ -34,7 +35,7 @@ for (const side of sides) {
   const fee = await side.client.readContract({ address: projects, abi: jbProjectsAbi, functionName: 'creationFee' })
   const { deployerConfigurations } = parseSuckerDeployerConfig(side.chain.id, chainIds, [MappableAsset.NATIVE], { version: 6, bridge: 'ccip' })
   const config = {
-    name: 'Burrito', symbol: 'BRTO', projectUri: '', hostChainId: BigInt(chainIds[0]), token: '0x000000000000000000000000000000000000EEEe', deadline: terms.deadline, creator: account,
+    name: process.env.LUNCH_NAME ?? 'Burrito', symbol: process.env.LUNCH_SYMBOL ?? 'BRTO', projectUri: '', hostChainId: BigInt(chainIds[0]), token: '0x000000000000000000000000000000000000EEEe', deadline: terms.deadline, creator: account,
     keepPercent: 200_000_000, keepCap: parseEther('0.5'), tokenPercent: 100_000_000, vestingDuration: 52 * 604800, salt: terms.salt,
     suckerDeploymentConfiguration: { salt: zeroHash, deployerConfigurations: deployerConfigurations.map(({ deployer }) => ({
       deployer, peer: zeroHash, mappings: isHost ? [] : [{ localToken: NATIVE_TOKEN, minGas: 200_000, remoteToken: pad(NATIVE_TOKEN, { size: 32 }) }],
@@ -49,8 +50,8 @@ for (const side of sides) {
 const [host, copy] = sides
 console.log({ hostId: ids[0], copyId: ids[1] })
 
-const paid = parseEther('0.3')
-await send(host, { address: host.terminal, abi: jbMultiTerminalAbi, functionName: 'pay', args: [ids[0], NATIVE_TOKEN, parseEther('1'), account, 0n, '', '0x'], value: parseEther('1') })
+const paid = parseEther('0.3'), raise = parseEther(process.env.LUNCH_RAISE ?? '1')
+await send(host, { address: host.terminal, abi: jbMultiTerminalAbi, functionName: 'pay', args: [ids[0], NATIVE_TOKEN, raise, account, 0n, '', '0x'], value: raise })
 await send(copy, { address: copy.terminal, abi: jbMultiTerminalAbi, functionName: 'pay', args: [ids[1], NATIVE_TOKEN, paid, account, 0n, '', '0x'], value: paid })
 if (process.argv.includes('--stop-before-send')) process.exit(0)
 
