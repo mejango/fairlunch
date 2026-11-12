@@ -31,7 +31,7 @@ const amountOf = (text: string): bigint => {
   try { return parseEther(text.trim() || '0') } catch { return 0n }
 }
 
-function Stat({ label, value, action }: { label: string; value: string; action?: ReactNode }) {
+function Stat({ label, value, action }: { label: ReactNode; value: string; action?: ReactNode }) {
   return (
     <div>
       <dt className="text-sm text-muted">{label}</dt>
@@ -39,6 +39,10 @@ function Stat({ label, value, action }: { label: string; value: string; action?:
     </div>
   )
 }
+
+/** The pie's colors: where a raise goes. */
+const POOL = '#2e7d32', CREATOR = '#f5b942', FEE = '#b9a98f'
+const Swatch = ({ color }: { color: string }) => <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />
 
 /** Uniswap's own page for a lunch's pool, on the chains its app shows. */
 const UNISWAP_CHAIN: Record<number, string> = { 1: 'ethereum', 10: 'optimism', 8453: 'base', 42161: 'arbitrum' }
@@ -258,9 +262,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
   const phase = phaseOf(lunch, lunch.balance, now)
   const split = splitOf(lunch.balance, lunch.supply, lunch)
   const logo = assetUrl(logoUri)
-  // The creator's share before the fee, as it fills toward its cap.
-  const uncapped = (lunch.balance * lunch.keepPercent) / PERCENT_TOTAL
-  const kept = uncapped < lunch.keepCap ? uncapped : lunch.keepCap
+  // Each part of the raise as a percent of it, for the pie.
+  const slice = (wei: bigint) => (lunch.balance > 0n ? Number((wei * 10_000n) / lunch.balance) / 100 : 0)
   const timer =
     phase === 'cooking' ? `${countdown(lunch.deadline - now)} left`
     : phase === 'resting' ? `buybacks start in ${countdown(lunch.servedAt + REST_SECONDS - now)}`
@@ -312,21 +315,24 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
           {lunch.servedAt ? (
             <ServedStats lunch={lunch} burns={burns} now={now} phase={phase} />
           ) : (
-            <dl className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <dt className="text-sm text-muted">Raised</dt>
-                <dd className="text-4xl font-bold tabular-nums">{formatEth(lunch.balance)} ETH</dd>
+            <>
+              <p className="text-sm text-muted">Raised</p>
+              <p className="text-4xl font-bold tabular-nums">{formatEth(lunch.balance)} ETH</p>
+              <div className="mt-4 flex items-center gap-5">
+                {lunch.balance > 0n ? (
+                  <div role="img" aria-label="Where the raise goes" className="h-24 w-24 shrink-0 rounded-full border border-line"
+                    style={{ background: `conic-gradient(${POOL} 0 ${slice(split.poolEth)}%, ${CREATOR} 0 ${slice(split.poolEth + split.creatorEth)}%, ${FEE} 0)` }} />
+                ) : null}
+                <dl className="space-y-2">
+                  <Stat label={<><Swatch color={POOL} />🔒 To the pool</>} value={`${formatEth(split.poolEth)} ETH`} />
+                  <Stat label={<><Swatch color={CREATOR} />👩‍🍳 To the creator</>} value={`${formatEth(split.creatorEth)} ETH`} />
+                  <Stat label={<><Swatch color={FEE} />Juicebox fee</>} value={`${formatEth(split.fee)} ETH`} />
+                </dl>
               </div>
-              <Stat label="🔒 To the pool" value={`${formatEth(split.poolEth)} ETH`} />
-              <Stat label="👩‍🍳 To the creator" value={`${formatEth(split.creatorEth)} ETH`} />
-              {lunch.keepPercent > 0n && lunch.keepCap > 0n ? (
-                <progress className="col-span-2 h-2 w-full" aria-label="The creator's share, toward its cap"
-                  max={Number(formatUnits(lunch.keepCap, 18))} value={Number(formatUnits(kept, 18))} />
-              ) : null}
-            </dl>
+            </>
           )}
           <p className="mt-4 text-sm text-muted">
-            Creator keeps {percent(lunch.keepPercent)} of the raise, up to {formatUnits(lunch.keepCap, 18)} ETH, and gets {percent(lunch.tokenPercent)} of the tokens over {Math.round(lunch.vestingDuration / 604800)} weeks. The rest is locked in the pool.
+            Creator {lunch.servedAt ? 'kept' : 'keeps'} {percent(lunch.keepPercent)} of the raise, up to {formatUnits(lunch.keepCap, 18)} ETH, and {lunch.servedAt ? 'got' : 'gets'} {percent(lunch.tokenPercent)} of the tokens, unlocking over {Math.round(lunch.vestingDuration / 604800)} weeks. The rest {lunch.servedAt ? 'was' : 'is'} locked in the pool.
           </p>
         </section>
       </div>
