@@ -28,6 +28,7 @@ contract FairLunchDataHook is IJBRulesetDataHook {
 
     error FairLunchDataHook_Closed(uint256 projectId, uint256 deadline);
     error FairLunchDataHook_NoSale(uint256 projectId);
+    error FairLunchDataHook_NotOpenYet(uint256 projectId, uint256 deadline);
 
     //*********************************************************************//
     // --------------- public immutable stored properties ---------------- //
@@ -121,8 +122,14 @@ contract FairLunchDataHook is IJBRulesetDataHook {
     {
         FairLunchRecord memory record = FAIR_LUNCH.recordOf(context.projectId);
 
-        // Everywhere but the host, payments mint nothing and wait to be sent home.
-        if (record.hostChainId != block.chainid) return (context.weight, hookSpecifications);
+        // Everywhere but the host, payments mint nothing and wait to be sent home. While the host is still selling
+        // tokens they're refused, since a payer here would get none.
+        if (record.hostChainId != block.chainid) {
+            if (block.timestamp <= record.deadline) {
+                revert FairLunchDataHook_NotOpenYet({projectId: context.projectId, deadline: record.deadline});
+            }
+            return (context.weight, hookSpecifications);
+        }
 
         if (record.servedAt != 0) {
             // A payment that doesn't name the fewest tokens it will take, `(uint256 amountToSwapWith, uint256

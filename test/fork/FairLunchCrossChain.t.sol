@@ -22,6 +22,7 @@ import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionMa
 import {Test} from "forge-std/Test.sol";
 
 import {FairLunch} from "../../src/FairLunch.sol";
+import {FairLunchDataHook} from "../../src/FairLunchDataHook.sol";
 import {FairLunchVestingDeployer} from "../../src/FairLunchVestingDeployer.sol";
 import {FairLunchConfig} from "../../src/structs/FairLunchConfig.sol";
 
@@ -156,6 +157,7 @@ contract FairLunchCrossChain is Test {
     function test_remote_paysMintNothingAndSendHome() public {
         vm.selectFork(optimismFork);
         uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_config(true));
+        vm.warp(uint256(deadline) + 1);
 
         assertEq(_pay(id, 1 ether), 0, "remote payments mint nothing");
         assertEq(TOKENS.totalSupplyOf(id), 0);
@@ -189,6 +191,7 @@ contract FairLunchCrossChain is Test {
     function test_remote_usdcLunchSendsUsdcHome() public {
         vm.selectFork(optimismFork);
         uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_usdcConfig(OP_USDC, BASE_USDC));
+        vm.warp(uint256(deadline) + 1);
         assertEq(lunch.recordOf(id).token, address(OP_USDC), "takes this chain's USDC");
 
         deal(address(OP_USDC), alice, 500e6);
@@ -232,6 +235,7 @@ contract FairLunchCrossChain is Test {
     function test_sendHome_returnsAFeeTheSuckerCouldntPay() public {
         vm.selectFork(optimismFork);
         uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_config(true));
+        vm.warp(uint256(deadline) + 1);
         _pay(id, 1 ether);
         address sucker = REGISTRY.suckersOf(id)[0];
 
@@ -268,6 +272,7 @@ contract FairLunchCrossChain is Test {
     function test_sendHome_withHoldersOnTheRemote() public {
         vm.selectFork(optimismFork);
         uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_config(true));
+        vm.warp(uint256(deadline) + 1);
         _pay(id, 1 ether);
 
         // What a sucker's `claim` does for a holder who bridged 100 tokens here.
@@ -406,44 +411,40 @@ contract FairLunchCrossChain is Test {
         assertTrue(sucker.isMapped(JBConstants.NATIVE_TOKEN));
     }
 
-    function test_host_claimBeforeServe_countsAsRaised() public {
+    /// @notice Money sent home before `serve` isn't part of the raise: nobody was sold tokens for it.
+    function test_host_claimBeforeServe_waitsForTheBurn() public {
         vm.selectFork(baseFork);
         uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_config(false));
         _pay(id, 10 ether);
 
-        // What serving leaves when the same 1 ETH arrives with no token carrying it.
-        uint256 snapshot = vm.snapshotState();
-        address sucker = REGISTRY.suckersOf(id)[0];
-        vm.deal(sucker, 1 ether);
-        vm.prank(sucker);
-        TERMINAL.addToBalanceOf{value: 1 ether}(id, JBConstants.NATIVE_TOKEN, 1 ether, false, "", "");
-        vm.warp(uint256(deadline) + 1);
-        lunch.serve(id);
-        uint256 supplyWithoutCarrier = TOKENS.totalSupplyOf(id);
-        vm.revertToState(snapshot);
-
         // A remote chain with no holders sends 1 ETH home carried by one wei of token.
+        vm.warp(uint256(deadline) + 1);
         _claimOnHost({id: id, eth: 1 ether, tokens: 1});
         assertEq(_balance(id), 11 ether);
-
-        vm.warp(uint256(deadline) + 1);
         lunch.serve(id);
 
-        // All 11 ETH less the fee is pooled beside 10.725M tokens, and the carrier wei is gone.
-        assertApproxEqAbs(TOKENS.totalSupplyOf(id), 10_000_000e18 + 10_725_000e18, 1e12);
+        // The 10 ETH payers paid, less the fee, is pooled beside 9.75M tokens. The carrier wei is gone.
+        assertApproxEqAbs(TOKENS.totalSupplyOf(id), 10_000_000e18 + 9_750_000e18, 1e12);
         assertEq(TOKENS.totalBalanceOf(address(lunch), id), 0);
         assertEq(address(lunch).balance, 0);
+        assertGe(_balance(id), 1 ether, "what was sent home waits for the burn");
+        assertLt(_balance(id), 1 ether + 1e12);
+    }
 
-        // To the wei: the supply is what it would be had no carrier come, payers hold what they bought, and every
-        // other token is in the pool. The carrier diluted nobody.
-        assertEq(TOKENS.totalSupplyOf(id), supplyWithoutCarrier, "the same supply as with no carrier");
-        IERC20 token = IERC20(address(TOKENS.tokenOf(id)));
-        assertEq(token.balanceOf(alice), 10_000_000e18, "the payer's tokens");
-        assertEq(
-            TOKENS.totalSupplyOf(id),
-            10_000_000e18 + token.balanceOf(address(lunch.POOL().POOL_MANAGER())),
-            "payer plus pool"
+    /// @notice While the host sells tokens, a payment on another chain would get none, so it's refused.
+    function test_remote_refusesPaymentsUntilTheDeadline() public {
+        vm.selectFork(optimismFork);
+        uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_config(true));
+
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(FairLunchDataHook.FairLunchDataHook_NotOpenYet.selector, id, uint256(deadline))
         );
+        TERMINAL.pay{value: 1 ether}(id, JBConstants.NATIVE_TOKEN, 1 ether, alice, 0, "", "");
+
+        vm.warp(uint256(deadline) + 1);
+        assertEq(_pay(id, 1 ether), 0, "taken once the fundraise is over");
     }
 
     function test_host_claimAfterServe_feedsTheBurn() public {

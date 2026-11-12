@@ -502,3 +502,17 @@ Review. Codex pass 14 on `56858ae` said hold: High, a lunch with no chef tokens 
 
 Follow-ups the same day. jango: show the airdrop on the ready-to-serve and served pages with the recipients expandable, show the starting token pie on the served page, food emojis for the airdrop fields. Done: an expandable Airdrop row on both pages lists recipients (20 at a time, find by address, Claim per row once served, the list checked against the on-chain root), `readServed` reads the lunch's `Serve` event for the served page's pie, and `assetUrl` uses the configured Center origin. Codex pass 15 on the cap removal said hold for one Medium: at shares near 100% a raise in a token with around 5e29 units paid could exceed Juicebox's uint208 supply cap and fail to serve. Not changed in code, since it needs both an absurd token and absurd shares; RISKS.md says so. Open for jango: accept that, or bound the shares (99% would give a 100x ceiling). Its Low (duplicate addresses) was already documented, and its note that claims can be one token-wei short is left alone.
 
+
+## Other chains closed during the raise (2026-11-12)
+
+jango: "maybe better to only allow funds on home chain during the raise phase", then "do it. also, can you mitigate the side effect?" (money delivered between the deadline and serve counting as raised).
+
+Refinement record. Objective: nobody can pay a lunch's copy and get nothing while the host sells tokens, and only money that bought tokens is the raise. System fit: one check in the data hook's pay path on copies (the deadline is in every copy's terms, no message needed), and `serve` sizes the raise from the supply payers hold instead of the whole balance. Not changed: `sendHome`, the bridge route checks, what copies do after the deadline.
+
+- [x] Data hook refuses a copy's payments until the deadline (`FairLunchDataHook_NotOpenYet`).
+- [x] `serve` burns carrier tokens first and takes `min(balance, supply at the fixed price)` as the raise; the rest waits for `burn`.
+- [x] Tests: `test_remote_refusesPaymentsUntilTheDeadline`, `test_host_claimBeforeServe_waitsForTheBurn`; remote tests pay after the deadline.
+- [x] Site: `raisedOf` for the Raised number, pies and phase; Delivery hidden while cooking. README and RISKS.md.
+- [ ] Codex pass, local fork rebuild, testnet redeploy.
+
+Review. Full suite 112 of 112. Site 22 of 22. A lunch nobody funded on the host can't be served, as before, and money paid on its copies after the deadline stays there; RISKS.md says so.

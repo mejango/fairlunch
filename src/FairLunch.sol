@@ -604,7 +604,17 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         }
 
         address token = record.token;
-        uint256 raised = _balanceOf({projectId: projectId, token: token});
+        uint256 perToken = TOKENS_PER_UNIT * 1e18;
+        uint256 unit = 10 ** TERMINAL.accountingContextForTokenOf({projectId: projectId, token: token}).decimals;
+
+        // The raise is what payers paid for the tokens they hold. Money that came another way, like revenue sent home
+        // from another chain since the deadline, stays in the balance for `burn`. The tokens that carried it are burned
+        // first so they don't count as sold.
+        // slither-disable-next-line unused-return
+        _burnTokensOf(projectId);
+        uint256 raised = _min(
+            _balanceOf({projectId: projectId, token: token}), mulDiv(TOKENS.totalSupplyOf(projectId), unit, perToken)
+        );
         if (raised == 0) revert FairLunch_NothingRaised(projectId);
 
         // From here on the lunch is served: payments stop minting and start buying back.
@@ -627,8 +637,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         });
         // The pool takes at most what `_MAX_POOL_TOKENS` matches, an amount Uniswap V4 can always account for. Any more
         // stays in the balance for `burn`.
-        uint256 perToken = TOKENS_PER_UNIT * 1e18;
-        uint256 unit = 10 ** TERMINAL.accountingContextForTokenOf({projectId: projectId, token: token}).decimals;
         uint256 poolAmount = _min(_holdingOf(token) - before, mulDiv(_MAX_POOL_TOKENS, unit, perToken));
 
         // The payout's fee minted JBP6 to this contract as the project's owner. It belongs to the creator.

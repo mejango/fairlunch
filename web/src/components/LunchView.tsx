@@ -12,7 +12,7 @@ import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { claimCallOf, readServed, readClaimed, readClaimList, readCopies, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
 import { SHARES_TOTAL } from '@/lib/fair-lunch/claims'
-import { PERCENT_TOTAL, splitOf, tokensFor } from '@/lib/fair-lunch/split'
+import { PERCENT_TOTAL, raisedOf, splitOf, tokensFor } from '@/lib/fair-lunch/split'
 import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
 import { chainName, projectPath } from '@/lib/urn'
@@ -419,11 +419,12 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
   if (isError) return <p className="card p-6">This lunch couldn&apos;t load. It&apos;ll try again.</p>
   if (!lunch) return <NoLunch chainId={chainId} projectId={projectId} />
 
-  const phase = phaseOf(lunch, lunch.balance, now)
-  const split = splitOf(lunch.balance, lunch.supply, lunch, lunch.money.decimals)
+  const raised = raisedOf(lunch.balance, lunch.supply, lunch.money.decimals)
+  const phase = phaseOf(lunch, raised, now)
+  const split = splitOf(raised, lunch.supply, lunch, lunch.money.decimals)
   const logo = assetUrl(logoUri)
   // Each part of the raise as a percent of it, for the pie.
-  const slice = (wei: bigint) => (lunch.balance > 0n ? Number((wei * 10_000n) / lunch.balance) / 100 : 0)
+  const slice = (wei: bigint) => (raised > 0n ? Number((wei * 10_000n) / raised) / 100 : 0)
   const airdropped = lunch.claimsPercent ? ` ${percent(lunch.claimsPercent)} of the tokens ${lunch.servedAt ? 'went' : 'go'} to an airdrop list.` : ''
   const timer =
     phase === 'cooking' ? `${countdown(lunch.deadline - now)} left`
@@ -478,9 +479,9 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
           ) : (
             <>
               <p className="text-sm text-muted">Raised</p>
-              <p className="text-4xl font-bold tabular-nums">{moneyText(lunch, lunch.balance)}</p>
+              <p className="text-4xl font-bold tabular-nums">{moneyText(lunch, raised)}</p>
               <div className="mt-4 flex items-center gap-5">
-                {lunch.balance > 0n ? (
+                {raised > 0n ? (
                   <div role="img" aria-label="Where the raise goes" className="h-24 w-24 shrink-0 rounded-full border border-line"
                     style={{ background: `conic-gradient(${POOL} 0 ${slice(split.poolEth)}%, ${CREATOR} 0)` }} />
                 ) : null}
@@ -501,7 +502,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
               ? `The chef kept ${percent(lunch.keepPercent)} of the raise, up to ${formatUnits(lunch.keepCap, lunch.money.decimals)} ${lunch.money.symbol}, and got ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.${airdropped} The rest was locked in the pool.`
               : `Funders get 1M ${lunch.symbol} per ${lunch.money.symbol}, fixed. The pool gets the same for its ${lunch.money.symbol}. The chef gets ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.${airdropped}`}
           </p>
-          <Copies lunch={lunch} />
+          {/* Other chains take payments once the fundraise is over. */}
+          {phase === 'cooking' ? null : <Copies lunch={lunch} />}
         </section>
       </div>
     </div>

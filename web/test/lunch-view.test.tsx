@@ -95,12 +95,13 @@ describe('LunchView', () => {
   it('lists other chains with only the buttons that have something to move', async () => {
     const copy = (over: Partial<Copy>): Copy => ({ chainId: 10, projectId: 3, money: { address: '0x000000000000000000000000000000000000EEEe', symbol: 'ETH', decimals: 18 }, balance: 0n, onTheWay: 0n, hostSucker: '0x0000000000000000000000000000000000000005', claims: [], ...over })
     const claim = { token: '0x000000000000000000000000000000000000EEEe', proof: [], leaf: { index: 0n, beneficiary: '0x', projectTokenCount: 1n, terminalTokenAmount: ETH / 10n, metadata: '0x' } } as unknown as Copy['claims'][number]
-    const text = await show(lunch({}), [
-      copy({ balance: ETH / 2n, onTheWay: ETH / 5n }),
-      copy({ chainId: 42161, claims: [claim] }),
-    ])
+    const copies = [copy({ balance: ETH / 2n, onTheWay: ETH / 5n }), copy({ chainId: 42161, claims: [claim] })]
+    const text = await show(lunch({ deadline: NOW - 1 }), copies)
     expect(text).toContain('0.5 ETH waiting, 0.2 ETH on the way')
-    expect(buttons()).toEqual(['Fund', 'Deliver', 'Bring in 0.1 ETH'])
+    expect(buttons()).toEqual(['🍽️ Serve it', 'Deliver', 'Bring in 0.1 ETH'])
+    // Other chains take nothing while the fundraise is on, so there's nothing to deliver yet.
+    act(() => root?.unmount())
+    expect(await show(lunch({}), copies)).not.toContain('Delivery')
   })
 
   it('points a copy at its lunch, and says so when there is none', async () => {
