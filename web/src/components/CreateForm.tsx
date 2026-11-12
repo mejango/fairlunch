@@ -157,6 +157,12 @@ export function CreateForm() {
   return (
     <form onSubmit={event => void submit(event)} className="card mx-auto max-w-xl space-y-4 p-5">
       <h1 className="text-2xl font-bold">🛒 Ingredients</h1>
+      <ul className="space-y-1 text-sm text-muted">
+        <li>🧑‍🍳 Pick a name, a deadline and the share you keep.</li>
+        <li>🥬 People fund it at one fixed price. No refunds.</li>
+        <li>🍽️ After the deadline anyone can serve it. You get your share and the rest is locked in a Uniswap pool.</li>
+        <li>🔥 Anything paid in later buys the token from the pool and burns it.</li>
+      </ul>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">🍞 Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
         <label className="field">🥓 Ticker<input name="symbol" className="input uppercase" maxLength={10} required placeholder="SAND" /></label>
