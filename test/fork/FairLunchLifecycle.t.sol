@@ -103,6 +103,10 @@ contract FairLunchLifecycle is Test {
     IGeomeanOracle internal constant ORACLE = IGeomeanOracle(0xB436Cedbee8F191A3860719b4B0f474434F315c8);
 
     uint256 internal constant RAISE_SQRT_PRICE_X96 = 1000 << 96;
+    // Where a trade costs the fundraise's price once the pool's 1% fee is counted: 1% more tokens per ETH, and 1%
+    // fewer.
+    uint160 internal constant CHEAPEST_SQRT_PRICE_X96 = 79_627_299_360_338_032_629_969_613_668_148;
+    uint160 internal constant DEAREST_SQRT_PRICE_X96 = 78_831_026_366_734_652_303_669_917_531_468;
     uint32 internal constant HALF = JBConstants.SPLITS_TOTAL_PERCENT / 2;
     uint32 internal constant FIFTH = JBConstants.SPLITS_TOTAL_PERCENT / 5;
     uint32 internal constant TENTH = JBConstants.SPLITS_TOTAL_PERCENT / 10;
@@ -487,16 +491,16 @@ contract FairLunchLifecycle is Test {
     }
 
     function test_serve_hostilePoolTooHigh() public {
-        _serveOverHostilePool(138_162 + 46_000, 138_162 + 110);
+        _serveOverHostilePool(138_162 + 46_000, CHEAPEST_SQRT_PRICE_X96);
     }
 
     function test_serve_hostilePoolTooLow() public {
-        _serveOverHostilePool(138_162 - 46_000, 138_162 - 110);
+        _serveOverHostilePool(138_162 - 46_000, DEAREST_SQRT_PRICE_X96);
     }
 
     /// @notice A stranger creates the pool at a price about 100x off before the lunch is served. Serving moves it back
-    /// for free, to the edge of the 1.1% beside the fundraise's price that it won't trade inside.
-    function _serveOverHostilePool(int24 hostileTick, int24 servedTick) internal {
+    /// for free, to the edge of the 1% beside the fundraise's price that it won't trade inside.
+    function _serveOverHostilePool(int24 hostileTick, uint160 servedSqrtPriceX96) internal {
         uint256 id = _create(FIFTH, 5 ether, TENTH);
         _pay(id, alice, 10 ether);
 
@@ -506,8 +510,8 @@ contract FairLunchLifecycle is Test {
         vm.warp(deadline + 1);
         lunch.serve(id);
 
-        assertEq(_sqrtPrice(id), TickMath.getSqrtPriceAtTick(servedTick), "moved back beside the fundraise's price");
-        assertLt(_balance(id), 0.1 ether, "all but the 1.1% the off price didn't take was pooled");
+        assertEq(_sqrtPrice(id), servedSqrtPriceX96, "moved back beside the fundraise's price");
+        assertLt(_balance(id), 0.1 ether, "all but the 1% the off price didn't take was pooled");
         _assertHoldsNothing(id);
     }
 
@@ -538,7 +542,7 @@ contract FairLunchLifecycle is Test {
         vm.warp(deadline + 1);
         lunch.serve(id);
 
-        assertEq(_sqrtPrice(id), TickMath.getSqrtPriceAtTick(138_162 - 110), "ends beside the fundraise's price");
+        assertEq(_sqrtPrice(id), DEAREST_SQRT_PRICE_X96, "ends beside the fundraise's price");
         // The stranger's ETH was bought with fewer tokens than the fundraise would have charged for it, so fewer than
         // 9.75M tokens were needed beside the pool's ETH, and the extra ETH is waiting for the burn.
         assertLt(TOKENS.totalSupplyOf(id) - supplyBefore, 9_750_000e18, "sold tokens dear");
@@ -1011,14 +1015,15 @@ contract FairLunchLifecycle is Test {
         PoolProbe probe = new PoolProbe(POSITION_MANAGER, PERMIT2);
         vm.deal(address(probe), 40 ether);
 
-        // The range that holds the fundraise's price, tick 138,162, with the pool started at its far edge.
+        // A range beside the fundraise's price, tick 138,162, with the pool started at its far edge so `serve` trades
+        // through it.
         if (dear) {
             probe.seed(key, TickMath.getSqrtPriceAtTick(138_000), 138_000, 138_200, 30 ether, 0);
         } else {
             vm.prank(address(probe));
             uint256 tokens =
                 TERMINAL.pay{value: 30 ether}(id, JBConstants.NATIVE_TOKEN, 30 ether, address(probe), 0, "", "");
-            probe.seed(key, TickMath.getSqrtPriceAtTick(138_200), 138_000, 138_200, 0, uint128(tokens));
+            probe.seed(key, TickMath.getSqrtPriceAtTick(138_400), 138_200, 138_400, 0, uint128(tokens));
         }
         uint256 positionId = POSITION_MANAGER.nextTokenId() - 1;
         uint256 ethBefore = address(probe).balance;
@@ -1036,6 +1041,57 @@ contract FairLunchLifecycle is Test {
             uint256 sold = 30_000_000e18 - (_token(id).balanceOf(address(probe)) - tokensBefore);
             assertLe((address(probe).balance - ethBefore) * 1_000_000, sold, "sold over the fundraise's price");
         }
+    }
+
+    /// @notice A pool started as far from the fundraise's price as `serve` will leave it gives nobody a trade that
+    /// beats the fundraise: tokens bought while cooking don't sell for more than they cost, and the pool's tokens don't
+    /// sell
+    /// for less.
+    function test_serve_openingBesideTheRaisePriceGivesNoFreeTrade_dear() public {
+        (uint256 id, PoolProbe probe) = _servedFrom(DEAREST_SQRT_PRICE_X96);
+        IERC20 token = _token(id);
+        vm.prank(alice);
+        token.transfer(address(probe), 1000e18);
+        assertLe(probe.swap(lunch.poolKeyOf(id), false, 1000e18), 0.001 ether, "sold over the fundraise's price");
+    }
+
+    function test_serve_openingBesideTheRaisePriceGivesNoFreeTrade_cheap() public {
+        (uint256 id, PoolProbe probe) = _servedFrom(CHEAPEST_SQRT_PRICE_X96);
+        vm.deal(address(probe), 0.001 ether);
+        assertLe(probe.swap(lunch.poolKeyOf(id), true, 0.001 ether), 1000e18, "bought under the fundraise's price");
+    }
+
+    function _servedFrom(uint160 sqrtPriceX96) internal returns (uint256 id, PoolProbe probe) {
+        id = _create(0, 0, 0);
+        _pay(id, alice, 10 ether);
+        POOL_MANAGER.initialize(lunch.poolKeyOf(id), sqrtPriceX96);
+        vm.warp(deadline + 1);
+        lunch.serve(id);
+        assertEq(_sqrtPrice(id), sqrtPriceX96, "opened where it was started");
+        probe = new PoolProbe(POSITION_MANAGER, PERMIT2);
+    }
+
+    /// @notice Someone can buy a little, lend it to the pool as liquidity right where a burn is about to buy, and take
+    /// it back after: they sell into the burn and earn its fee instead of paying one. That pays, and the burn's price
+    /// bound is what limits it: they never take more than 2% of what the burn spent.
+    function test_burn_liquidityAddedAheadTakesNoMoreThanTheBound() public {
+        uint256 id = _served(0, 0, 0);
+        PoolKey memory key = lunch.poolKeyOf(id);
+        PoolProbe probe = new PoolProbe(POSITION_MANAGER, PERMIT2);
+        _pay(id, bob, 1 ether);
+        _trade(id);
+        vm.warp(_servedAt() + 31 minutes);
+
+        vm.deal(address(probe), 1 ether);
+        uint256 bought = probe.swap(key, true, 0.05 ether);
+        probe.seed(key, 0, 138_000, 138_200, 0.2 ether, uint128(bought));
+        uint256 positionId = POSITION_MANAGER.nextTokenId() - 1;
+        (uint256 spent,) = lunch.burn(id);
+        probe.unseed(key, positionId);
+        probe.swap(key, false, _token(id).balanceOf(address(probe)));
+
+        assertGt(spent, 0, "the burn bought");
+        assertLe(address(probe).balance, 1 ether + spent / 50, "took more than the bound allows");
     }
 
     /// @notice Deep liquidity parked just short of the fundraise's price can't keep a lunch from being served.

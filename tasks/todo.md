@@ -412,7 +412,14 @@ Hostile lunches, pool made before `serve`:
 
 ### The fix
 
-`serve` now stops its price-moving swap 110 ticks (1.1%) short of the raise price on either side, so the fee it pays early liquidity never makes the trade worse than the fundraise's price. A pool someone started off-price opens 1.1% beside the raise price instead of on it, and about 1% of the pool's ETH (or tokens) is left for burns. `FairLunch` is 24,514 bytes, 62 spare. 56 contract tests pass.
+`serve` now stops its price-moving swap 1% short of the raise price on either side, so the fee it pays early liquidity never makes the trade worse than the fundraise's price. A pool someone started off-price opens 1% beside the raise price instead of on it, and about 1% of the pool's ETH (or tokens) is left for burns. First built as a 110 tick margin, then made exact after pass 9. 59 contract tests pass.
 
-- [ ] Codex pass 9 on the fix.
+- [x] Codex pass 9 on the fix: HOLD, one Low it introduced and one Medium that was already there.
+
+| Finding | Decision |
+|---|---|
+| Low: at the edge of the 110-tick margin, a pool opens 1.1% off and a fundraise holder sells into it 0.05% above cost (0.000022 ETH on a 100 ETH raise) | Fixed. The limits are now the exact prices where a trade costs the raise price after the 1% fee, as constants. `FairLunch` is 23,806 bytes, 770 spare. `test_serve_openingBesideTheRaisePriceGivesNoFreeTrade_dear` and `_cheap` |
+| `test_serve_buysNoTokenOverTheRaisePrice` started inside the margin, so it proved nothing | Fixed: it starts outside now and `serve` trades through the offers |
+| Medium, already there: liquidity added just ahead of a `burn` and removed after sells into it and earns its fee. 0.0004 ETH from a burn that spent 0.1 | Reproduced in `test_burn_liquidityAddedAheadTakesNoMoreThanTheBound`, which holds it under 2% of the burn's spend. Not fixed: any LP earns a burn's fee, and the bound is what limits the rest. In RISKS.md. **Open for jango:** tighten the 200 tick bound, or leave it |
+
 - [x] Testnet recheck on the fixed contract (`0x3c4baf80021d73fba39d31b5d1abc065cd964ba1`, Arbitrum Sepolia only, projects 15 and 16). The same 30,000 offered tokens: `serve` bought none, and all 30,000 came back to the attacker with no ETH. That pool opened 0.4% cheap. The pool started 100x too cheap opened 1.1% cheap, with 0.00017 of 0.0156 ETH left for burns.
