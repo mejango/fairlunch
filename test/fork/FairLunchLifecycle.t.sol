@@ -36,6 +36,7 @@ import {FairLunch} from "../../src/FairLunch.sol";
 import {FairLunchDataHook} from "../../src/FairLunchDataHook.sol";
 import {FairLunchVestingDeployer} from "../../src/FairLunchVestingDeployer.sol";
 import {IFairLunch} from "../../src/interfaces/IFairLunch.sol";
+import {PoolProbe} from "../PoolProbe.sol";
 import {FairLunchConfig} from "../../src/structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "../../src/structs/FairLunchRecord.sol";
 
@@ -78,45 +79,6 @@ contract ForwardingCreator {
 
     receive() external payable {
         TERMINAL.pay{value: msg.value}(payInto, JBConstants.NATIVE_TOKEN, msg.value, address(this), 0, "", "");
-    }
-}
-
-/// @notice Anyone trading in a lunch's pool.
-contract Trader is IUnlockCallback {
-    IPoolManager internal immutable POOL_MANAGER;
-
-    constructor(IPoolManager poolManager) {
-        POOL_MANAGER = poolManager;
-    }
-
-    receive() external payable {}
-
-    /// @notice Sell an exact amount of ETH (`zeroForOne`) or of the token into the pool, at any price.
-    function swap(PoolKey memory key, bool zeroForOne, uint256 amountIn) external returns (uint256 received) {
-        received = abi.decode(POOL_MANAGER.unlock(abi.encode(key, zeroForOne, amountIn)), (uint256));
-    }
-
-    function unlockCallback(bytes calldata data) external override returns (bytes memory) {
-        (PoolKey memory key, bool zeroForOne, uint256 amountIn) = abi.decode(data, (PoolKey, bool, uint256));
-        BalanceDelta delta = POOL_MANAGER.swap(
-            key,
-            SwapParams({
-                zeroForOne: zeroForOne,
-                amountSpecified: -int256(amountIn),
-                sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
-            }),
-            ""
-        );
-        if (zeroForOne) {
-            POOL_MANAGER.settle{value: uint128(-delta.amount0())}();
-            POOL_MANAGER.take(key.currency1, address(this), uint128(delta.amount1()));
-            return abi.encode(uint256(uint128(delta.amount1())));
-        }
-        POOL_MANAGER.sync(key.currency1);
-        IERC20(Currency.unwrap(key.currency1)).transfer(address(POOL_MANAGER), uint128(-delta.amount1()));
-        POOL_MANAGER.settle();
-        POOL_MANAGER.take(key.currency0, address(this), uint128(delta.amount0()));
-        return abi.encode(uint256(uint128(delta.amount0())));
     }
 }
 
@@ -760,7 +722,7 @@ contract FairLunchLifecycle is Test {
         // tokens.
         _pay(id, bob, 0.05 ether);
         lunch.burn(id);
-        Trader trader = new Trader(POOL_MANAGER);
+        PoolProbe trader = new PoolProbe(POSITION_MANAGER, PERMIT2);
         IERC20 token = _token(id);
         vm.prank(alice);
         token.transfer(address(trader), 100_000e18);
@@ -899,7 +861,7 @@ contract FairLunchLifecycle is Test {
     function test_burn_ignoresPriceMovedInItsOwnBlock() public {
         uint256 id = _served(0, 0, 0);
         PoolKey memory key = lunch.poolKeyOf(id);
-        Trader trader = new Trader(POOL_MANAGER);
+        PoolProbe trader = new PoolProbe(POSITION_MANAGER, PERMIT2);
         vm.deal(address(trader), 10 ether);
 
         // A holder sells hard, and time passes with the price low: far under the average, a buyback has room.
@@ -935,22 +897,103 @@ contract FairLunchLifecycle is Test {
     function test_burn_sandwichLosesMoney() public {
         uint256 id = _served(0, 0, 0);
         PoolKey memory key = lunch.poolKeyOf(id);
-        Trader trader = new Trader(POOL_MANAGER);
+        PoolProbe trader = new PoolProbe(POSITION_MANAGER, PERMIT2);
         vm.deal(address(trader), 4 ether);
         _pay(id, bob, 1 ether);
         _trade(id);
         vm.warp(_servedAt() + 31 minutes);
 
         // 4 ETH into a 10 ETH pool, a burn with 1 ETH waiting, then out again.
-        uint256 bought = trader.swap(key, true, 4 ether);
-        (uint256 spent,) = lunch.burn(id);
-        vm.prank(address(trader));
-        _token(id).approve(address(trader), bought);
-        trader.swap(key, false, bought);
+        (, bytes memory result) =
+            trader.sandwich(key, true, 4 ether, address(lunch), 0, abi.encodeCall(lunch.burn, (id)));
+        (uint256 spent,) = abi.decode(result, (uint256, uint256));
 
         assertEq(spent, 0, "the burn didn't buy at the pushed price");
         assertLt(address(trader).balance, 4 ether, "the round trip only paid fees");
         assertApproxEqAbs(_balance(id), 1 ether, 1e9, "the ETH still waits");
+    }
+
+    /// @notice Trading around a burn never pays, whichever way the push goes, however big it and the waiting balance
+    /// are, in the burn's own block or with the push a block ahead.
+    function testFuzz_burn_sandwichNeverProfits(uint256 push, uint256 waiting, bool ethFirst, bool blockAhead) public {
+        uint256 id = _served(0, 0, 0);
+        PoolKey memory key = lunch.poolKeyOf(id);
+        PoolProbe probe = new PoolProbe(POSITION_MANAGER, PERMIT2);
+        _pay(id, bob, bound(waiting, 0.001 ether, 5 ether));
+        _trade(id);
+        vm.warp(_servedAt() + 31 minutes);
+
+        // Up to twice the pool's ETH, or most of its tokens.
+        if (ethFirst) {
+            push = bound(push, 0.0001 ether, 20 ether);
+            vm.deal(address(probe), push);
+        } else {
+            push = bound(push, 100e18, 9_000_000e18);
+            IERC20 token = _token(id);
+            vm.prank(alice);
+            token.transfer(address(probe), push);
+        }
+
+        uint256 back;
+        if (blockAhead) {
+            uint256 got = probe.swap(key, ethFirst, push);
+            vm.warp(_servedAt() + 31 minutes + 2);
+            lunch.burn(id);
+            back = probe.swap(key, !ethFirst, got);
+        } else {
+            (back,) = probe.sandwich(key, ethFirst, push, address(lunch), 0, abi.encodeCall(lunch.burn, (id)));
+        }
+        assertLe(back, push, "the round trip paid");
+    }
+
+    /// @notice Someone who makes the pool early with their own liquidity in the way, lets `serve` trade through it,
+    /// and then sells everything, never ends with more ETH than they started with.
+    /// @param dear Whether their pool prices the token above the fundraise's price (resting ETH bids) or below it
+    /// (resting asks of tokens they bought while it cooked).
+    function testFuzz_serve_earlyPoolNeverProfits(
+        bool dear,
+        uint256 size,
+        uint256 stake,
+        uint8 width,
+        uint8 gap,
+        bool straddle
+    )
+        public
+    {
+        uint256 id = _create(FIFTH, 5 ether, TENTH);
+        _pay(id, alice, 10 ether);
+        PoolKey memory key = lunch.poolKeyOf(id);
+        PoolProbe probe = new PoolProbe(POSITION_MANAGER, PERMIT2);
+        size = bound(size, 0.01 ether, 40 ether);
+        stake = bound(stake, 0, 20 ether);
+        vm.deal(address(probe), size + stake);
+
+        // They can also hold tokens from the fundraise to sell into whatever price the pool opens at.
+        if (stake != 0) {
+            vm.prank(address(probe));
+            TERMINAL.pay{value: stake}(id, JBConstants.NATIVE_TOKEN, stake, address(probe), 0, "", "");
+        }
+
+        // The fundraise's price is tick 138,162. A range ends beside it or straddles it.
+        int24 span = 200 * int24(uint24(bound(width, 1, 20)));
+        int24 away = 200 * int24(uint24(bound(gap, 0, 50)));
+        if (dear) {
+            int24 upper = straddle ? int24(138_200) : int24(138_000);
+            probe.seed(key, TickMath.getSqrtPriceAtTick(upper - span - away), upper - span, upper, uint128(size), 0);
+        } else {
+            vm.prank(address(probe));
+            uint256 tokens = TERMINAL.pay{value: size}(id, JBConstants.NATIVE_TOKEN, size, address(probe), 0, "", "");
+            int24 lower = straddle ? int24(138_000) : int24(138_200);
+            probe.seed(key, TickMath.getSqrtPriceAtTick(lower + span + away), lower, lower + span, 0, uint128(tokens));
+        }
+        uint256 positionId = POSITION_MANAGER.nextTokenId() - 1;
+
+        vm.warp(deadline + 1);
+        lunch.serve(id);
+
+        probe.unseed(key, positionId);
+        probe.swap(key, false, _token(id).balanceOf(address(probe)));
+        assertLe(address(probe).balance, size + stake, "making the pool early paid");
     }
 
     /// @notice Deep liquidity parked just short of the fundraise's price can't keep a lunch from being served.

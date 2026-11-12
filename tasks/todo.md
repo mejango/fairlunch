@@ -342,7 +342,7 @@ Plan, as built:
 - [x] Site: Buy is the terminal's `pay` and Sell is `cashOutTokensOf`, each with the pool's quote less 2% in the buyback metadata (SDK builders). Permit2, the router and the approval steps are gone.
 - [x] 53 contract tests and 18 site tests pass. `npm run check` passes.
 - [x] Codex pass 7 on the rework: HOLD, one High.
-- [ ] Redeploy to the testnets and walk it, with buy and sell.
+- [x] Redeploy to the testnets and walk it, with buy and sell.
 
 Found on the way: the oracle hook reports no history until a pool has observations at two timestamps. In a served pool nothing has traded in, the buyback hook buys at the current price for small payments only, and won't sell without a named minimum. A trade slipped in ahead of `burn` writes the second observation, and the burn then holds to the average (`test_burn_doesntChaseAPushedPrice`).
 
@@ -368,3 +368,15 @@ Testnet, reworked contract at `0xa309e08ddc1098f67d6a6cb6e4ef4b2b1a9bef5e` on Ar
 | Pay 0.01 ETH without a minimum | Waits in the balance |
 
 Local site on a rebuilt Base fork: the trade card quotes a buy and a sell, shows one Buy or Sell button with no approval step, and logs no errors at 390px.
+
+## Pool and sandwich testing on testnets (2026-11-12)
+
+jango: "thoroughly test LPing and buybacks and everything related to pools on testnets too", "especially be mindful about mitigating sandwich attacks during permissionless pool related transactions".
+
+The permissionless calls that touch a pool are `serve`, `burn`, `collect`, and payments and cash outs through the buyback hook. One tool measures all of them: `test/PoolProbe.sol`, an attacker that trades ahead of any call and back out after it in one transaction, and that can make a pool early with its own liquidity. The fork tests use it as a gate, and it is deployed to Arbitrum Sepolia for real transactions. Evidence is the attacker's round-trip result per case.
+
+- [ ] `PoolProbe` replaces the test-only `Trader`. No behavior change, tests green.
+- [ ] Fork gates: a fuzzed atomic sandwich of `burn` never profits, a sandwich of `serve` over the attacker's own early pool loses, sandwiched quoted buys and sells past their minimum revert, `collect` gives a sandwich nothing.
+- [ ] Testnet, clean lunch: burn, collect, claim, oversized burn in parts, then each sandwich as a real transaction (same block, and across blocks).
+- [ ] Testnet, hostile lunches: pool made early too high, too low, and with the attacker's liquidity in the way. Serve, then buy, sell, burn and collect on each.
+- [ ] Record results. Fix what the tests find before anything else.
