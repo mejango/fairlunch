@@ -32,6 +32,7 @@ import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmo
 import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 import {Test} from "forge-std/Test.sol";
 
+import {FairLunchPool} from "../../src/FairLunchPool.sol";
 import {FairLunch} from "../../src/FairLunch.sol";
 import {FairLunchDataHook} from "../../src/FairLunchDataHook.sol";
 import {FairLunchVestingDeployer} from "../../src/FairLunchVestingDeployer.sol";
@@ -250,6 +251,8 @@ contract FairLunchLifecycle is Test {
 
     function _assertHoldsNothing(uint256 id) internal view {
         assertEq(address(lunch).balance, 0, "lunch holds ETH");
+        assertEq(address(lunch.POOL()).balance, 0, "pool contract holds ETH");
+        assertEq(TOKENS.totalBalanceOf(address(lunch.POOL()), id), 0, "pool contract holds tokens");
         assertEq(TOKENS.totalBalanceOf(address(lunch), id), 0, "lunch holds tokens");
         assertEq(TOKENS.totalBalanceOf(address(lunch), 1), 0, "lunch holds JBP6");
     }
@@ -367,8 +370,9 @@ contract FairLunchLifecycle is Test {
     }
 
     function test_unlockCallback_onlyPoolManager() public {
-        vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));
-        lunch.unlockCallback("");
+        FairLunchPool pool = lunch.POOL();
+        vm.expectRevert(abi.encodeWithSelector(FairLunchPool.FairLunchPool_Unauthorized.selector, address(this)));
+        pool.unlockCallback("");
     }
 
     //*********************************************************************//
@@ -439,8 +443,8 @@ contract FairLunchLifecycle is Test {
         assertEq(lunch.recordOf(id).servedAt, _servedAt());
         assertEq(
             IERC721Like(address(POSITION_MANAGER)).ownerOf(lunch.recordOf(id).positionId),
-            address(lunch),
-            "lunch holds the position"
+            address(lunch.POOL()),
+            "the lunch's pool contract holds the position"
         );
         _assertHoldsNothing(id);
     }
@@ -1150,7 +1154,9 @@ contract FairLunchLifecycle is Test {
     }
 
     function test_setChainSpecificConstants_onlyDeployerOnce() public {
-        assertEq(address(lunch.POOL_MANAGER()), address(POOL_MANAGER), "pool manager read from the position manager");
+        assertEq(
+            address(lunch.POOL().POOL_MANAGER()), address(POOL_MANAGER), "pool manager read from the position manager"
+        );
 
         vm.expectRevert(FairLunch.FairLunch_AlreadyConfigured.selector);
         lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});

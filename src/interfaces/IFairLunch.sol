@@ -9,12 +9,11 @@ import {IJBTokens} from "@bananapus/core-v6/src/interfaces/IJBTokens.sol";
 import {IJBOmnichainDeployer} from "@bananapus/omnichain-deployers-v6/src/interfaces/IJBOmnichainDeployer.sol";
 import {IJBSuckerRegistry} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerRegistry.sol";
 import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
-import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
 import {FairLunchDataHook} from "../FairLunchDataHook.sol";
+import {FairLunchPool} from "../FairLunchPool.sol";
 import {FairLunchVestingDeployer} from "../FairLunchVestingDeployer.sol";
 import {FairLunchConfig} from "../structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "../structs/FairLunchRecord.sol";
@@ -99,17 +98,11 @@ interface IFairLunch {
     /// @notice The Uniswap V4 hook every lunch's pool uses, which records the price history buybacks are bounded by.
     function ORACLE_HOOK() external view returns (IGeomeanOracle);
 
-    /// @notice The Permit2 contract the position manager pulls tokens through.
-    function PERMIT2() external view returns (IAllowanceTransfer);
-
     /// @notice The fee of every lunch's pool, in hundredths of a basis point.
     function POOL_FEE() external view returns (uint24);
 
-    /// @notice The Uniswap V4 pool manager.
-    function POOL_MANAGER() external view returns (IPoolManager);
-
-    /// @notice The Uniswap V4 position manager.
-    function POSITION_MANAGER() external view returns (IPositionManager);
+    /// @notice The holder of every lunch's liquidity, which trades in its pool.
+    function POOL() external view returns (FairLunchPool);
 
     /// @notice The registry of every lunch's suckers.
     function SUCKER_REGISTRY() external view returns (IJBSuckerRegistry);

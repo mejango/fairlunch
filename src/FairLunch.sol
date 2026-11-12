@@ -34,24 +34,15 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {mulDiv} from "@prb/math/src/Common.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
-import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
-import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
-import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
-import {Actions} from "@uniswap/v4-periphery/src/libraries/Actions.sol";
-import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 
 import {FairLunchDataHook} from "./FairLunchDataHook.sol";
+import {FairLunchPool} from "./FairLunchPool.sol";
 import {FairLunchVestingDeployer} from "./FairLunchVestingDeployer.sol";
 import {IFairLunch} from "./interfaces/IFairLunch.sol";
 import {IBuybackOracle} from "./interfaces/IBuybackOracle.sol";
@@ -76,27 +67,12 @@ import {FairLunchRecord} from "./structs/FairLunchRecord.sol";
 /// through the lunch's suckers. `burn` uses the balance to buy the token and burn it, never paying more than a bound
 /// above the pool's time-weighted average price. Whatever a bounded buy can't spend waits for the next one.
 ///
-/// This contract is each lunch's owner and the holder of its liquidity. `FairLunchDataHook`, which it deploys, is each
-/// lunch's data hook (wrapped by `JBOmnichainDeployer`). This contract holds no ETH or tokens between calls.
-contract FairLunch is
-    ERC2771Context,
-    ReentrancyGuardTransient,
-    IFairLunch,
-    IJBPayerTracker,
-    IUnlockCallback,
-    IERC721Receiver
-{
-    // A library that reverts instead of truncating when narrowing a number.
-    using SafeCast for uint256;
-
+/// This contract is each lunch's owner. It deploys `FairLunchDataHook`, each lunch's data hook (wrapped by
+/// `JBOmnichainDeployer`), and `FairLunchPool`, which holds each lunch's liquidity and trades in its pool. This
+/// contract holds no ETH or tokens between calls.
+contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBPayerTracker, IERC721Receiver {
     // A library that adds default safety checks to ERC-20 functionality.
     using SafeERC20 for IERC20;
-
-    // A library that derives a Uniswap V4 pool's ID from its key.
-    using PoolIdLibrary for PoolKey;
-
-    // A library that reads Uniswap V4 pool state.
-    using StateLibrary for IPoolManager;
 
     //*********************************************************************//
     // --------------------------- custom errors ------------------------- //
@@ -107,7 +83,6 @@ contract FairLunch is
     error FairLunch_HostMapsNoTokens();
     error FairLunch_InvalidConfig();
     error FairLunch_NoHostSucker(uint256 projectId, uint256 hostChainId);
-    error FairLunch_NoLiquidity(uint256 projectId);
     error FairLunch_NotConfigured();
     error FairLunch_NotHost(uint256 projectId, uint256 hostChainId);
     error FairLunch_NotRemote(uint256 projectId);
@@ -154,17 +129,6 @@ contract FairLunch is
     /// @notice The gas a sucker reserves on the remote chain for a native token claim.
     uint32 internal constant _SUCKER_MIN_GAS = 200_000;
 
-    /// @notice The pool price that matches the fundraise's price: `sqrt(TOKENS_PER_ETH)` as a Q64.96. ETH is always
-    /// currency0, so the pool's price is tokens per ETH.
-    uint160 internal constant _RAISE_SQRT_PRICE_X96 = 1000 << 96;
-
-    /// @notice The pool prices where trading costs exactly the fundraise's price once the pool's 1% fee is counted:
-    /// 1% more tokens per ETH than the fundraise gave (`_SERVE_CHEAPEST_SQRT_PRICE_X96`) and 1% fewer
-    /// (`_SERVE_DEAREST_SQRT_PRICE_X96`). `serve` only trades through a pool someone made early outside of these, and a
-    /// pool that opens between them gives no trade against it that beats the fundraise.
-    uint160 internal constant _SERVE_CHEAPEST_SQRT_PRICE_X96 = 79_627_299_360_338_032_629_969_613_668_148;
-    uint160 internal constant _SERVE_DEAREST_SQRT_PRICE_X96 = 78_831_026_366_734_652_303_669_917_531_468;
-
     //*********************************************************************//
     // --------------- public immutable stored properties ---------------- //
     //*********************************************************************//
@@ -184,8 +148,8 @@ contract FairLunch is
     /// @notice The deployer every lunch is launched through, which wires up its suckers.
     IJBOmnichainDeployer public immutable override OMNICHAIN_DEPLOYER;
 
-    /// @notice The Permit2 contract the position manager pulls tokens through.
-    IAllowanceTransfer public immutable override PERMIT2;
+    /// @notice The holder of every lunch's liquidity, which trades in its pool.
+    FairLunchPool public immutable override POOL;
 
     /// @notice The registry of every lunch's suckers.
     IJBSuckerRegistry public immutable override SUCKER_REGISTRY;
@@ -216,14 +180,6 @@ contract FairLunch is
     /// @notice The Uniswap V4 hook every lunch's pool uses, which records the price history buybacks are bounded by.
     /// @dev Set once by `_DEPLOYER` through `setChainSpecificConstants`. Zero until then.
     IGeomeanOracle public override ORACLE_HOOK;
-
-    /// @notice The Uniswap V4 pool manager.
-    /// @dev Set once by `_DEPLOYER` through `setChainSpecificConstants`. Zero until then.
-    IPoolManager public override POOL_MANAGER;
-
-    /// @notice The Uniswap V4 position manager.
-    /// @dev Set once by `_DEPLOYER` through `setChainSpecificConstants`. Zero until then.
-    IPositionManager public override POSITION_MANAGER;
 
     //*********************************************************************//
     // -------------------- internal stored properties ------------------- //
@@ -274,7 +230,7 @@ contract FairLunch is
         TERMINAL = terminal;
         TOKENS = terminal.TOKENS();
         SUCKER_REGISTRY = suckerRegistry;
-        PERMIT2 = permit2;
+        POOL = new FairLunchPool(permit2);
         VESTING_DEPLOYER = vestingDeployer;
         _DEPLOYER = deployer;
     }
@@ -283,7 +239,7 @@ contract FairLunch is
     // ------------------------- receive / fallback ---------------------- //
     //*********************************************************************//
 
-    /// @notice Accept ETH from payouts, cash outs, the pool manager and the position manager.
+    /// @notice Accept ETH from payouts, cash outs, suckers and `POOL`.
     receive() external payable {}
 
     //*********************************************************************//
@@ -325,17 +281,10 @@ contract FairLunch is
             // belongs to the creator.
             _sendFeeTokensTo(record.creator);
 
-            PoolKey memory key = poolKeyOf(projectId);
-
-            // Buying the token lowers the pool's tokens-per-ETH price, so the bound sits below the reference.
-            uint160 sqrtPriceLimitX96 = TickMath.getSqrtPriceAtTick(_boundTickOf(key) - TWAP_MAX_DEVIATION);
-
-            // Buy as much as the bound allows.
-            // slither-disable-next-line unused-return
-            (uint160 sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
-            if (sqrtPriceX96 > sqrtPriceLimitX96) {
-                (spent,) = _swap({key: key, zeroForOne: true, amountIn: amount, sqrtPriceLimitX96: sqrtPriceLimitX96});
-            }
+            // Buy as much as the price bound allows. The tokens and the ETH the buy couldn't spend come back.
+            spent = POOL.buy{value: amount}({
+                key: poolKeyOf(projectId), twapWindow: TWAP_WINDOW, maxDeviation: TWAP_MAX_DEVIATION
+            });
 
             // Put back what the buy couldn't spend.
             if (amount != spent) _addToBalanceOf({projectId: projectId, amount: amount - spent});
@@ -359,15 +308,10 @@ contract FairLunch is
         // Only a served lunch has a position.
         if (record.servedAt == 0) revert FairLunch_NotServed(projectId);
 
-        PoolKey memory key = poolKeyOf(projectId);
         uint256 ethBefore = address(this).balance;
 
-        // Decreasing liquidity by zero collects the position's fees without touching its principal.
-        bytes memory actions = abi.encodePacked(uint8(Actions.DECREASE_LIQUIDITY), uint8(Actions.TAKE_PAIR));
-        bytes[] memory params = new bytes[](2);
-        params[0] = abi.encode(record.positionId, uint256(0), uint128(0), uint128(0), "");
-        params[1] = abi.encode(key.currency0, key.currency1, address(this));
-        POSITION_MANAGER.modifyLiquidities({unlockData: abi.encode(actions, params), deadline: block.timestamp});
+        // Take the position's fees without touching its liquidity.
+        POOL.collect({key: poolKeyOf(projectId), positionId: record.positionId});
 
         // Burn the token side.
         tokensBurned = _burnTokensOf(projectId);
@@ -408,7 +352,7 @@ contract FairLunch is
         ) revert FairLunch_InvalidConfig();
 
         // A lunch needs this chain's Uniswap addresses.
-        if (address(POSITION_MANAGER) == address(0)) revert FairLunch_NotConfigured();
+        if (address(ORACLE_HOOK) == address(0)) revert FairLunch_NotConfigured();
 
         // Scope the salt to the caller so nobody else can take a lunch's addresses on another chain, and to the
         // lunch's terms so only copies with the very same terms are bridged to each other. A copy with another host,
@@ -522,12 +466,10 @@ contract FairLunch is
         });
     }
 
-    /// @notice Accept only a lunch's project NFT and its liquidity position.
+    /// @notice Accept only a lunch's project NFT.
     /// @dev Part of `IERC721Receiver`.
     function onERC721Received(address, address, uint256, bytes calldata) external view override returns (bytes4) {
-        if (msg.sender != address(CONTROLLER.PROJECTS()) && msg.sender != address(POSITION_MANAGER)) {
-            revert FairLunch_Unauthorized(msg.sender);
-        }
+        if (msg.sender != address(CONTROLLER.PROJECTS())) revert FairLunch_Unauthorized(msg.sender);
         return IERC721Receiver.onERC721Received.selector;
     }
 
@@ -635,8 +577,10 @@ contract FairLunch is
 
         _mintTokensOf({projectId: projectId, tokenCount: poolTokens, beneficiary: address(this)});
 
-        // Put the ETH and the tokens in the pool, forever.
-        record.positionId = _openPoolOf({projectId: projectId, eth: poolEth, tokens: poolTokens});
+        // Put the ETH and the tokens in the pool, forever. What the pool's price didn't take comes back.
+        PoolKey memory key = poolKeyOf(projectId);
+        IERC20(Currency.unwrap(key.currency1)).safeTransfer({to: address(POOL), value: poolTokens});
+        record.positionId = POOL.open{value: poolEth}({key: key, tokens: poolTokens});
 
         // From here on the buyback hook routes the lunch's payments and cash outs through that pool.
         IJBBuybackHook(address(BUYBACK_REGISTRY.hookOf(projectId)))
@@ -700,60 +644,13 @@ contract FairLunch is
     /// @param oracleHook The Uniswap V4 hook every lunch's pool uses.
     function setChainSpecificConstants(IPositionManager positionManager, IGeomeanOracle oracleHook) external override {
         if (msg.sender != _DEPLOYER) revert FairLunch_Unauthorized(msg.sender);
-        if (address(POSITION_MANAGER) != address(0)) revert FairLunch_AlreadyConfigured();
+        if (address(ORACLE_HOOK) != address(0)) revert FairLunch_AlreadyConfigured();
         if (address(positionManager) == address(0) || address(oracleHook) == address(0)) {
             revert FairLunch_InvalidConfig();
         }
 
-        POSITION_MANAGER = positionManager;
-        POOL_MANAGER = positionManager.poolManager();
+        POOL.setChainSpecificConstants({positionManager: positionManager, oracleHook: oracleHook});
         ORACLE_HOOK = oracleHook;
-    }
-
-    /// @notice Swaps inside the pool manager's lock.
-    /// @dev Part of `IUnlockCallback`. Only reachable through `_swap`.
-    /// @param data The encoded pool key, direction, input amount and price limit.
-    /// @return The encoded amounts spent and received.
-    function unlockCallback(bytes calldata data) external override returns (bytes memory) {
-        if (msg.sender != address(POOL_MANAGER)) revert FairLunch_Unauthorized(msg.sender);
-
-        (PoolKey memory key, bool zeroForOne, uint256 amountIn, uint160 sqrtPriceLimitX96) =
-            abi.decode(data, (PoolKey, bool, uint256, uint160));
-
-        // A negative amount means exact input. The swap stops early if it reaches the price limit.
-        BalanceDelta delta = POOL_MANAGER.swap({
-            key: key,
-            params: SwapParams({
-                zeroForOne: zeroForOne, amountSpecified: -int256(amountIn), sqrtPriceLimitX96: sqrtPriceLimitX96
-            }),
-            hookData: ""
-        });
-
-        // The input side is owed to the pool manager (negative) and the output side is owed to this contract.
-        (int128 deltaIn, int128 deltaOut) =
-            zeroForOne ? (delta.amount0(), delta.amount1()) : (delta.amount1(), delta.amount0());
-        uint256 spent = uint256(uint128(-deltaIn));
-        uint256 received = uint256(uint128(deltaOut));
-
-        if (spent != 0) {
-            if (zeroForOne) {
-                // slither-disable-next-line unused-return
-                POOL_MANAGER.settle{value: spent}();
-            } else {
-                POOL_MANAGER.sync(key.currency1);
-                IERC20(Currency.unwrap(key.currency1)).safeTransfer({to: address(POOL_MANAGER), value: spent});
-                // slither-disable-next-line unused-return
-                POOL_MANAGER.settle();
-            }
-        }
-
-        if (received != 0) {
-            POOL_MANAGER.take({
-                currency: zeroForOne ? key.currency1 : key.currency0, to: address(this), amount: received
-            });
-        }
-
-        return abi.encode(spent, received);
     }
 
     //*********************************************************************//
@@ -822,99 +719,6 @@ contract FairLunch is
         CONTROLLER.mintTokensOf({
             projectId: projectId, tokenCount: tokenCount, beneficiary: beneficiary, memo: "", useReservedPercent: false
         });
-    }
-
-    /// @notice Put a lunch's ETH and tokens into its pool as one full-range position.
-    /// @dev Anyone can create the pool, or add liquidity to it, before the lunch is served. So before adding liquidity,
-    /// this trades toward the fundraise's price with that price as the limit. An empty pool moves there for free. Any
-    /// liquidity in the way is traded against at a price better for the lunch than the fundraise's price: tokens
-    /// offered below it are bought, and ETH bid above it is sold to.
-    /// @param projectId The ID of the lunch's project.
-    /// @param eth The amount of ETH to pool.
-    /// @param tokens The number of tokens to pool.
-    /// @return positionId The ID of the position.
-    function _openPoolOf(uint256 projectId, uint256 eth, uint256 tokens) internal returns (uint256 positionId) {
-        PoolKey memory key = poolKeyOf(projectId);
-
-        // slither-disable-next-line unused-return
-        (uint160 sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
-
-        if (sqrtPriceX96 == 0) {
-            // Nobody made the pool yet. Open it at the fundraise's price.
-            // slither-disable-next-line unused-return
-            POOL_MANAGER.initialize({key: key, sqrtPriceX96: _RAISE_SQRT_PRICE_X96});
-        } else {
-            // Trade toward the fundraise's price only where the pool's price beats it by more than the pool's fee.
-            // The fee goes to whoever left liquidity there, so trading any closer would sell them tokens for less
-            // than the fundraise charged, or buy tokens back from them for more.
-            if (sqrtPriceX96 > _SERVE_CHEAPEST_SQRT_PRICE_X96) {
-                // Tokens are cheaper than that. Buy them down to it, with at most half the ETH so there's always a
-                // position left to make however much liquidity is in the way.
-                (uint256 spent, uint256 received) = _swap({
-                    key: key, zeroForOne: true, amountIn: eth / 2, sqrtPriceLimitX96: _SERVE_CHEAPEST_SQRT_PRICE_X96
-                });
-                eth -= spent;
-                tokens += received;
-            } else if (sqrtPriceX96 < _SERVE_DEAREST_SQRT_PRICE_X96) {
-                // Tokens are dearer than that. Sell them up to it, with at most half the tokens.
-                (uint256 spent, uint256 received) = _swap({
-                    key: key, zeroForOne: false, amountIn: tokens / 2, sqrtPriceLimitX96: _SERVE_DEAREST_SQRT_PRICE_X96
-                });
-                tokens -= spent;
-                eth += received;
-            }
-        }
-
-        // Size the position at wherever the price ended up.
-        // slither-disable-next-line unused-return
-        (sqrtPriceX96,,,) = POOL_MANAGER.getSlot0(key.toId());
-        int24 tickLower = TickMath.minUsableTick(TICK_SPACING);
-        int24 tickUpper = TickMath.maxUsableTick(TICK_SPACING);
-        uint128 liquidity = LiquidityAmounts.getLiquidityForAmounts({
-            sqrtPriceX96: sqrtPriceX96,
-            sqrtPriceAX96: TickMath.getSqrtPriceAtTick(tickLower),
-            sqrtPriceBX96: TickMath.getSqrtPriceAtTick(tickUpper),
-            amount0: eth,
-            amount1: tokens
-        });
-
-        // Someone traded one whole side away at a better-than-fundraise price. Arbitrage will clear that; try again.
-        if (liquidity == 0) revert FairLunch_NoLiquidity(projectId);
-
-        // Let the position manager pull the tokens through Permit2, for this call only.
-        IERC20 token = IERC20(Currency.unwrap(key.currency1));
-        token.forceApprove({spender: address(PERMIT2), value: tokens});
-        PERMIT2.approve({
-            token: address(token),
-            spender: address(POSITION_MANAGER),
-            amount: tokens.toUint160(),
-            expiration: uint48(block.timestamp)
-        });
-
-        // Mint the position to this contract, settle both sides, and sweep back what the price didn't take.
-        positionId = POSITION_MANAGER.nextTokenId();
-        bytes memory actions = abi.encodePacked(
-            uint8(Actions.MINT_POSITION),
-            uint8(Actions.SETTLE),
-            uint8(Actions.SETTLE),
-            uint8(Actions.SWEEP),
-            uint8(Actions.SWEEP)
-        );
-        bytes[] memory params = new bytes[](5);
-        params[0] = abi.encode(
-            key, tickLower, tickUpper, uint256(liquidity), eth.toUint128(), tokens.toUint128(), address(this), ""
-        );
-        params[1] = abi.encode(key.currency0, uint256(0), true);
-        params[2] = abi.encode(key.currency1, uint256(0), true);
-        params[3] = abi.encode(key.currency0, address(this));
-        params[4] = abi.encode(key.currency1, address(this));
-        POSITION_MANAGER.modifyLiquidities{value: eth}({
-            unlockData: abi.encode(actions, params), deadline: block.timestamp
-        });
-
-        // Leave no pull authority behind.
-        PERMIT2.approve({token: address(token), spender: address(POSITION_MANAGER), amount: 0, expiration: 1});
-        token.forceApprove({spender: address(PERMIT2), value: 0});
     }
 
     /// @notice Queue the ruleset a lunch keeps forever, set up to pay its whole raise out once.
@@ -993,30 +797,6 @@ contract FairLunch is
         }
     }
 
-    /// @notice Swap an exact input in a lunch's pool, stopping at a price limit.
-    /// @param key The pool's key.
-    /// @param zeroForOne Whether ETH is being sold for tokens (true) or tokens for ETH (false).
-    /// @param amountIn The most to sell.
-    /// @param sqrtPriceLimitX96 The price at which the swap stops.
-    /// @return spent The amount sold.
-    /// @return received The amount bought.
-    function _swap(
-        PoolKey memory key,
-        bool zeroForOne,
-        uint256 amountIn,
-        uint160 sqrtPriceLimitX96
-    )
-        internal
-        returns (uint256 spent, uint256 received)
-    {
-        if (amountIn == 0) return (0, 0);
-
-        return
-            abi.decode(
-                POOL_MANAGER.unlock(abi.encode(key, zeroForOne, amountIn, sqrtPriceLimitX96)), (uint256, uint256)
-            );
-    }
-
     //*********************************************************************//
     // ----------------------- internal views ---------------------------- //
     //*********************************************************************//
@@ -1039,30 +819,6 @@ contract FairLunch is
     function _balanceOf(uint256 projectId) internal view returns (uint256) {
         return TERMINAL.STORE()
             .balanceOf({terminal: address(TERMINAL), projectId: projectId, token: JBConstants.NATIVE_TOKEN});
-    }
-
-    /// @notice The tick a buyback's price bound is measured from: the pool's average tick over the last `TWAP_WINDOW`,
-    /// or its tick a second ago if that's higher (cheaper tokens).
-    /// @dev The average keeps a buyback from chasing a price that was pushed up over several blocks. The tick a second
-    /// ago is the price before anything traded in this block, which keeps a buyback from chasing a price that was
-    /// pushed up just ahead of it. Reverts if the pool's history doesn't reach `TWAP_WINDOW` back.
-    /// @param key The pool's key.
-    /// @return tick The reference tick, rounded toward negative infinity.
-    function _boundTickOf(PoolKey memory key) internal view returns (int24 tick) {
-        uint32[] memory secondsAgos = new uint32[](3);
-        secondsAgos[0] = TWAP_WINDOW;
-        secondsAgos[1] = 1;
-
-        // slither-disable-next-line unused-return
-        (int56[] memory tickCumulatives,) = ORACLE_HOOK.observe({key: key, secondsAgos: secondsAgos});
-
-        int56 delta = tickCumulatives[2] - tickCumulatives[0];
-        tick = int24(delta / int56(uint56(TWAP_WINDOW)));
-        if (delta < 0 && delta % int56(uint56(TWAP_WINDOW)) != 0) tick--;
-
-        // Over one second the cumulative's change is the tick itself.
-        int24 lastTick = int24(tickCumulatives[2] - tickCumulatives[1]);
-        if (lastTick > tick) tick = lastTick;
     }
 
     /// @notice The smaller of two numbers.

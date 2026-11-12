@@ -383,7 +383,9 @@ contract FairLunchCrossChain is Test {
         IERC20 token = IERC20(address(TOKENS.tokenOf(id)));
         assertEq(token.balanceOf(alice), 10_000_000e18, "the payer's tokens");
         assertEq(
-            TOKENS.totalSupplyOf(id), 10_000_000e18 + token.balanceOf(address(lunch.POOL_MANAGER())), "payer plus pool"
+            TOKENS.totalSupplyOf(id),
+            10_000_000e18 + token.balanceOf(address(lunch.POOL().POOL_MANAGER())),
+            "payer plus pool"
         );
     }
 
