@@ -354,7 +354,7 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
           <p className="mt-3 text-sm text-muted">
             {lunch.servedAt
               ? `Creator kept ${percent(lunch.keepPercent)} of the raise, up to ${formatUnits(lunch.keepCap, 18)} ETH, and got ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks. The rest was locked in the pool.`
-              : `Creator gets ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.`}
+              : `Funders get 1M ${lunch.symbol} per ETH, fixed. The pool gets the same for its ETH. Creator gets ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.`}
           </p>
         </section>
       </div>
