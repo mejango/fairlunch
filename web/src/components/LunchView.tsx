@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
-import { formatUnits, parseUnits, type Abi } from 'viem'
+import { formatUnits, isAddressEqual, parseUnits, type Abi } from 'viem'
 import { useWallet } from '@/hooks/useWallet'
 import { ChainIcon } from '@/components/ChainIcon'
 import { PriceChart, type Burn } from '@/components/PriceChart'
@@ -10,7 +10,8 @@ import { TxAction } from '@/components/TxAction'
 import { assetUrl, formatEth, formatPrice, formatTokens } from '@/lib/format'
 import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib/fair-lunch/phase'
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
-import { readClaim, readCopies, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
+import { claimCallOf, readServed, readClaimed, readClaimList, readCopies, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
+import { SHARES_TOTAL } from '@/lib/fair-lunch/claims'
 import { PERCENT_TOTAL, splitOf, tokensFor } from '@/lib/fair-lunch/split'
 import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
@@ -146,7 +147,7 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
     <label className="block rounded-xl border border-line p-3 focus-within:border-ink">
       <span className="text-sm text-muted">{label}</span>
       <span className="flex items-center gap-2">
-        <input className="min-w-0 flex-1 bg-transparent text-2xl font-bold tabular-nums outline-none" inputMode="decimal" placeholder="0"
+        <input size={1} className="min-w-0 flex-1 bg-transparent text-2xl font-bold tabular-nums outline-none" inputMode="decimal" placeholder="0"
           value={typed.side === which ? typed.text : other(which)} onChange={event => setTyped({ side: which, text: event.target.value })} />
         <span className="rounded-full border border-line px-3 py-1 font-semibold">{unit}</span>
       </span>
@@ -188,6 +189,97 @@ const SMALL = 'btn-secondary min-h-[36px] px-3 text-sm'
 /** A number on its own row with the button that moves it at its right. */
 const ACTION_ROW = 'col-span-2 flex flex-wrap items-end justify-between gap-3 border-t border-line/50 pt-3'
 
+/** Who gets the tokens: funders, the pool, the chef and the airdrop list. */
+function TokenPie({ lunch, title, funders, poolTokens, creatorTokens, claimsTokens }: { lunch: Lunch; title: string; funders: bigint; poolTokens: bigint; creatorTokens: bigint; claimsTokens: bigint }) {
+  const total = funders + poolTokens + creatorTokens + claimsTokens
+  if (total === 0n) return null
+  const part = (tokens: bigint) => Number((tokens * 10_000n) / total) / 100
+  return (
+    <>
+      <p className="mt-5 text-sm text-muted">{title}</p>
+      <p className="text-2xl font-bold tabular-nums">{formatTokens(total)} {lunch.symbol}</p>
+      <div className="mt-3 flex items-center gap-5">
+        <div role="img" aria-label="Who gets the tokens" className="h-24 w-24 shrink-0 rounded-full border border-line"
+          style={{ background: `conic-gradient(${FUNDERS} 0 ${part(funders)}%, ${POOL} 0 ${part(funders + poolTokens)}%, ${CREATOR} 0 ${part(funders + poolTokens + creatorTokens)}%, ${AIRDROP} 0)` }} />
+        <dl className="space-y-2">
+          <Stat label={<><Swatch color={FUNDERS} />🥬 Funders</>} value={formatTokens(funders)} />
+          <Stat label={<><Swatch color={POOL} />🔒 The pool</>} value={formatTokens(poolTokens)} />
+          <Stat label={<><Swatch color={CREATOR} />👩‍🍳 The chef, vested</>} value={formatTokens(creatorTokens)} />
+          {claimsTokens ? <Stat label={<><Swatch color={AIRDROP} />🫒 Airdrop</>} value={formatTokens(claimsTokens)} /> : null}
+        </dl>
+      </div>
+    </>
+  )
+}
+
+/** How many of a list's addresses show at once. Typing an address finds the rest. */
+const RECIPIENTS_SHOWN = 20
+
+/** The airdrop and who it goes to. Once lunch is served, anyone can send an address its tokens. */
+function Airdrop({ lunch, tokens }: { lunch: Lunch; tokens: bigint }) {
+  const { address } = useWallet()
+  const [find, setFind] = useState('')
+  const { data: entries } = useQuery({
+    queryKey: ['fair-lunch', 'claim-list', lunch.chainId, lunch.projectId],
+    queryFn: ({ signal }) => readClaimList(lunch, assetUrl, signal),
+    enabled: lunch.claimsPercent > 0n,
+    staleTime: Infinity,
+  })
+  const yours = (account: string) => !!address && isAddressEqual(account as `0x${string}`, address)
+  const wanted = find.trim().toLowerCase()
+  const found = (entries ?? []).map((entry, index) => ({ account: entry[0], shares: BigInt(entry[1]), index }))
+    .filter(({ account }) => account.toLowerCase().includes(wanted))
+    .sort((a, b) => Number(yours(b.account)) - Number(yours(a.account)))
+  const shown = found.slice(0, RECIPIENTS_SHOWN)
+  const { data: claimed } = useQuery({
+    queryKey: ['fair-lunch', 'claimed', lunch.chainId, lunch.projectId, shown.map(({ account }) => account)],
+    queryFn: ({ signal }) => readClaimed(lunch, shown.map(({ account }) => account), signal),
+    enabled: !!lunch.servedAt && shown.length > 0,
+    refetchInterval: 60_000,
+  })
+  if (!lunch.claimsPercent) return null
+  return (
+    <details className="mt-4 border-t border-line/50 pt-3">
+      <summary className="cursor-pointer">
+        <span className="text-sm text-muted">Airdrop{entries ? ` to ${entries.length.toLocaleString()} ${entries.length === 1 ? 'address' : 'addresses'}` : ''}</span>
+        <span className="block text-xl font-bold tabular-nums">{tokens ? `${formatTokens(tokens)} ${lunch.symbol}` : percent(lunch.claimsPercent)}</span>
+      </summary>
+      {entries === undefined ? <p className="mt-3 text-sm text-muted">…</p> : entries === null ? (
+        <p className="mt-3 text-sm text-muted">The chef hasn’t published the list.</p>
+      ) : (
+        <>
+          <input className="input mt-3 font-mono text-sm" aria-label="Find an address" placeholder="Find an address, 0x…" value={find} onChange={event => setFind(event.target.value)} />
+          <ul className="mt-2 divide-y divide-line/50">
+            {shown.map(({ account, shares, index }, row) => {
+              const amount = (tokens * shares) / SHARES_TOTAL
+              return (
+                <li key={account} className="flex min-h-[44px] flex-wrap items-center justify-between gap-x-3 py-1 text-sm">
+                  <span className="font-mono" title={account}>{account.slice(0, 6)}…{account.slice(-4)}{yours(account) ? <span className="ml-2 font-sans font-bold">You</span> : null}</span>
+                  <span className="flex items-center gap-3 tabular-nums">
+                    {tokens ? `${formatTokens(amount)} ${lunch.symbol}` : `${formatUnits(shares * 100n, 18).replace(/(\.\d{2})\d+$/, '$1')}%`}
+                    {!lunch.servedAt ? null : claimed?.[row] ? <span className="text-muted">Claimed</span> : (
+                      <TxAction chainId={lunch.chainId} className={SMALL} label="Claim" title="Claim the airdrop" doneTitle="Claimed" disabled={!claimed}
+                        prepare={async () => {
+                          const call = await claimCallOf(lunch, entries, index)
+                          return {
+                            request: { ...call, abi: call.abi as Abi, label: `Sends ${lunch.symbol} from the airdrop` },
+                            rows: [{ label: 'Sends', value: `${formatTokens(amount)} ${lunch.symbol} to ${account.slice(0, 6)}…${account.slice(-4)}`, strong: true }, { label: 'Costs you', value: 'Network fee only' }],
+                          }
+                        }} />
+                    )}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+          {found.length === 0 ? <p className="mt-2 text-sm text-muted">That address isn’t on the list.</p>
+            : found.length > shown.length ? <p className="mt-2 text-sm text-muted">Showing {shown.length} of {found.length.toLocaleString()}.</p> : null}
+        </>
+      )}
+    </details>
+  )
+}
+
 /** A served lunch's numbers, with the calls anyone can make beside what they'd move. */
 function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readonly Burn[]; now: number; phase: Phase }) {
   const { data: fees } = useQuery({
@@ -200,12 +292,10 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
     queryFn: ({ signal }) => readReleasable(lunch, signal),
     refetchInterval: 60_000,
   })
-  const { address } = useWallet()
-  const { data: claim } = useQuery({
-    queryKey: ['fair-lunch', 'claim', lunch.chainId, lunch.projectId, address],
-    queryFn: ({ signal }) => readClaim(lunch, address!, assetUrl, signal),
-    enabled: !!address && lunch.claimsPercent > 0n,
-    refetchInterval: 60_000,
+  const { data: served } = useQuery({
+    queryKey: ['fair-lunch', 'served', lunch.chainId, lunch.projectId],
+    queryFn: ({ signal }) => readServed(lunch, signal),
+    staleTime: Infinity,
   })
   const uniswap = UNISWAP_CHAIN[lunch.chainId]
   return (
@@ -239,17 +329,9 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
               })} />
           )}
         </div>
-        {lunch.claimsPercent ? (
-          <div className={ACTION_ROW}>
-            <Stat label="Airdrop" value={claim && !claim.claimed ? `${formatTokens(claim.tokens)} ${lunch.symbol} for you` : `${formatTokens(lunch.claimsTokens)} ${lunch.symbol}`} />
-            <TxAction chainId={lunch.chainId} className={SMALL} label={claim?.claimed ? 'Claimed' : 'Claim'} title="Claim your airdrop" doneTitle="Claimed" disabled={!claim || claim.claimed}
-              prepare={async () => ({
-                request: { ...claim!.call, abi: claim!.call.abi as Abi, label: `Claims ${lunch.symbol} from the airdrop` },
-                rows: [{ label: 'You get', value: `${formatTokens(claim!.tokens)} ${lunch.symbol}`, strong: true }, { label: 'Costs you', value: 'Network fee only' }],
-              })} />
-          </div>
-        ) : null}
       </dl>
+      {served ? <div className="mt-4 border-t border-line/50"><TokenPie lunch={lunch} title="Tokens when served" {...served} /></div> : null}
+      <Airdrop lunch={lunch} tokens={lunch.claimsTokens} />
       {uniswap ? (
         <p className="mt-4 text-sm">
           <a className="text-accent underline" target="_blank" rel="noreferrer" href={`https://app.uniswap.org/explore/pools/${uniswap}/${uniswapV4PoolId(lunch.poolKey)}`}>See the pool on Uniswap</a>
@@ -343,8 +425,6 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
   // Each part of the raise as a percent of it, for the pie.
   const slice = (wei: bigint) => (lunch.balance > 0n ? Number((wei * 10_000n) / lunch.balance) / 100 : 0)
   const airdropped = lunch.claimsPercent ? ` ${percent(lunch.claimsPercent)} of the tokens ${lunch.servedAt ? 'went' : 'go'} to an airdrop list.` : ''
-  const tokenTotal = lunch.supply + split.poolTokens + split.creatorTokens + split.claimsTokens
-  const part = (tokens: bigint) => (tokenTotal > 0n ? Number((tokens * 10_000n) / tokenTotal) / 100 : 0)
   const timer =
     phase === 'cooking' ? `${countdown(lunch.deadline - now)} left`
     : phase === 'resting' ? `buybacks start in ${countdown(lunch.servedAt + REST_SECONDS - now)}`
@@ -412,22 +492,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
               <p className="mt-3 text-sm text-muted">
                 The chef keeps {percent(lunch.keepPercent)} of the raise, up to {formatUnits(lunch.keepCap, lunch.money.decimals)} {lunch.money.symbol}. The rest is locked in the pool.
               </p>
-              {tokenTotal > 0n ? (
-                <>
-                  <p className="mt-5 text-sm text-muted">Tokens if served now</p>
-                  <p className="text-2xl font-bold tabular-nums">{formatTokens(tokenTotal)} {lunch.symbol}</p>
-                  <div className="mt-3 flex items-center gap-5">
-                    <div role="img" aria-label="Who gets the tokens" className="h-24 w-24 shrink-0 rounded-full border border-line"
-                      style={{ background: `conic-gradient(${FUNDERS} 0 ${part(lunch.supply)}%, ${POOL} 0 ${part(lunch.supply + split.poolTokens)}%, ${CREATOR} 0 ${part(lunch.supply + split.poolTokens + split.creatorTokens)}%, ${AIRDROP} 0)` }} />
-                    <dl className="space-y-2">
-                      <Stat label={<><Swatch color={FUNDERS} />🥬 Funders</>} value={formatTokens(lunch.supply)} />
-                      <Stat label={<><Swatch color={POOL} />🔒 The pool</>} value={formatTokens(split.poolTokens)} />
-                      <Stat label={<><Swatch color={CREATOR} />👩‍🍳 The chef, vested</>} value={formatTokens(split.creatorTokens)} />
-                      {lunch.claimsPercent ? <Stat label={<><Swatch color={AIRDROP} />🥡 Airdrop</>} value={formatTokens(split.claimsTokens)} /> : null}
-                    </dl>
-                  </div>
-                </>
-              ) : null}
+              <TokenPie lunch={lunch} title="Tokens if served now" funders={lunch.supply} poolTokens={split.poolTokens} creatorTokens={split.creatorTokens} claimsTokens={split.claimsTokens} />
+              <Airdrop lunch={lunch} tokens={split.claimsTokens} />
             </>
           )}
           <p className="mt-3 text-sm text-muted">

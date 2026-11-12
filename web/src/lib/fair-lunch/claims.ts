@@ -7,6 +7,7 @@ export type ClaimEntry = readonly [account: Address, shares: string]
 
 export const claimsAbi = parseAbi([
   'function percentOf(uint256 projectId) view returns (uint32)',
+  'function rootOf(uint256 projectId) view returns (bytes32)',
   'function tokenCountOf(uint256 projectId) view returns (uint256)',
   'function claimedBy(uint256 projectId, address account) view returns (bool)',
   'function claim(uint256 projectId, address account, uint256 shares, bytes32[] proof) returns (uint256)',

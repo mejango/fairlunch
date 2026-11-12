@@ -1,3 +1,4 @@
+import { jbCenterBaseUrl } from '@/lib/jbcenter-config'
 import { formatUnits } from 'viem'
 
 const number = (digits: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: digits })
@@ -28,5 +29,5 @@ export function formatChange(ratio: number): string {
  * the project see who looks at it. */
 export function assetUrl(uri: string | null | undefined): string | null {
   const path = uri?.startsWith('ipfs://') ? uri.slice(7) : ''
-  return /^[A-Za-z0-9]+(\/[\w.~%-]+)*$/.test(path) ? `https://juicebox.center/ipfs/${path}` : null
+  return /^[A-Za-z0-9]+(\/[\w.~%-]+)*$/.test(path) ? `${jbCenterBaseUrl().replace(/\/$/, '')}/ipfs/${path}` : null
 }

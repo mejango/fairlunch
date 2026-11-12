@@ -4,8 +4,9 @@ import { claimFromSuckerMovement, getSuckerMovements, getV6SuckerPairs, type JBC
 import { encodeAbiParameters, encodePacked, erc20Abi, getContractAddress, isAddressEqual, keccak256, parseAbi, type Address, type Hex, type PublicClient } from 'viem'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
-import { claimProofOf, claimsAbi, type ClaimEntry } from './claims'
+import { claimProofOf, claimsAbi, claimsRootOf, type ClaimEntry } from './claims'
 import { deploymentOn } from './deployments'
+import { tokensFor } from './split'
 
 /** What a lunch raises and its pool trades against: ETH or an ERC-20. */
 export type Money = { address: Address; symbol: string; decimals: number }
@@ -151,25 +152,54 @@ export const releaseCall = (lunch: Pick<Lunch, 'chainId' | 'vestingWallet' | 'to
   ({ chainId: lunch.chainId, address: lunch.vestingWallet, abi: vestingAbi, functionName: 'release', args: [lunch.token] }) as const
 
 /** What an address can claim of a lunch's airdrop, with the call that sends it. Null if it isn't on the list. */
-export type Claim = { tokens: bigint; claimed: boolean; call: { chainId: number; address: Address; abi: typeof claimsAbi; functionName: 'claim'; args: readonly [bigint, Address, bigint, Hex[]] } }
+/** The tokens each side got when lunch was served, or null if the chain no longer hands over that block's events. */
+export type Served = { funders: bigint; poolTokens: bigint; creatorTokens: bigint; claimsTokens: bigint }
+export async function readServed(lunch: Pick<Lunch, 'chainId' | 'projectId' | 'servedAt' | 'money' | 'claimsTokens'>, signal?: AbortSignal): Promise<Served | null> {
+  const client = jbCenterPublicClient(lunch.chainId, signal)
+  const { lunch: address } = await wiringOn(lunch.chainId)
+  // ponytail: the block is found by its time, about 27 reads once per lunch. An indexed Serve event would be one.
+  let low = 0n, high = await client.getBlockNumber()
+  while (low < high) {
+    const middle = (low + high) / 2n
+    if ((await client.getBlock({ blockNumber: middle })).timestamp < BigInt(lunch.servedAt)) low = middle + 1n
+    else high = middle
+  }
+  const [log] = await client.getContractEvents({ address, abi: fairLunchAbi, eventName: 'Serve', args: { projectId: BigInt(lunch.projectId) }, fromBlock: low, toBlock: low })
+  if (!log) return null
+  const { raised, poolTokens, creatorTokens } = log.args as { raised: bigint; poolTokens: bigint; creatorTokens: bigint }
+  return { funders: tokensFor(raised, lunch.money.decimals), poolTokens, creatorTokens, claimsTokens: lunch.claimsTokens }
+}
 
-/** The lunch's list comes from its metadata: `claimsUri` names a JSON file holding `claims`, the entries in order. */
-export async function readClaim(lunch: Pick<Lunch, 'chainId' | 'projectId' | 'uri' | 'claimsTokens'>, account: Address, gateway: (uri: string) => string | null, signal?: AbortSignal): Promise<Claim | null> {
+/**
+ * The lunch's list, or null if the chef published none. Its metadata's `claimsUri` names a JSON file holding `claims`,
+ * the entries in order. A file that doesn't hash to the lunch's root isn't its list.
+ */
+export async function readClaimList(lunch: Pick<Lunch, 'chainId' | 'projectId' | 'uri'>, gateway: (uri: string) => string | null, signal?: AbortSignal): Promise<ClaimEntry[] | null> {
   const json = async (uri: string) => {
     const url = gateway(uri)
-    if (!url) throw new Error('The list has no address to read it from.')
-    return (await fetch(url, { signal })).json()
+    // A file that can't be read is a list that isn't published.
+    return url ? fetch(url, { signal }).then(response => response.json()).catch(() => ({})) : {}
   }
   const { claimsUri } = await json(lunch.uri) as { claimsUri?: string }
-  if (!claimsUri) return null
-  const { claims: entries } = await json(claimsUri) as { claims: ClaimEntry[] }
-  const index = entries.findIndex(([listed]) => isAddressEqual(listed, account))
-  if (index < 0) return null
+  const { claims: entries } = (claimsUri ? await json(claimsUri) : {}) as { claims?: ClaimEntry[] }
+  if (!entries?.length) return null
   const { claims } = await wiringOn(lunch.chainId)
-  const id = BigInt(lunch.projectId), shares = BigInt(entries[index][1])
-  const claimed = await jbCenterPublicClient(lunch.chainId, signal).readContract({ address: claims, abi: claimsAbi, functionName: 'claimedBy', args: [id, account] })
-  return { tokens: (lunch.claimsTokens * shares) / 10n ** 18n, claimed,
-    call: { chainId: lunch.chainId, address: claims, abi: claimsAbi, functionName: 'claim', args: [id, account, shares, claimProofOf(entries, index)] } }
+  const root = await jbCenterPublicClient(lunch.chainId, signal).readContract({ address: claims, abi: claimsAbi, functionName: 'rootOf', args: [BigInt(lunch.projectId)] })
+  return claimsRootOf(entries) === root ? entries : null
+}
+
+/** Whether each account has been sent its airdrop. */
+export async function readClaimed(lunch: Pick<Lunch, 'chainId' | 'projectId'>, accounts: readonly Address[], signal?: AbortSignal): Promise<boolean[]> {
+  const { claims } = await wiringOn(lunch.chainId)
+  const client = jbCenterPublicClient(lunch.chainId, signal)
+  return Promise.all(accounts.map(account => client.readContract({ address: claims, abi: claimsAbi, functionName: 'claimedBy', args: [BigInt(lunch.projectId), account] })))
+}
+
+/** The call that sends the entry at `index` its airdrop. Anyone can make it. */
+export async function claimCallOf(lunch: Pick<Lunch, 'chainId' | 'projectId'>, entries: readonly ClaimEntry[], index: number) {
+  const { claims } = await wiringOn(lunch.chainId)
+  return { chainId: lunch.chainId, address: claims, abi: claimsAbi, functionName: 'claim' as const,
+    args: [BigInt(lunch.projectId), entries[index][0], BigInt(entries[index][1]), claimProofOf(entries, index)] as const }
 }
 
 export type PricePoint = { time: number; price: number }

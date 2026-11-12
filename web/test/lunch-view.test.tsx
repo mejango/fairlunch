@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LunchView } from '@/components/LunchView'
 import type { Copy, Lunch } from '@/lib/fair-lunch/reads'
 
-const reads = vi.hoisted(() => ({ readLunch: vi.fn(), readCopies: vi.fn(), readHostOf: vi.fn(), readPoolFees: vi.fn(), readReleasable: vi.fn().mockResolvedValue(0n), readClaim: vi.fn().mockResolvedValue(null), releaseCall: vi.fn() }))
+const reads = vi.hoisted(() => ({ readLunch: vi.fn(), readCopies: vi.fn(), readHostOf: vi.fn(), readPoolFees: vi.fn(), readReleasable: vi.fn().mockResolvedValue(0n), readServed: vi.fn().mockResolvedValue(null), readClaimList: vi.fn().mockResolvedValue(null), readClaimed: vi.fn().mockResolvedValue([]), claimCallOf: vi.fn(), releaseCall: vi.fn() }))
 vi.mock('@/lib/fair-lunch/reads', () => reads)
 vi.mock('@/hooks/useWallet', () => ({ useWallet: () => ({ address: undefined, isConnected: false }) }))
 // The page's buttons and chart are their own units: a label is all the page decides about them.

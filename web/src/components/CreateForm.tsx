@@ -187,7 +187,7 @@ export function CreateForm() {
       <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
         <li>Sell a new token at a fixed price until the deadline. No refunds.</li>
         <li>You get your share of the raise, the rest is locked in a liquidity pool.</li>
-        <li>Tokens go to funders, to the pool to match its money, and some to you.</li>
+        <li>Tokens go to funders, to the pool, to an airdrop, and some to you.</li>
         <li>Later payments on any chain buy the token on the main chain and burn it.</li>
       </ul>
       <div className="flex gap-4">
@@ -235,8 +235,8 @@ export function CreateForm() {
         </label>
       </div>
       <div className="flex flex-wrap gap-4">
-        <label className="field w-32 shrink-0">🥡 Airdrop, %<input name="airdrop" className="input" inputMode="numeric" defaultValue="0" /></label>
-        <label className="field min-w-0 flex-1">🧾 To this list<input name="list" type="file" accept=".csv,.txt,text/csv,text/plain"
+        <label className="field w-32 shrink-0">🫒 Airdrop, %<input name="airdrop" className="input" inputMode="numeric" defaultValue="0" /></label>
+        <label className="field min-w-0 flex-1">🥜 To this list<input name="list" type="file" accept=".csv,.txt,text/csv,text/plain"
           className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
       </div>
       <p className="-mt-2 text-sm text-muted">One address,amount per line. Sent out when lunch is served.</p>
