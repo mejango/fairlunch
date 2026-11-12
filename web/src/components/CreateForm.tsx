@@ -161,7 +161,7 @@ export function CreateForm() {
         <li>Sell a new token at a fixed price until the deadline. No refunds.</li>
         <li>Then you get your share of the raise and of the tokens.</li>
         <li>The rest becomes permanently locked Uniswap liquidity.</li>
-        <li>Supply is set at launch. After that it only shrinks.</li>
+        <li>Equal token supply to funders and the liquidity pool, plus some for you.</li>
         <li>Later payments on any chain buy the token on the main chain and burn it.</li>
       </ul>
       <div className="grid gap-4 sm:grid-cols-2">
