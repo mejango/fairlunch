@@ -193,7 +193,7 @@ export function CreateForm() {
         <label className="field">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
       </div>
       <div className="flex gap-4">
-        <label className="field w-32 shrink-0">🥫 Raise in
+        <label className="field w-32 shrink-0">🍋 Raise in
           <select className="input select-caret" value={raiseIn} onChange={event => setRaiseIn(event.target.value as typeof raiseIn)}>
             <option value="ETH">ETH</option>
             <option value="USDC">USDC</option>
