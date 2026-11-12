@@ -176,11 +176,10 @@ if (step === 'create' || step === 'create-host') {
   for (const move of ready) await send(host, buildBridgeClaimTx({ chainId: host.chain.id, sucker: pair.local, claim: claimFromSuckerMovement(move) }))
   console.log({ balance: formatEther(await balanceOf(host, state.hostId)) })
 } else {
-  const record = await host.client.readContract({ address: LUNCH, abi: fairLunchAbi, functionName: 'recordOf', args: [BigInt(state.hostId)] })
   const { moves } = await (state.copyId ? movements() : Promise.resolve({ moves: [] })).catch(error => ({ moves: [], error: console.log('movements failed:', error.shortMessage ?? error.message) }))
   const poolKey = await host.client.readContract({ address: LUNCH, abi: fairLunchAbi, functionName: 'poolKeyOf', args: [BigInt(state.hostId)] })
   const tokensPerEth = await quoteUniswapV4ExactInputSingle(host.client, { chainId: host.chain.id, poolKey, zeroForOne: true, amountIn: 10n ** 12n }).then(out => Number(out) / 1e12, () => null)
-  console.log(big({ ...state, tokensPerEthAfterFee: tokensPerEth, now: Math.floor(Date.now() / 1000), servedAt: record.servedAt, hostBalance: formatEther(await balanceOf(host, state.hostId)), copyBalance: state.copyId ? formatEther(await balanceOf(copy, state.copyId)) : undefined,
+  console.log(big({ ...state, tokensPerEthAfterFee: tokensPerEth, now: Math.floor(Date.now() / 1000), servedAt: await host.client.readContract({ address: LUNCH, abi: fairLunchAbi, functionName: 'servedAtOf', args: [BigInt(state.hostId)] }), hostBalance: formatEther(await balanceOf(host, state.hostId)), copyBalance: state.copyId ? formatEther(await balanceOf(copy, state.copyId)) : undefined,
     movements: moves.map(move => ({ status: move.status, eth: formatEther(move.leaf.terminalTokenAmount) })),
     wallet: { host: formatEther(await host.client.getBalance({ address: account.address })), copy: formatEther(await copy.client.getBalance({ address: account.address })) } }))
 }

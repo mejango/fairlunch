@@ -4,7 +4,7 @@ import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
 import { deploymentOn } from './deployments'
 import type { PublicClient } from 'viem'
-import { readLunch, readMoney } from './reads'
+import { readClock, readLunch, readMoney } from './reads'
 
 /** A lunch as the home page lists it. Server only: Bendystraw is read here and nowhere in the browser. */
 export type ListedLunch = {
@@ -41,9 +41,10 @@ export async function listLunches(network: 'mainnet' | 'testnet'): Promise<Liste
     }).catch(() => null)
     if (!record || Number(record.hostChainId) !== row.chainId) return null
     const { symbol, decimals } = await readMoney(jbCenterPublicClient(row.chainId) as PublicClient, record.token)
-    const price = record.servedAt ? (await readLunch(row.chainId, row.projectId).catch(() => null))?.price ?? null : null
+    const clock = await readClock(row.chainId, row.projectId)
+    const price = clock.servedAt ? (await readLunch(row.chainId, row.projectId).catch(() => null))?.price ?? null : null
     return { chainId: row.chainId, projectId: row.projectId, name: row.name, symbol: row.tokenSymbol, logoUri: row.logoUri,
-      paidIn: row.volume, deadline: record.deadline, servedAt: record.servedAt, money: { symbol, decimals }, price }
+      paidIn: row.volume, deadline: clock.deadline, servedAt: clock.servedAt, money: { symbol, decimals }, price }
   }))
   return listed.filter(lunch => lunch !== null)
 }

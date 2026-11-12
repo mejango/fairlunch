@@ -14,7 +14,7 @@ export const PHASE_LABEL: Record<Phase, string> = {
 
 export function phaseOf(lunch: { deadline: number; servedAt: number }, raised: bigint, now: number): Phase {
   if (lunch.servedAt) return now < lunch.servedAt + REST_SECONDS ? 'resting' : 'eating'
-  if (now <= lunch.deadline) return 'cooking'
+  if (now < lunch.deadline) return 'cooking'
   return raised > 0n ? 'ready' : 'empty'
 }
 

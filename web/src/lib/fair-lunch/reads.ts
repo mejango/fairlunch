@@ -73,6 +73,16 @@ const oracleAbi = [
  * in smallest units, and the token has 18 decimals. */
 const priceAt = (tick: number, on: Pick<Lunch, 'money' | 'moneyIs0'>) => 1.0001 ** (on.moneyIs0 ? -tick : tick) * 10 ** (18 - on.money.decimals)
 
+/** A host lunch's times, read from its current ruleset: the rulesets are its clock. The ruleset that sells tokens lasts
+ * until the deadline, the next takes no payments until `serve`, and the last started when the lunch was served. */
+export async function readClock(chainId: number, projectId: number, signal?: AbortSignal): Promise<{ startedAt: number; deadline: number; servedAt: number }> {
+  const { controller } = await wiringOn(chainId)
+  const [ruleset, metadata] = await jbCenterPublicClient(chainId, signal).readContract({ address: controller, abi: jbControllerAbi, functionName: 'currentRulesetOf', args: [BigInt(projectId)] })
+  const start = Number(ruleset.start)
+  if (ruleset.weight > 0n) return { startedAt: start, deadline: start + Number(ruleset.duration), servedAt: 0 }
+  return { startedAt: start, deadline: start, servedAt: metadata.pausePay ? 0 : start }
+}
+
 /** The Juicebox contracts a chain's Fair Lunch was deployed with. They never change. */
 const wiring = new Map<number, Promise<{ lunch: Address; terminal: Address; store: Address; tokens: Address; controller: Address; buyback: Address; router: Address; claims: Address }>>()
 export function wiringOn(chainId: number) {
@@ -98,21 +108,20 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
   const { lunch, terminal, store, tokens, controller, claims } = await wiringOn(chainId)
   const client = jbCenterPublicClient(chainId, signal)
   const id = BigInt(projectId)
-  const [record, poolKey, token, supply, uri, [ruleset], claimsPercent, claimsTokens] = await Promise.all([
+  const [record, poolKey, token, supply, uri, clock, claimsPercent, claimsTokens] = await Promise.all([
     client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'recordOf', args: [id] }),
     client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'poolKeyOf', args: [id] }),
     client.readContract({ address: tokens, abi: jbTokensAbi, functionName: 'tokenOf', args: [id] }),
     client.readContract({ address: tokens, abi: jbTokensAbi, functionName: 'totalSupplyOf', args: [id] }),
     client.readContract({ address: controller, abi: jbControllerAbi, functionName: 'uriOf', args: [id] }),
-    // A lunch's first ruleset starts when it's made.
-    client.readContract({ address: controller, abi: jbControllerAbi, functionName: 'currentRulesetOf', args: [id] }),
+    readClock(chainId, projectId, signal),
     client.readContract({ address: claims, abi: claimsAbi, functionName: 'percentOf', args: [id] }),
     client.readContract({ address: claims, abi: claimsAbi, functionName: 'tokenCountOf', args: [id] }),
   ])
   if (Number(record.hostChainId) !== chainId) return null
   const moneyIs0 = !isAddressEqual(poolKey.currency0, token)
   const stateView = UNISWAP_V4_STATE_VIEW_ADDRESSES[chainId as keyof typeof UNISWAP_V4_STATE_VIEW_ADDRESSES]
-  const pool = record.servedAt && stateView ? { address: stateView, abi: stateViewAbi, args: [uniswapV4PoolId(poolKey)] } as const : null
+  const pool = clock.servedAt && stateView ? { address: stateView, abi: stateViewAbi, args: [uniswapV4PoolId(poolKey)] } as const : null
   const [money, balance, name, symbol, slot0, liquidity] = await Promise.all([
     readMoney(client as PublicClient, record.token),
     client.readContract({ address: store, abi: jbTerminalStoreAbi, functionName: 'balanceOf', args: [terminal, id, record.token] }),
@@ -122,7 +131,7 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
     pool ? client.readContract({ ...pool, functionName: 'getLiquidity' }) : null,
   ])
   return {
-    chainId, projectId, hostChainId: Number(record.hostChainId), startedAt: Number(ruleset.start), deadline: record.deadline, servedAt: record.servedAt,
+    chainId, projectId, hostChainId: Number(record.hostChainId), ...clock,
     creator: record.creator, keepPercent: BigInt(record.keepPercent), keepCap: record.keepCap, tokenPercent: BigInt(record.tokenPercent),
     vestingDuration: record.vestingDuration, vestingWallet: record.vestingWallet, claimsPercent: BigInt(claimsPercent), claimsTokens, token, name, symbol, uri, money, moneyIs0, balance, supply, poolKey,
     price: slot0 ? priceAt(slot0[1], { money, moneyIs0 }) : null,

@@ -59,7 +59,7 @@ const paid = parseEther('0.3'), raise = parseEther(process.env.LUNCH_RAISE ?? '1
 await send(host, { address: host.terminal, abi: jbMultiTerminalAbi, functionName: 'pay', args: [ids[0], NATIVE_TOKEN, raise, account, 0n, '', '0x'], value: raise })
 if (process.argv.includes('--stop-after-raise')) process.exit(0)
 // A copy takes payments once the fundraise is over, so move its fork past the deadline first.
-if (Number((await copy.client.getBlock()).timestamp) <= terms.deadline) await copy.client.request({ method: 'evm_setNextBlockTimestamp', params: [`0x${(terms.deadline + 1).toString(16)}`] })
+if (Number((await copy.client.getBlock()).timestamp) < terms.deadline) await copy.client.request({ method: 'evm_setNextBlockTimestamp', params: [`0x${terms.deadline.toString(16)}`] })
 await send(copy, { address: copy.terminal, abi: jbMultiTerminalAbi, functionName: 'pay', args: [ids[1], NATIVE_TOKEN, paid, account, 0n, '', '0x'], value: paid })
 if (process.argv.includes('--stop-before-send')) process.exit(0)
 

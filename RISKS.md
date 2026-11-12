@@ -15,6 +15,7 @@ Nobody can change a lunch after it's created, including its creator.
 
 ## By design
 
+- **A fundraise ends at its deadline, not after it.** A lunch's rulesets are its clock. A payment or refund in a block stamped with the deadline is too late, and no fundraise can run longer than about 136 years, the longest a ruleset lasts.
 - **Refunds end at the deadline.** Until the deadline a holder can cash tokens out on the host chain for what they were paid for, less a wei of rounding at most. After it money paid in stays in: a cash out between the deadline and `serve` reverts, and once served the only exit is selling into the pool.
 - **A refund can come back 2.5% short.** Juicebox takes its fee on a refund up to the amount another project has paid into the lunch from the same terminal. Someone has to give the lunch that much money to cause it, and the money stays in the lunch for `burn`.
 - **A raise can shrink at the last second.** Whoever paid can take it back until the deadline, so the raise and projected market cap a payer sees may be gone by the time the lunch is served. A large payer can fund early and refund in the last block, and nobody else can react. If everyone refunds, the lunch is unfunded and dead.

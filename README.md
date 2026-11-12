@@ -23,7 +23,7 @@ A lunch has one host chain, where its pool lives. It can also be created on othe
 | Contract | Does |
 | --- | --- |
 | `FairLunch` | Owns every lunch's project and holds its pool position. |
-| `FairLunchDataHook` | Every lunch's data hook: the fixed price and deadline while cooking, the buyback hook once served. Deployed by `FairLunch`. |
+| `FairLunchDataHook` | Every lunch's data hook: refunds at the fixed price while cooking, the buyback hook once served. A lunch's rulesets are its clock: one sells until the deadline, the next takes no payments until `serve`, and the last is the one it keeps. Deployed by `FairLunch`. |
 | `FairLunchVestingDeployer` | Deploys the creator's OpenZeppelin `VestingWallet`. Split out to keep `FairLunch` under the contract size limit. |
 
 `FairLunch` has no owner and no admin. The one privileged call, `setChainSpecificConstants`, sets the chain's Uniswap V4 addresses once at deployment and can never run again.

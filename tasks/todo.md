@@ -530,3 +530,14 @@ jango: "allow user refunds during the fund period only. this makes sense as they
 - [x] Site: "You hold" row with a Refund button on the funding card, copy changed from "No refunds".
 - [x] README and RISKS: refunds end at the deadline, a raise can shrink at the last second.
 - [x] Codex review, pass 17: HOLD for two Mediums and a stale test. Fixed: a refund count rounded down twice could pay nothing with donated money in the balance (now rounded up, `test_refund_ofTheSmallestPayment`), and the stale test is gone. Accepted and written into RISKS.md: Juicebox's 2.5% fee on refunds up to the fee-free surplus another project pays in. The site's refund asks for at least 97% of the price.
+
+## The clock in rulesets
+
+jango: "can we move the clock into the rulesets too?" then "do it".
+
+- [x] Host: funding ruleset lasting to the deadline (sells, untaxed cash outs), then a closed one (payments paused). Copies: paused to the deadline, then open at weight 0. `serve` needs the closed ruleset current and queues the last as before.
+- [x] `FairLunchRecord` drops `deadline` and `servedAt`. `FairLunch.servedAtOf` reads the served time from the current ruleset; `burn`, `collect` and the hook use it.
+- [x] Hook: an untaxed ruleset means refund, a priced one means sell, and anything else is closed unless served. A cash out on a copy now reverts where it burned for nothing.
+- [x] Site: `readClock` derives started, deadline and served times from the current ruleset. Cooking ends at the deadline's own second.
+- [x] Tests updated, duration bound test added. 108 non-fuzz tests passed on first run.
+- [ ] Full suite, Codex review, local fork rebuild, testnet redeploy.

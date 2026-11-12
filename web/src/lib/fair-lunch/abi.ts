@@ -626,16 +626,6 @@ export const fairLunchAbi = [
             "internalType": "address"
           },
           {
-            "name": "deadline",
-            "type": "uint48",
-            "internalType": "uint48"
-          },
-          {
-            "name": "servedAt",
-            "type": "uint48",
-            "internalType": "uint48"
-          },
-          {
             "name": "creator",
             "type": "address",
             "internalType": "address"
@@ -700,6 +690,25 @@ export const fairLunchAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "servedAtOf",
+    "inputs": [
+      {
+        "name": "projectId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "servedAt",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",

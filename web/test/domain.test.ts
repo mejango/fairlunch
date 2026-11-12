@@ -27,9 +27,9 @@ describe('splitOf', () => {
 describe('phaseOf', () => {
   const lunch = { deadline: 1000, servedAt: 0 }
   it('follows the lifecycle', () => {
-    expect(phaseOf(lunch, 0n, 1000)).toBe('cooking')
-    expect(phaseOf(lunch, 1n, 1001)).toBe('ready')
-    expect(phaseOf(lunch, 0n, 1001)).toBe('empty')
+    expect(phaseOf(lunch, 0n, 999)).toBe('cooking')
+    expect(phaseOf(lunch, 1n, 1000)).toBe('ready')
+    expect(phaseOf(lunch, 0n, 1000)).toBe('empty')
     expect(phaseOf({ deadline: 1000, servedAt: 2000 }, 0n, 2000 + 1799)).toBe('resting')
     expect(phaseOf({ deadline: 1000, servedAt: 2000 }, 0n, 2000 + 1800)).toBe('eating')
   })
