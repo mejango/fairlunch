@@ -1,5 +1,5 @@
 // A lunch's whole life on two testnets, one step per run, with the builders the site uses:
-//   FAIR_LUNCH_KEY_FILE=<file holding a testnet key> node scripts/testnet-walk.mjs <state.json> <create|create-host|send-home|serve|status|claim|burn|collect|pay-host|buy|sell|probe>
+//   FAIR_LUNCH_KEY_FILE=<file holding a testnet key> node scripts/testnet-walk.mjs <state.json> <create|create-host|pay-copy|airdrop|send-home|serve|status|claim|burn|collect|pay-host|buy|sell|probe>
 // `probe` drives test/PoolProbe.sol (PROBE_ADDRESS), the adversary: `probe sandwich <burn|collect|buy|sell> <eth|token> <push> [victim amount]`,
 // `probe seed <start tick> <lower> <upper> <eth> <tokens>`, `probe unseed <position>`, `probe swap <eth|token> <amount>`, `probe withdraw`.
 // FAIR_LUNCH_ADDRESS names the deployment to walk.
@@ -13,6 +13,10 @@ import { createPublicClient, createWalletClient, decodeFunctionResult, encodeFun
 import { privateKeyToAccount } from 'viem/accounts'
 import { arbitrumSepolia, sepolia } from 'viem/chains'
 import { fairLunchAbi } from '../src/lib/fair-lunch/abi.ts'
+import { claimProofOf, claimsAbi, claimsRootOf } from '../src/lib/fair-lunch/claims.ts'
+
+// WALK_AIRDROP=<percent> gives that share of supply to the sender (60%) and one other address (40%).
+const LIST = account => [[account, '600000000000000000'], ['0x00000000000000000000000000000000000a11ce', '400000000000000000']]
 
 const LUNCH = process.env.FAIR_LUNCH_ADDRESS
 const [stateFile, step] = process.argv.slice(2)
@@ -61,7 +65,7 @@ if (step === 'create' || step === 'create-host') {
     const { deployerConfigurations } = parseSuckerDeployerConfig(on.chain.id, chainIds, [MappableAsset.NATIVE], { version: 6, bridge: 'ccip' })
     const config = {
       name: 'Burrito', symbol: 'BRTO', projectUri: '', hostChainId: BigInt(host.chain.id), token: '0x000000000000000000000000000000000000EEEe', deadline: terms.deadline, creator: account.address,
-      keepPercent: 200_000_000, keepCap: parseEther('0.005'), tokenPercent: 100_000_000, vestingDuration: 26 * 604800, claimsPercent: 0, claimsRoot: zeroHash, salt: terms.salt,
+      keepPercent: 200_000_000, keepCap: parseEther('0.005'), tokenPercent: 100_000_000, vestingDuration: 26 * 604800, claimsPercent: Number(process.env.WALK_AIRDROP ?? 0) * 10_000_000, claimsRoot: process.env.WALK_AIRDROP ? claimsRootOf(LIST(account.address)) : zeroHash, salt: terms.salt,
       suckerDeploymentConfiguration: { salt: zeroHash, deployerConfigurations: deployerConfigurations.map(({ deployer }) => ({
         deployer, peer: zeroHash, mappings: isHost ? [] : [{ localToken: NATIVE_TOKEN, minGas: 200_000, remoteToken: pad(NATIVE_TOKEN, { size: 32 }) }],
       })) },
@@ -75,8 +79,19 @@ if (step === 'create' || step === 'create-host') {
   writeFileSync(stateFile, big(state))
   const raise = process.argv[5] ?? '0.05'
   await pay(host, state.hostId, raise, parseEther(raise) * 1_000_000n)
-  if (step === 'create') await pay(copy, state.copyId, '0.02', 0n)
+  // The copy takes nothing while the host sells tokens.
+  if (step === 'create') console.log('copy pay during the raise:', await pay(copy, state.copyId, '0.002', 0n).then(() => 'WENT THROUGH', error => `refused, ${String(error.shortMessage ?? error).slice(0, 160)}`))
   console.log(big(state))
+} else if (step === 'pay-copy') {
+  await pay(copy, state.copyId, process.argv[4] ?? '0.01', 0n)
+  console.log({ copyBalance: formatEther(await balanceOf(copy, state.copyId)) })
+} else if (step === 'airdrop') {
+  // Sends the list's other address its tokens, with the proof the site builds.
+  const claims = await host.client.readContract({ address: LUNCH, abi: fairLunchAbi, functionName: 'CLAIMS' })
+  const list = LIST(account.address), id = BigInt(state.hostId)
+  await send(host, { address: claims, abi: claimsAbi, functionName: 'claim', args: [id, list[1][0], BigInt(list[1][1]), claimProofOf(list, 1)] })
+  console.log({ pool: formatEther(await host.client.readContract({ address: claims, abi: claimsAbi, functionName: 'tokenCountOf', args: [id] })),
+    claimed: await host.client.readContract({ address: claims, abi: claimsAbi, functionName: 'claimedBy', args: [id, list[1][0]] }) })
 } else if (step === 'send-home') {
   const call = { address: LUNCH, abi: fairLunchAbi, functionName: 'sendHome', args: [BigInt(state.copyId)] }
   const sending = await balanceOf(copy, state.copyId)

@@ -513,6 +513,10 @@ Refinement record. Objective: nobody can pay a lunch's copy and get nothing whil
 - [x] `serve` burns carrier tokens first and takes `min(balance, supply at the fixed price)` as the raise; the rest waits for `burn`.
 - [x] Tests: `test_remote_refusesPaymentsUntilTheDeadline`, `test_host_claimBeforeServe_waitsForTheBurn`; remote tests pay after the deadline.
 - [x] Site: `raisedOf` for the Raised number, pies and phase; Delivery hidden while cooking. README and RISKS.md.
-- [ ] Codex pass, local fork rebuild, testnet redeploy.
+- [x] Codex pass, local fork rebuild, testnet redeploy.
+
+Codex pass 16 said hold: Medium, the raise follows the supply, so payers burning their own tokens before serve move their money to the burn, and a lunch whose every payer burned everything can't be served; Low, a router that holds failed payments can deliver a copy payment made during the raise after the deadline for nothing. Neither changed in code: the first costs the burner their whole payment and strands only what the burners paid, the second ends where any post-deadline copy payment does. Both are in RISKS.md. Open for jango: accept, or record payments in a pay hook as Codex suggests.
 
 Review. Full suite 112 of 112. Site 22 of 22. A lunch nobody funded on the host can't be served, as before, and money paid on its copies after the deadline stays there; RISKS.md says so.
+
+Testnet. `0x9770a2cae790e496a449b38e18f8778ce2737860` on Arbitrum Sepolia and Sepolia, from the testnet key, with everything through `de65473`. Lunch 20 with copy 20, a 60% airdrop: the copy refused a payment during the raise (`FairLunchDataHook_NotOpenYet`), took 0.004 ETH after the deadline and sent it home, `serve` minted 35,600 tokens for the list from a 0.01 ETH raise (10,000 sold, 7,800 pooled, 60% of the final supply), and a proof from the site's `claimProofOf` delivered one listed address its 40%. The bridged 0.004 ETH was still on its way at the end of the walk.
