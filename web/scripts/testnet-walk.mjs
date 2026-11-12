@@ -61,7 +61,7 @@ if (step === 'create' || step === 'create-host') {
     const { deployerConfigurations } = parseSuckerDeployerConfig(on.chain.id, chainIds, [MappableAsset.NATIVE], { version: 6, bridge: 'ccip' })
     const config = {
       name: 'Burrito', symbol: 'BRTO', projectUri: '', hostChainId: BigInt(host.chain.id), token: '0x000000000000000000000000000000000000EEEe', deadline: terms.deadline, creator: account.address,
-      keepPercent: 200_000_000, keepCap: parseEther('0.005'), tokenPercent: 100_000_000, vestingDuration: 26 * 604800, salt: terms.salt,
+      keepPercent: 200_000_000, keepCap: parseEther('0.005'), tokenPercent: 100_000_000, vestingDuration: 26 * 604800, claimsPercent: 0, claimsRoot: zeroHash, salt: terms.salt,
       suckerDeploymentConfiguration: { salt: zeroHash, deployerConfigurations: deployerConfigurations.map(({ deployer }) => ({
         deployer, peer: zeroHash, mappings: isHost ? [] : [{ localToken: NATIVE_TOKEN, minGas: 200_000, remoteToken: pad(NATIVE_TOKEN, { size: 32 }) }],
       })) },

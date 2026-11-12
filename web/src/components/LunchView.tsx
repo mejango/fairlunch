@@ -10,7 +10,7 @@ import { TxAction } from '@/components/TxAction'
 import { assetUrl, formatEth, formatPrice, formatTokens } from '@/lib/format'
 import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib/fair-lunch/phase'
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
-import { readCopies, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
+import { readClaim, readCopies, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
 import { PERCENT_TOTAL, splitOf, tokensFor } from '@/lib/fair-lunch/split'
 import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
@@ -68,7 +68,7 @@ function Stat({ label, value, action }: { label: ReactNode; value: string; actio
 }
 
 /** The pie's colors: where a raise goes. */
-const POOL = '#2e7d32', CREATOR = '#f5b942', FUNDERS = '#2f6fed'
+const POOL = '#2e7d32', CREATOR = '#f5b942', FUNDERS = '#2f6fed', AIRDROP = '#c2410c'
 const Swatch = ({ color }: { color: string }) => <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />
 
 /** Uniswap's own page for a lunch's pool, on the chains its app shows. */
@@ -200,6 +200,13 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
     queryFn: ({ signal }) => readReleasable(lunch, signal),
     refetchInterval: 60_000,
   })
+  const { address } = useWallet()
+  const { data: claim } = useQuery({
+    queryKey: ['fair-lunch', 'claim', lunch.chainId, lunch.projectId, address],
+    queryFn: ({ signal }) => readClaim(lunch, address!, assetUrl, signal),
+    enabled: !!address && lunch.claimsPercent > 0n,
+    refetchInterval: 60_000,
+  })
   const uniswap = UNISWAP_CHAIN[lunch.chainId]
   return (
     <>
@@ -232,6 +239,16 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
               })} />
           )}
         </div>
+        {lunch.claimsPercent ? (
+          <div className={ACTION_ROW}>
+            <Stat label="Airdrop" value={claim && !claim.claimed ? `${formatTokens(claim.tokens)} ${lunch.symbol} for you` : `${formatTokens(lunch.claimsTokens)} ${lunch.symbol}`} />
+            <TxAction chainId={lunch.chainId} className={SMALL} label={claim?.claimed ? 'Claimed' : 'Claim'} title="Claim your airdrop" doneTitle="Claimed" disabled={!claim || claim.claimed}
+              prepare={async () => ({
+                request: { ...claim!.call, abi: claim!.call.abi as Abi, label: `Claims ${lunch.symbol} from the airdrop` },
+                rows: [{ label: 'You get', value: `${formatTokens(claim!.tokens)} ${lunch.symbol}`, strong: true }, { label: 'Costs you', value: 'Network fee only' }],
+              })} />
+          </div>
+        ) : null}
       </dl>
       {uniswap ? (
         <p className="mt-4 text-sm">
@@ -325,7 +342,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
   const logo = assetUrl(logoUri)
   // Each part of the raise as a percent of it, for the pie.
   const slice = (wei: bigint) => (lunch.balance > 0n ? Number((wei * 10_000n) / lunch.balance) / 100 : 0)
-  const tokenTotal = lunch.supply + split.poolTokens + split.creatorTokens
+  const airdropped = lunch.claimsPercent ? ` ${percent(lunch.claimsPercent)} of the tokens ${lunch.servedAt ? 'went' : 'go'} to an airdrop list.` : ''
+  const tokenTotal = lunch.supply + split.poolTokens + split.creatorTokens + split.claimsTokens
   const part = (tokens: bigint) => (tokenTotal > 0n ? Number((tokens * 10_000n) / tokenTotal) / 100 : 0)
   const timer =
     phase === 'cooking' ? `${countdown(lunch.deadline - now)} left`
@@ -400,11 +418,12 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
                   <p className="text-2xl font-bold tabular-nums">{formatTokens(tokenTotal)} {lunch.symbol}</p>
                   <div className="mt-3 flex items-center gap-5">
                     <div role="img" aria-label="Who gets the tokens" className="h-24 w-24 shrink-0 rounded-full border border-line"
-                      style={{ background: `conic-gradient(${FUNDERS} 0 ${part(lunch.supply)}%, ${POOL} 0 ${part(lunch.supply + split.poolTokens)}%, ${CREATOR} 0)` }} />
+                      style={{ background: `conic-gradient(${FUNDERS} 0 ${part(lunch.supply)}%, ${POOL} 0 ${part(lunch.supply + split.poolTokens)}%, ${CREATOR} 0 ${part(lunch.supply + split.poolTokens + split.creatorTokens)}%, ${AIRDROP} 0)` }} />
                     <dl className="space-y-2">
                       <Stat label={<><Swatch color={FUNDERS} />🥬 Funders</>} value={formatTokens(lunch.supply)} />
                       <Stat label={<><Swatch color={POOL} />🔒 The pool</>} value={formatTokens(split.poolTokens)} />
                       <Stat label={<><Swatch color={CREATOR} />👩‍🍳 The chef, vested</>} value={formatTokens(split.creatorTokens)} />
+                      {lunch.claimsPercent ? <Stat label={<><Swatch color={AIRDROP} />🥡 Airdrop</>} value={formatTokens(split.claimsTokens)} /> : null}
                     </dl>
                   </div>
                 </>
@@ -413,8 +432,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
           )}
           <p className="mt-3 text-sm text-muted">
             {lunch.servedAt
-              ? `The chef kept ${percent(lunch.keepPercent)} of the raise, up to ${formatUnits(lunch.keepCap, lunch.money.decimals)} ${lunch.money.symbol}, and got ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks. The rest was locked in the pool.`
-              : `Funders get 1M ${lunch.symbol} per ${lunch.money.symbol}, fixed. The pool gets the same for its ${lunch.money.symbol}. The chef gets ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.`}
+              ? `The chef kept ${percent(lunch.keepPercent)} of the raise, up to ${formatUnits(lunch.keepCap, lunch.money.decimals)} ${lunch.money.symbol}, and got ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.${airdropped} The rest was locked in the pool.`
+              : `Funders get 1M ${lunch.symbol} per ${lunch.money.symbol}, fixed. The pool gets the same for its ${lunch.money.symbol}. The chef gets ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.${airdropped}`}
           </p>
           <Copies lunch={lunch} />
         </section>

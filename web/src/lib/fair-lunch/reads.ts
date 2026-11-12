@@ -4,6 +4,7 @@ import { claimFromSuckerMovement, getSuckerMovements, getV6SuckerPairs, type JBC
 import { encodeAbiParameters, encodePacked, erc20Abi, getContractAddress, isAddressEqual, keccak256, parseAbi, type Address, type Hex, type PublicClient } from 'viem'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
+import { claimProofOf, claimsAbi, type ClaimEntry } from './claims'
 import { deploymentOn } from './deployments'
 
 /** What a lunch raises and its pool trades against: ETH or an ERC-20. */
@@ -35,6 +36,9 @@ export type Lunch = {
   tokenPercent: bigint
   vestingDuration: number
   vestingWallet: Address
+  /** The airdrop list's share of supply, and the tokens minted for it at serve. */
+  claimsPercent: bigint
+  claimsTokens: bigint
   token: Address
   name: string
   symbol: string
@@ -69,7 +73,7 @@ const oracleAbi = [
 const priceAt = (tick: number, on: Pick<Lunch, 'money' | 'moneyIs0'>) => 1.0001 ** (on.moneyIs0 ? -tick : tick) * 10 ** (18 - on.money.decimals)
 
 /** The Juicebox contracts a chain's Fair Lunch was deployed with. They never change. */
-const wiring = new Map<number, Promise<{ lunch: Address; terminal: Address; store: Address; tokens: Address; controller: Address; buyback: Address; router: Address }>>()
+const wiring = new Map<number, Promise<{ lunch: Address; terminal: Address; store: Address; tokens: Address; controller: Address; buyback: Address; router: Address; claims: Address }>>()
 export function wiringOn(chainId: number) {
   const known = wiring.get(chainId)
   if (known) return known
@@ -78,10 +82,10 @@ export function wiringOn(chainId: number) {
   const client = jbCenterPublicClient(chainId)
   const lunch = deployment.address
   const read = (async () => {
-    const [terminal, tokens, controller, buyback, router] = await Promise.all((['TERMINAL', 'TOKENS', 'CONTROLLER', 'BUYBACK_REGISTRY', 'ROUTER_TERMINAL_REGISTRY'] as const).map(functionName =>
+    const [terminal, tokens, controller, buyback, router, claims] = await Promise.all((['TERMINAL', 'TOKENS', 'CONTROLLER', 'BUYBACK_REGISTRY', 'ROUTER_TERMINAL_REGISTRY', 'CLAIMS'] as const).map(functionName =>
       client.readContract({ address: lunch, abi: fairLunchAbi, functionName })))
     const store = await client.readContract({ address: terminal, abi: jbMultiTerminalAbi, functionName: 'STORE' })
-    return { lunch, terminal, store, tokens, controller, buyback, router }
+    return { lunch, terminal, store, tokens, controller, buyback, router, claims }
   })()
   wiring.set(chainId, read)
   read.catch(() => wiring.delete(chainId))
@@ -90,10 +94,10 @@ export function wiringOn(chainId: number) {
 
 /** A lunch on its host chain, or null when the project isn't one. */
 export async function readLunch(chainId: number, projectId: number, signal?: AbortSignal): Promise<Lunch | null> {
-  const { lunch, terminal, store, tokens, controller } = await wiringOn(chainId)
+  const { lunch, terminal, store, tokens, controller, claims } = await wiringOn(chainId)
   const client = jbCenterPublicClient(chainId, signal)
   const id = BigInt(projectId)
-  const [record, poolKey, token, supply, uri, [ruleset]] = await Promise.all([
+  const [record, poolKey, token, supply, uri, [ruleset], claimsPercent, claimsTokens] = await Promise.all([
     client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'recordOf', args: [id] }),
     client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'poolKeyOf', args: [id] }),
     client.readContract({ address: tokens, abi: jbTokensAbi, functionName: 'tokenOf', args: [id] }),
@@ -101,6 +105,8 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
     client.readContract({ address: controller, abi: jbControllerAbi, functionName: 'uriOf', args: [id] }),
     // A lunch's first ruleset starts when it's made.
     client.readContract({ address: controller, abi: jbControllerAbi, functionName: 'currentRulesetOf', args: [id] }),
+    client.readContract({ address: claims, abi: claimsAbi, functionName: 'percentOf', args: [id] }),
+    client.readContract({ address: claims, abi: claimsAbi, functionName: 'tokenCountOf', args: [id] }),
   ])
   if (Number(record.hostChainId) !== chainId) return null
   const moneyIs0 = !isAddressEqual(poolKey.currency0, token)
@@ -117,7 +123,7 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
   return {
     chainId, projectId, hostChainId: Number(record.hostChainId), startedAt: Number(ruleset.start), deadline: record.deadline, servedAt: record.servedAt,
     creator: record.creator, keepPercent: BigInt(record.keepPercent), keepCap: record.keepCap, tokenPercent: BigInt(record.tokenPercent),
-    vestingDuration: record.vestingDuration, vestingWallet: record.vestingWallet, token, name, symbol, uri, money, moneyIs0, balance, supply, poolKey,
+    vestingDuration: record.vestingDuration, vestingWallet: record.vestingWallet, claimsPercent: BigInt(claimsPercent), claimsTokens, token, name, symbol, uri, money, moneyIs0, balance, supply, poolKey,
     price: slot0 ? priceAt(slot0[1], { money, moneyIs0 }) : null,
     // The position spans every price, so its currency0 is its liquidity over the square root of the price, and its
     // currency1 is its liquidity times it.
@@ -143,6 +149,28 @@ export async function readReleasable(lunch: Pick<Lunch, 'chainId' | 'vestingWall
 /** Sending the chef the tokens that have vested. Anyone can send it. */
 export const releaseCall = (lunch: Pick<Lunch, 'chainId' | 'vestingWallet' | 'token'>) =>
   ({ chainId: lunch.chainId, address: lunch.vestingWallet, abi: vestingAbi, functionName: 'release', args: [lunch.token] }) as const
+
+/** What an address can claim of a lunch's airdrop, with the call that sends it. Null if it isn't on the list. */
+export type Claim = { tokens: bigint; claimed: boolean; call: { chainId: number; address: Address; abi: typeof claimsAbi; functionName: 'claim'; args: readonly [bigint, Address, bigint, Hex[]] } }
+
+/** The lunch's list comes from its metadata: `claimsUri` names a JSON file holding `claims`, the entries in order. */
+export async function readClaim(lunch: Pick<Lunch, 'chainId' | 'projectId' | 'uri' | 'claimsTokens'>, account: Address, gateway: (uri: string) => string | null, signal?: AbortSignal): Promise<Claim | null> {
+  const json = async (uri: string) => {
+    const url = gateway(uri)
+    if (!url) throw new Error('The list has no address to read it from.')
+    return (await fetch(url, { signal })).json()
+  }
+  const { claimsUri } = await json(lunch.uri) as { claimsUri?: string }
+  if (!claimsUri) return null
+  const { claims: entries } = await json(claimsUri) as { claims: ClaimEntry[] }
+  const index = entries.findIndex(([listed]) => isAddressEqual(listed, account))
+  if (index < 0) return null
+  const { claims } = await wiringOn(lunch.chainId)
+  const id = BigInt(lunch.projectId), shares = BigInt(entries[index][1])
+  const claimed = await jbCenterPublicClient(lunch.chainId, signal).readContract({ address: claims, abi: claimsAbi, functionName: 'claimedBy', args: [id, account] })
+  return { tokens: (lunch.claimsTokens * shares) / 10n ** 18n, claimed,
+    call: { chainId: lunch.chainId, address: claims, abi: claimsAbi, functionName: 'claim', args: [id, account, shares, claimProofOf(entries, index)] } }
+}
 
 export type PricePoint = { time: number; price: number }
 export type PriceHistory = { points: PricePoint[]; /** The oracle no longer keeps the whole range asked for. */ short: boolean }
@@ -176,14 +204,14 @@ export async function readPriceHistory(lunch: Pick<Lunch, 'chainId' | 'poolKey' 
   })) }
 }
 
-export type MadeTerms = { /** The wallet that sends the create. */ sender: Address; salt: Hex; hostChainId: number; /** The host's money. */ token: Address; deadline: number; creator: Address; keepPercent: bigint; keepCap: bigint; tokenPercent: bigint; vestingDuration: number }
+export type MadeTerms = { /** The wallet that sends the create. */ sender: Address; salt: Hex; hostChainId: number; /** The host's money. */ token: Address; deadline: number; creator: Address; keepPercent: bigint; keepCap: bigint; tokenPercent: bigint; vestingDuration: number; claimsPercent: bigint; claimsRoot: Hex }
 
 /** Where `createFor` deploys a lunch's token: fixed by the terms and the wallet that sent them. */
 export function tokenAddressOf(terms: MadeTerms, on: { lunch: Address; controller: Address; tokens: Address; implementation: Address }): Address {
   // FairLunch's salt, then the controller's, then the token store's: each scopes the one before to its caller.
   const lunchSalt = keccak256(encodeAbiParameters(
-    [{ type: 'address' }, { type: 'bytes32' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
-    [terms.sender, terms.salt, BigInt(terms.hostChainId), terms.token, BigInt(terms.deadline), terms.creator, terms.keepPercent, terms.keepCap, terms.tokenPercent, BigInt(terms.vestingDuration)]))
+    [{ type: 'address' }, { type: 'bytes32' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes32' }],
+    [terms.sender, terms.salt, BigInt(terms.hostChainId), terms.token, BigInt(terms.deadline), terms.creator, terms.keepPercent, terms.keepCap, terms.tokenPercent, BigInt(terms.vestingDuration), terms.claimsPercent, terms.claimsRoot]))
   const controllerSalt = keccak256(encodePacked(['address', 'bytes32'], [on.lunch, lunchSalt]))
   const salt = keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'bytes32' }], [on.controller, controllerSalt]))
   // An ERC-1167 clone's creation code.

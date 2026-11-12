@@ -6,6 +6,7 @@ import { CCIP_SUCKER_TRANSPORT_VALUES, findSuckerTransportValue, getSuckerMoveme
 import { createPublicClient, createWalletClient, http, pad, parseEther, zeroHash } from 'viem'
 import { base, optimism } from 'viem/chains'
 import { fairLunchAbi } from '../src/lib/fair-lunch/abi.ts'
+import { claimsRootOf } from '../src/lib/fair-lunch/claims.ts'
 
 const [hostRpc, copyRpc, lunch] = process.argv.slice(2)
 const account = process.env.LUNCH_ACCOUNT ?? '0x1234567890123456789012345678901234567890'
@@ -27,6 +28,10 @@ const times = await Promise.all(sides.map(async ({ client }) => Number((await cl
 const chainIds = sides.map(side => side.chain.id)
 const terms = { deadline: process.env.LUNCH_MINUTES ? times[0] + Number(process.env.LUNCH_MINUTES) * 60 : Math.max(...times) + 3600, salt: pad(`0x${Date.now().toString(16)}`, { size: 32 }) }
 
+// LUNCH_AIRDROP=<percent> gives that share of supply to the sender (60%) and one other address (40%).
+const list = [[account, '600000000000000000'], ['0x00000000000000000000000000000000000a11ce', '400000000000000000']]
+const claims = process.env.LUNCH_AIRDROP ? { percent: Number(process.env.LUNCH_AIRDROP) * 10_000_000, root: claimsRootOf(list) } : { percent: 0, root: zeroHash }
+if (process.env.LUNCH_AIRDROP) console.log(JSON.stringify({ claims: list }))
 const ids = []
 for (const side of sides) {
   const isHost = side === sides[0]
@@ -36,7 +41,7 @@ for (const side of sides) {
   const { deployerConfigurations } = parseSuckerDeployerConfig(side.chain.id, chainIds, [MappableAsset.NATIVE], { version: 6, bridge: 'ccip' })
   const config = {
     name: process.env.LUNCH_NAME ?? 'Burrito', symbol: process.env.LUNCH_SYMBOL ?? 'BRTO', projectUri: '', hostChainId: BigInt(chainIds[0]), token: '0x000000000000000000000000000000000000EEEe', deadline: terms.deadline, creator: account,
-    keepPercent: 200_000_000, keepCap: parseEther('0.5'), tokenPercent: 100_000_000, vestingDuration: 52 * 604800, salt: terms.salt,
+    keepPercent: 200_000_000, keepCap: parseEther('0.5'), tokenPercent: 100_000_000, vestingDuration: 52 * 604800, claimsPercent: claims.percent, claimsRoot: claims.root, salt: terms.salt,
     suckerDeploymentConfiguration: { salt: zeroHash, deployerConfigurations: deployerConfigurations.map(({ deployer }) => ({
       deployer, peer: zeroHash, mappings: isHost ? [] : [{ localToken: NATIVE_TOKEN, minGas: 200_000, remoteToken: pad(NATIVE_TOKEN, { size: 32 }) }],
     })) },

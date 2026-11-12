@@ -48,11 +48,11 @@ describe('tokenAddressOf', () => {
   it('finds the token a create deployed, from its terms', () => {
     expect(tokenAddressOf({
       sender: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', salt: '0x0000000000000000000000000000000000000000000000000000000000000000', hostChainId: 8453, token: ETH_MONEY.address, deadline: 1795038375,
-      creator: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', keepPercent: 200_000_000n, keepCap: ETH / 2n, tokenPercent: 100_000_000n, vestingDuration: 31_449_600,
+      creator: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', keepPercent: 200_000_000n, keepCap: ETH / 2n, tokenPercent: 100_000_000n, vestingDuration: 31_449_600, claimsPercent: 0n, claimsRoot: '0x0000000000000000000000000000000000000000000000000000000000000000',
     }, {
-      lunch: '0x6a9c8ca664e24a9dac93312cad693d9f4890bb6e', controller: '0x3Fcec3572e84b624477BcfF4E2CF1f7dEAb648F1',
+      lunch: '0x5daafb44b864aaeb779f96365474ca6338311782', controller: '0x3Fcec3572e84b624477BcfF4E2CF1f7dEAb648F1',
       tokens: '0x1f80d8f057eE36b4C2656D107E4e4558B71bA7D9', implementation: '0x6DB9Cf17222D8DE2012Fe13B9FA5bB7981fa0b17',
-    })).toBe('0xd754F0FF53888BCD71011D120aa1C75e2E08E38C')
+    })).toBe('0x470fcaB5329C9F37BCe7b0e0f021d18E4B53Dbc2')
   })
 })
 

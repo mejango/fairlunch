@@ -288,7 +288,7 @@ contract FairLunchLifecycle is Test {
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(config);
 
-        config = _config(creator, 0, 0, HALF + 1);
+        config = _config(creator, 0, 0, 10 * TENTH);
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(config);
 
@@ -481,9 +481,9 @@ contract FairLunchLifecycle is Test {
     function test_createFor_revertsOnBadClaims() public {
         uint256 fee = PROJECTS.creationFee();
 
-        // The chef and the list can't get more than 90% together.
-        FairLunchConfig memory config = _config(creator, 0, 0, 5 * TENTH);
-        config.claimsPercent = 4 * TENTH + 1;
+        // The chef and the list can't get the whole supply together.
+        FairLunchConfig memory config = _config(creator, 0, 0, 6 * TENTH);
+        config.claimsPercent = 4 * TENTH;
         config.claimsRoot = bytes32(uint256(1));
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(config);
@@ -502,8 +502,8 @@ contract FairLunchLifecycle is Test {
     /// @notice Whatever the shares, the chef and the list get their percents of the supply and the list is never short.
     /// forge-config: default.fuzz.runs = 64
     function testFuzz_claims_anySplit(uint32 tokenPercent, uint32 claimsPercent, uint256 aliceShares) public {
-        tokenPercent = uint32(bound(tokenPercent, 0, 5 * TENTH));
-        claimsPercent = uint32(bound(claimsPercent, 1, 9 * TENTH - tokenPercent));
+        tokenPercent = uint32(bound(tokenPercent, 0, 9 * TENTH));
+        claimsPercent = uint32(bound(claimsPercent, 1, 990_000_000 - tokenPercent));
         aliceShares = bound(aliceShares, 0, 1e18);
 
         FairLunchConfig memory config = _config(creator, 0, 0, tokenPercent);

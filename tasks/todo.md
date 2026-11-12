@@ -488,12 +488,15 @@ Refinement record. Objective: a chef names a share of the supply and a list of a
 
 Decisions taken, open to jango's correction:
 
-- The airdrop is its own share (`claimsPercent`), apart from the chef's vested tokens. The chef's cap stays 50%. Chef plus airdrop can be up to 90% of supply.
+- The airdrop is its own share (`claimsPercent`), apart from the chef's vested tokens. jango (2026-11-12): no 50% or 90% caps, the only rule is that chef tokens plus airdrop come to under 100% of supply. The chef's keep of the raise stays capped at 50%.
 - A list entry is an address and its share of the airdrop out of 1e18. The site turns a CSV of `address,amount` into shares. The root is fixed at creation and is part of the terms that set the token's address.
 - Claims are on the host chain, open from `serve`, never expire, and anyone can send one: the tokens go to the listed address. Nobody can change or reclaim the list.
 - The list is pinned to IPFS and named in the lunch's metadata so the site can build proofs.
 
-- [ ] `FairLunchClaims` and the `claimsPercent`, `claimsRoot` terms; `serve` mints and funds; tests.
-- [ ] RISKS.md and README; Codex pass.
-- [ ] Site: CSV on the create form, the airdrop in the token pie, a claim row on the served page; tests.
-- [ ] Local fork check with a real list.
+- [x] `FairLunchClaims` and the `claimsPercent`, `claimsRoot` terms; `serve` mints and funds; tests.
+- [x] RISKS.md and README; Codex pass.
+- [x] Site: CSV on the create form, the airdrop in the token pie, a claim row on the served page; tests.
+- [x] Local fork check with a real list.
+
+Review. Codex pass 14 on `56858ae` said hold: High, a lunch with no chef tokens and no airdrop divided by zero in `serve` (fixed, `test_serve_noCreatorShares` passes again); Medium, the committed site used the old create call (the site wiring lands with this change); Low, a root naming an address twice pays only the entry claimed first (the site's list builder merges duplicates, RISKS.md says so for roots made elsewhere). Full suite before the cap change: 109 of 111, the two failures being test bounds, fixed and rerun. On the Base fork, lunch 42 took a 30% airdrop, and a proof built by the site's `claimProofOf` delivered a listed address its 40%. Not checked: the Claim button with a connected wallet, since the fork lunch has no pinned list.
+

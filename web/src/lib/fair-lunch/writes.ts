@@ -20,6 +20,8 @@ export type LunchTerms = {
   /** `sender` signs every chain's create. `creator` is paid the share and the tokens. */
   deadline: number; sender: Address; creator: Address
   keepPercent: number; keepCapWei: bigint; tokenPercent: number; vestingSeconds: number
+  /** The airdrop: a whole percent of supply and its list's root. Zero and the zero hash for none. */
+  claimsPercent: number; claimsRoot: Hex; claimsCount: number
   salt: Hex
 }
 
@@ -30,7 +32,8 @@ const PERCENT = 10_000_000 // 1% of JBConstants.SPLITS_TOTAL_PERCENT
 /** The project these terms already made on a chain, or null: what a create that finished out of sight left behind. */
 export function madeOn(terms: LunchTerms, chainId: number, signal?: AbortSignal): Promise<number | null> {
   return findMade({ sender: terms.sender, salt: terms.salt, hostChainId: terms.hostChainId, token: terms.tokenOn[terms.hostChainId], deadline: terms.deadline, creator: terms.creator,
-    keepPercent: BigInt(terms.keepPercent * PERCENT), keepCap: terms.keepCapWei, tokenPercent: BigInt(terms.tokenPercent * PERCENT), vestingDuration: terms.vestingSeconds }, chainId, signal)
+    keepPercent: BigInt(terms.keepPercent * PERCENT), keepCap: terms.keepCapWei, tokenPercent: BigInt(terms.tokenPercent * PERCENT), vestingDuration: terms.vestingSeconds,
+    claimsPercent: BigInt(terms.claimsPercent * PERCENT), claimsRoot: terms.claimsRoot }, chainId, signal)
 }
 
 /** The `createFor` call for one of a lunch's chains. Every chain gets the same terms, or their bridges won't pair. */
@@ -51,7 +54,7 @@ export async function createTx(terms: LunchTerms, chainId: number): Promise<TxRe
     name: terms.name, symbol: terms.symbol, projectUri: terms.projectUri,
     hostChainId: BigInt(terms.hostChainId), token: terms.tokenOn[terms.hostChainId], deadline: terms.deadline, creator: terms.creator,
     keepPercent: terms.keepPercent * PERCENT, keepCap: terms.keepCapWei, tokenPercent: terms.tokenPercent * PERCENT,
-    vestingDuration: terms.vestingSeconds, salt: terms.salt,
+    vestingDuration: terms.vestingSeconds, claimsPercent: terms.claimsPercent * PERCENT, claimsRoot: terms.claimsRoot, salt: terms.salt,
     suckerDeploymentConfiguration: {
       salt: zeroHash,
       deployerConfigurations: deployers.map(({ deployer }) => ({

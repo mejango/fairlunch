@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type FormEvent } from 'react'
 import { NATIVE_TOKEN, USDC_ADDRESSES, type JBChainId } from '@bananapus/nana-sdk-core'
-import { formatUnits, getAddress, isAddress, isAddressEqual, parseEventLogs, parseUnits, toHex, zeroAddress, type Address, type Hex, type PublicClient } from 'viem'
+import { formatUnits, getAddress, isAddress, isAddressEqual, parseEventLogs, parseUnits, toHex, zeroAddress, zeroHash, type Address, type Hex, type PublicClient } from 'viem'
 import { TxAction } from '@/components/TxAction'
 import { TxError } from '@/components/ui/TxError'
 import { useWallet } from '@/hooks/useWallet'
@@ -13,6 +13,7 @@ import { environmentForChainIds, PRODUCTION_CHAINS, TESTNET_CHAINS } from '@/lib
 import { fairLunchAbi } from '@/lib/fair-lunch/abi'
 import { deploymentOn } from '@/lib/fair-lunch/deployments'
 import { readMoney } from '@/lib/fair-lunch/reads'
+import { claimEntriesOf, claimsRootOf, type ClaimEntry } from '@/lib/fair-lunch/claims'
 import { createTx, madeOn, type LunchTerms } from '@/lib/fair-lunch/writes'
 import { jbCenterBaseUrl } from '@/lib/jbcenter-config'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
@@ -83,7 +84,7 @@ export function CreateForm() {
     if (!isConnected || !address) return void openSignIn()
     const form = new FormData(event.currentTarget)
     const text = (name: string) => String(form.get(name) ?? '').trim()
-    const days = whole(text('days'), 1, 365), keep = whole(text('keep'), 0, 50), share = whole(text('share'), 0, 50)
+    const days = whole(text('days'), 1, 365), keep = whole(text('keep'), 0, 50), share = whole(text('share'), 0, 99)
     const otherChainIds = others.filter(chain => form.get(`also-${chain.id}`)).map(chain => chain.id)
     const chainIds = [hostId, ...otherChainIds]
     // ETH and USDC have a known address on every chain. Any other token is only known where the creator names it.
@@ -95,7 +96,15 @@ export function CreateForm() {
     if (chainIds.some(chainId => !tokenOn[chainId])) return setError('USDC isn’t on one of those chains.')
     if (!text('name') || !text('symbol')) return setError('Give it a name and a ticker.')
     if (days === null) return setError('Raise for 1 to 365 days.')
-    if (keep === null || share === null) return setError('Keep 0 to 50 percent.')
+    if (keep === null) return setError('Keep 0 to 50 percent of the raise.')
+    const airdrop = share === null ? null : whole(text('airdrop') || '0', 0, 99 - share)
+    if (share === null || airdrop === null) return setError('Your tokens and the airdrop have to add up to under 100 percent.')
+    const list = form.get('list')
+    let entries: ClaimEntry[] = []
+    if (airdrop) {
+      if (!(list instanceof File) || !list.size) return setError('Add the airdrop list: a file of address,amount lines.')
+      try { entries = claimEntriesOf(await list.text()) } catch (cause) { return setError(cause instanceof Error ? cause.message : 'The list couldn’t be read.') }
+    }
     // Strict: all lowercase or a right checksum, so a mistyped address is caught here, not paid.
     const payout = text('payout')
     if (!isAddress(payout) || isAddressEqual(payout, zeroAddress)) return setError('Enter the address to pay as 0x and 40 characters.')
@@ -109,16 +118,18 @@ export function CreateForm() {
       const center = new JBCenterClient({ baseUrl: jbCenterBaseUrl() })
       const logo = form.get('logo')
       const logoUri = logo instanceof File && logo.size ? (await center.pinImage(logo, { filename: logo.name })).uri : undefined
-      const { uri } = await center.pinJson({ name: text('name'), ...(logoUri ? { logoUri } : {}) })
+      const claimsUri = entries.length ? (await center.pinJson({ claims: entries.map(([account, shares]) => [account, shares]) })).uri : undefined
+      const { uri } = await center.pinJson({ name: text('name'), ...(logoUri ? { logoUri } : {}), ...(claimsUri ? { claimsUri } : {}) })
       setTerms({
         name: text('name'), symbol: text('symbol').toUpperCase(), projectUri: uri,
         hostChainId: hostId, otherChainIds, tokenOn, money: { symbol: money.symbol, decimals: money.decimals },
         deadline: Math.floor(Date.now() / 1000) + days * 86_400, sender: address, creator: getAddress(payout),
         keepPercent: keep, keepCapWei: cap, tokenPercent: share, vestingSeconds: Number(text('vesting')) * WEEK,
+        claimsPercent: airdrop, claimsRoot: entries.length ? claimsRootOf(entries) : zeroHash, claimsCount: entries.length,
         salt: toHex(crypto.getRandomValues(new Uint8Array(32))),
       })
     } catch {
-      setError('The logo or name couldn’t be saved. Try again.')
+      setError('The logo, name or list couldn’t be saved. Try again.')
     } finally {
       setBusy(false)
     }
@@ -144,6 +155,7 @@ export function CreateForm() {
                       { label: 'Raise ends', value: new Date(terms.deadline * 1000).toLocaleString() },
                       { label: 'You keep', value: `${terms.keepPercent}% of the raise, up to ${formatUnits(terms.keepCapWei, terms.money.decimals)} ${terms.money.symbol}, before the 2.5% fee` },
                       { label: 'Your tokens', value: `${terms.tokenPercent}% over ${terms.vestingSeconds / WEEK} weeks` },
+                      ...(terms.claimsPercent ? [{ label: 'Airdrop', value: `${terms.claimsPercent}% of supply to ${terms.claimsCount} addresses, at serve` }] : []),
                       { label: 'Paid to', value: isAddressEqual(terms.creator, account) ? 'This wallet' : terms.creator },
                       { label: 'Can change later', value: 'Nothing', strong: true },
                     ] }
@@ -222,6 +234,12 @@ export function CreateForm() {
           </select>
         </label>
       </div>
+      <div className="flex flex-wrap gap-4">
+        <label className="field w-32 shrink-0">🥡 Airdrop, %<input name="airdrop" className="input" inputMode="numeric" defaultValue="0" /></label>
+        <label className="field min-w-0 flex-1">🧾 To this list<input name="list" type="file" accept=".csv,.txt,text/csv,text/plain"
+          className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
+      </div>
+      <p className="-mt-2 text-sm text-muted">One address,amount per line. Sent out when lunch is served.</p>
       <label className="field">🥑 Pay your share to
         <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
       </label>

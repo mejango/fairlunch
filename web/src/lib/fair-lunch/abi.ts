@@ -65,6 +65,19 @@ export const fairLunchAbi = [
   },
   {
     "type": "function",
+    "name": "CLAIMS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract FairLunchClaims"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "CONTROLLER",
     "inputs": [],
     "outputs": [
@@ -395,6 +408,16 @@ export const fairLunchAbi = [
             "name": "vestingDuration",
             "type": "uint32",
             "internalType": "uint32"
+          },
+          {
+            "name": "claimsPercent",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "claimsRoot",
+            "type": "bytes32",
+            "internalType": "bytes32"
           },
           {
             "name": "salt",
