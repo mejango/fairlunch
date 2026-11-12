@@ -37,7 +37,8 @@ import {PoolProbe} from "../PoolProbe.sol";
 contract Money is ERC20("Money", "MONEY") {}
 
 /// @notice The life of a lunch that raises an ERC-20, against live V6 and Uniswap V4 on Base. Each contract below runs
-/// it with another token.
+/// it with another token. The fuzzed cases run 64 times each, not the default 512: every run reads fresh pool and
+/// router state from the fork's RPC, and 512 of them take twenty minutes.
 abstract contract FairLunchErc20 is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -260,6 +261,7 @@ abstract contract FairLunchErc20 is Test {
     }
 
     /// @notice Trading around a burn never pays, whichever way the push goes.
+    /// forge-config: default.fuzz.runs = 64
     function testFuzz_burn_sandwichNeverProfits(uint256 push, uint256 waiting, bool moneyFirst) public {
         uint256 id = _served(0, 0, 0);
         PoolKey memory key = lunch.poolKeyOf(id);
@@ -286,6 +288,7 @@ abstract contract FairLunchErc20 is Test {
     }
 
     /// @notice A pool someone made early at a far-off price, either way, doesn't move where the lunch opens.
+    /// forge-config: default.fuzz.runs = 64
     function test_serve_overAnEarlyPool(bool dear) public {
         uint256 id = _create(0, 0, 0);
         _pay(id, alice, 10_000 * unit, "");
@@ -302,6 +305,7 @@ abstract contract FairLunchErc20 is Test {
     }
 
     /// @notice Whatever is raised, the pool opens at the raise price with nothing left behind.
+    /// forge-config: default.fuzz.runs = 64
     function testFuzz_serve_anyRaise(uint256 raised, uint32 keepPercent) public {
         raised = bound(raised, unit / 100, 500_000 * unit);
         uint256 id = _create(uint32(bound(keepPercent, 0, 500_000_000)), type(uint104).max, 0);
