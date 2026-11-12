@@ -374,7 +374,8 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     function createFor(FairLunchConfig calldata config) external payable override returns (uint256 projectId) {
         bool isHost = config.hostChainId == block.chainid;
 
-        // Only the host sells tokens, so only the host needs time left to sell them. A copy on another chain can be
+        // Only the host sells tokens, so only the host needs time left to sell them: two seconds at least, since
+        // `serve` can't queue its ruleset in the second after the launch's two. A copy on another chain can be
         // made after the deadline: its terms, deadline included, must match the host's to pair with it.
         // The money this chain's project takes: the lunch's own on the host, and on a copy whatever its first sucker
         // maps home.
@@ -387,7 +388,8 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         // A lunch that raises ETH takes ETH everywhere, and one that raises an ERC-20 takes ERC-20s everywhere. None
         // takes JBP6: this contract passes on all the JBP6 it holds as fee proceeds.
         if (
-            config.creator == address(0) || config.hostChainId == 0 || (isHost && config.deadline <= block.timestamp)
+            config.creator == address(0) || config.hostChainId == 0
+                || (isHost && config.deadline <= block.timestamp + 1)
                 || config.deadline > block.timestamp + type(uint32).max || config.token == address(0)
                 || (config.token == JBConstants.NATIVE_TOKEN) != (token == JBConstants.NATIVE_TOKEN)
                 || token == address(TOKENS.tokenOf(_FEE_PROJECT_ID)) || config.keepPercent > MAX_CREATOR_PERCENT

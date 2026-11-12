@@ -30,6 +30,7 @@ contract FairLunchDataHook is IJBRulesetDataHook {
 
     error FairLunchDataHook_Closed(uint256 projectId);
     error FairLunchDataHook_NoSale(uint256 projectId);
+    error FairLunchDataHook_NothingToRefund(uint256 projectId);
 
     //*********************************************************************//
     // --------------- public immutable stored properties ---------------- //
@@ -87,29 +88,31 @@ contract FairLunchDataHook is IJBRulesetDataHook {
         }
 
         // Only the ruleset that sells tokens doesn't tax cash outs. While it lasts a holder takes back what the tokens
-        // were paid for. Money that reached the balance any other way isn't theirs, so the count is scaled down to
-        // leave it out. It's rounded up: the terminal rounds what it pays down, and rounding both ways down could pay
-        // nothing for a small cash out.
+        // were paid for, or their share of the balance if that's less.
         if (context.cashOutTaxRate == 0) {
-            uint256 sold = mulDiv({
-                x: context.totalSupply,
+            uint256 refund = mulDiv({
+                x: context.cashOutCount,
                 y: 10 ** context.surplus.decimals,
                 denominator: FAIR_LUNCH.TOKENS_PER_UNIT() * 1e18
             });
-            return (
-                0,
-                context.surplus.value > sold
-                    ? Math.mulDiv({
-                        x: context.cashOutCount,
-                        y: sold,
-                        denominator: context.surplus.value,
-                        rounding: Math.Rounding.Ceil
-                    })
-                    : context.cashOutCount,
-                context.totalSupply,
-                context.surplus.value,
-                hookSpecifications
-            );
+            cashOutCount = context.cashOutCount;
+
+            // Money that reached the balance any other way isn't a payer's to take. The terminal pays a cash out its
+            // share of the whole balance, so price the cash out with the largest count whose share is no more than the
+            // refund.
+            if (_shareOf({context: context, count: cashOutCount}) > refund) {
+                cashOutCount = Math.mulDiv({
+                    x: refund, y: context.totalSupply, denominator: context.surplus.value, rounding: Math.Rounding.Ceil
+                });
+                if (_shareOf({context: context, count: cashOutCount}) > refund) cashOutCount -= 1;
+            }
+
+            // A cash out that would reclaim nothing would still burn its tokens.
+            if (_shareOf({context: context, count: cashOutCount}) == 0) {
+                revert FairLunchDataHook_NothingToRefund(context.projectId);
+            }
+
+            return (0, cashOutCount, context.totalSupply, context.surplus.value, hookSpecifications);
         }
 
         // Until a lunch is served, and everywhere but its host, there's no pool to sell into, and a cash out would burn
@@ -187,6 +190,24 @@ contract FairLunchDataHook is IJBRulesetDataHook {
     //*********************************************************************//
     // ----------------------- internal views ---------------------------- //
     //*********************************************************************//
+
+    /// @notice What the terminal reclaims for an untaxed cash out priced with a count of tokens.
+    /// @dev Mirrors `JBCashOuts.cashOutFrom` at a tax rate of zero.
+    /// @param context The cash out's context.
+    /// @param count The number of tokens to price the cash out with.
+    /// @return share The amount reclaimed.
+    function _shareOf(
+        JBBeforeCashOutRecordedContext calldata context,
+        uint256 count
+    )
+        internal
+        pure
+        returns (uint256 share)
+    {
+        if (count == 0) return 0;
+        if (count >= context.totalSupply) return context.surplus.value;
+        return mulDiv({x: context.surplus.value, y: count, denominator: context.totalSupply});
+    }
 
     /// @notice The minimum a payment or cash out asks of the buyback hook, read from its metadata.
     /// @param metadata The payment's or cash out's metadata.

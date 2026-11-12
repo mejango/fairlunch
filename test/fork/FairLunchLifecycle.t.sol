@@ -296,7 +296,7 @@ contract FairLunchLifecycle is Test {
         lunch.createFor{value: fee}(config);
 
         config = _config(creator, 0, 0, 0);
-        config.deadline = uint48(block.timestamp);
+        config.deadline = uint48(block.timestamp + 1);
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(config);
 
