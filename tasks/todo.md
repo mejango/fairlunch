@@ -260,3 +260,36 @@ Second pass, on the fixed tree and the create form. It confirmed the minimum is 
 
 Codex pass 4, on the late-copy contract change alone: no findings, verdict MERGE for the diff. It notes a copy made with no host behind it is the already documented host-first risk, and that late creation after `serve` through delivery and burn has no test.
 
+
+## Review: Codex Astra pass on the whole tree (2026-11-12)
+
+Asked for by jango: is the code complete and safe. Two read-only `gpt-6-astra` runs, one on the contracts and one on the site, each against the spec. No High in either.
+
+Contracts:
+
+| Finding | Call | Result |
+|---|---|---|
+| Medium: a copy could be created with its ETH mapping set and then switched off, since the sucker's `isMapped` stays true. It would take ETH and never send it home | Real, needs a creator's own odd configuration | `createFor` reads the mapping's `enabled` flag through `ISuckerRoute`, one word, because the full struct put the contract 16 bytes over the limit. Test in `test_createFor_remoteNeedsARouteHome`. 24,501 bytes, 75 margin |
+| No test: `sendHome` with holders on the remote | Real gap | `test_sendHome_withHoldersOnTheRemote`: a millionth stays, holders untouched, carriers burned |
+| No test: cash outs while ready to serve and while eating | Real gap | Added to `test_cashOut_reclaimsNothing_everyPhase` |
+| No test: the unlock callback's caller | Real gap | `test_unlockCallback_onlyPoolManager` |
+| No test: failed sucker fee recovery, hostile pool history followed by a buyback, the one-wei dilution bound asserted exactly | Not built | Each needs a mock or a longer fork walk. Listed for the PR |
+
+47 tests pass. Astra found the creator's limits, the locked position, the buyback bound, bridge accounting and reentrancy sound.
+
+Site:
+
+| Finding | Call | Result |
+|---|---|---|
+| Medium: a create that finishes while the page is closed, or in a Safe after co-signing, never marked its chain made, so the other chains stayed locked | Real, and the normal case for a Safe | The form asks the chain: `createFor` puts the token at an address fixed by the terms, so `findMade` derives it and reads its project. Checked against lunch 46 on the fork, pinned in `test/writes.test.ts` |
+| Medium: a Safe's sale could promise a deadline past its allowance's end | Real | The sale's deadline is capped at the allowance's end, a Safe needs a day left on one to reuse it, and the review says when the swap must run by |
+| Low: Burn could be signed when the price limit stops it buying anything | Real | Simulated when prepared; a burn that would spend and burn nothing is refused |
+| Low: logos could load from any https address, telling its owner who looks | Real | Only `ipfs://` through Center's gateway |
+| Low: the chart asked the oracle for more history than it keeps | Real, and bigger than Low. The oracle keeps 1,801 observations, one per second the pool trades in, so a busy pool keeps as little as half an hour | The range is cut to `observationCoverageOf` and the chart says older prices aren't kept. Real history needs the pool's swaps indexed, the same Bendystraw handler the volume bars need |
+| Low: burn marks and the count stayed stale after a transaction | Real | The page's server reads refresh when a transaction confirms |
+| Low: the list showed "Nothing cooking yet" when the index failed, and one chain's bridge history failing hid every copy | Real | The list says it couldn't load; a failed history leaves the copy and its balance showing |
+| Spec: creator cap progress, facts row (burned, liquidity, vesting), Collect before buybacks start, 44px controls | Missing | Built |
+| Spec: chart left and card right on desktop, an editable payout address, one Relayr bundle for a multi-chain create | Not built | The first two are small and jango's call; Relayr is already open |
+| The list reads the newest 200 projects and the burned total the newest 500 burns | Kept | Marked `ponytail:` in `indexed.ts` with the way up |
+
+`npm run check` passes with 18 tests. Rendered `/base:39` and `/base:40` at 390px and 1280px: no overflow, no console errors.
