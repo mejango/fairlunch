@@ -160,7 +160,7 @@ export function CreateForm() {
       <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
         <li>Sell a new token at a fixed price until the deadline. No refunds.</li>
         <li>You get your share of the raise, the rest is locked in a liquidity pool.</li>
-        <li>Half of all tokens go to funders. The other half to the pool, and some to you.</li>
+        <li>The pool gets tokens for its money at the same price funders paid. Your tokens come on top.</li>
         <li>Later payments on any chain buy the token on the main chain and burn it.</li>
       </ul>
       <div className="grid gap-4 sm:grid-cols-2">
