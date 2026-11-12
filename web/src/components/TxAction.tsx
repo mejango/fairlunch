@@ -19,7 +19,7 @@ type Review = { account: Address; plan: TxRequest | null; rows: readonly TxConfi
  * chain as it is now, the review shows what it does, the wallet confirms, and the page's reads refresh.
  * `prepare` throws a sentence to refuse (nothing to pay, say).
  */
-export function TxAction({ chainId, label, title, doneTitle, prepare, onDone, disabled, className = 'btn-primary min-h-[44px] w-full px-5' }: {
+export function TxAction({ chainId, label, title, doneTitle, prepare, onDone, disabled, className = 'btn-primary min-h-[44px] px-5' }: {
   chainId: number
   label: ReactNode
   title: string

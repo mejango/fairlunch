@@ -146,7 +146,7 @@ export function CreateForm() {
           ))}
         </ol>
         {terms.hostChainId in made ? (
-          <button type="button" className="btn-secondary min-h-[44px] w-full px-5" onClick={() => router.push(hostPath ?? '/')}>🥪 See your lunch</button>
+          <button type="button" className="btn-secondary min-h-[44px] px-5" onClick={() => router.push(hostPath ?? '/')}>🥪 See your lunch</button>
         ) : (
           <button type="button" className="btn-link" onClick={() => { setTerms(null); setMade({}) }}>Back</button>
         )}
@@ -156,7 +156,7 @@ export function CreateForm() {
 
   return (
     <form onSubmit={event => void submit(event)} className="card mx-auto max-w-xl space-y-4 p-5">
-      <h1 className="text-2xl font-bold">🧑‍🍳 Make lunch</h1>
+      <h1 className="text-2xl font-bold">🍞🥬🍅🧀🥓 Lunch ingredients</h1>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
         <label className="field">Ticker<input name="symbol" className="input uppercase" maxLength={10} required placeholder="SAND" /></label>
@@ -193,7 +193,7 @@ export function CreateForm() {
       </label>
       <p className="text-sm text-muted">🔒 Everything else goes into a pool nobody can pull. Nothing can be changed after.</p>
       <TxError error={error} />
-      <button type="submit" className="btn-primary min-h-[48px] w-full px-5 text-lg" disabled={busy}>{busy ? 'Saving…' : isConnected ? 'Review' : 'Connect wallet'}</button>
+      <button type="submit" className="btn-primary min-h-[48px] px-5 text-lg" disabled={busy}>{busy ? 'Saving…' : isConnected ? 'Review' : 'Connect wallet'}</button>
     </form>
   )
 }

@@ -5,11 +5,11 @@ export type Phase = 'cooking' | 'ready' | 'empty' | 'resting' | 'eating'
 export const REST_SECONDS = 30 * 60
 
 export const PHASE_LABEL: Record<Phase, string> = {
-  cooking: '🧑‍🍳 Cooking',
+  cooking: '🧑‍🍳 Cooking lunch',
   ready: '🍽️ Ready to serve',
   empty: '🫙 Nobody came',
-  resting: '🍽️ Served',
-  eating: '🔥 Eating',
+  resting: '🥪 Lunch is served',
+  eating: '🥪 Lunch is served',
 }
 
 export function phaseOf(lunch: { deadline: number; servedAt: number }, raised: bigint, now: number): Phase {

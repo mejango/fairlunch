@@ -11,6 +11,8 @@ export type Lunch = {
   chainId: number
   projectId: number
   hostChainId: number
+  /** When the lunch was made. */
+  startedAt: number
   deadline: number
   servedAt: number
   creator: Address
@@ -72,13 +74,15 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
   const { lunch, terminal, store, tokens, controller } = await wiringOn(chainId)
   const client = jbCenterPublicClient(chainId, signal)
   const id = BigInt(projectId)
-  const [record, poolKey, token, balance, supply, uri] = await Promise.all([
+  const [record, poolKey, token, balance, supply, uri, [ruleset]] = await Promise.all([
     client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'recordOf', args: [id] }),
     client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'poolKeyOf', args: [id] }),
     client.readContract({ address: tokens, abi: jbTokensAbi, functionName: 'tokenOf', args: [id] }),
     client.readContract({ address: store, abi: jbTerminalStoreAbi, functionName: 'balanceOf', args: [terminal, id, NATIVE_TOKEN] }),
     client.readContract({ address: tokens, abi: jbTokensAbi, functionName: 'totalSupplyOf', args: [id] }),
     client.readContract({ address: controller, abi: jbControllerAbi, functionName: 'uriOf', args: [id] }),
+    // A lunch's first ruleset starts when it's made.
+    client.readContract({ address: controller, abi: jbControllerAbi, functionName: 'currentRulesetOf', args: [id] }),
   ])
   if (Number(record.hostChainId) !== chainId) return null
   const stateView = UNISWAP_V4_STATE_VIEW_ADDRESSES[chainId as keyof typeof UNISWAP_V4_STATE_VIEW_ADDRESSES]
@@ -90,13 +94,20 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
     pool ? client.readContract({ ...pool, functionName: 'getLiquidity' }) : null,
   ])
   return {
-    chainId, projectId, hostChainId: Number(record.hostChainId), deadline: record.deadline, servedAt: record.servedAt,
+    chainId, projectId, hostChainId: Number(record.hostChainId), startedAt: Number(ruleset.start), deadline: record.deadline, servedAt: record.servedAt,
     creator: record.creator, keepPercent: BigInt(record.keepPercent), keepCap: record.keepCap, tokenPercent: BigInt(record.tokenPercent),
     vestingDuration: record.vestingDuration, vestingWallet: record.vestingWallet, token, name, symbol, uri, balance, supply, poolKey,
     price: slot0 ? priceAt(slot0[1]) : null,
     // The position spans every price, so its ETH (currency0) is its liquidity over the square root of the price.
     pooledEth: slot0 && liquidity !== null && slot0[0] > 0n ? (liquidity << 96n) / slot0[0] : null,
   }
+}
+
+/** The pool fees a served lunch's position has earned and not yet collected: what `collect` would move right now. */
+export async function readPoolFees(lunch: Pick<Lunch, 'chainId' | 'projectId'>, signal?: AbortSignal): Promise<{ tokens: bigint; eth: bigint }> {
+  const { lunch: address } = await wiringOn(lunch.chainId)
+  const { result } = await jbCenterPublicClient(lunch.chainId, signal).simulateContract({ address, abi: fairLunchAbi, functionName: 'collect', args: [BigInt(lunch.projectId)] })
+  return { tokens: result[0], eth: result[1] }
 }
 
 export type PricePoint = { time: number; price: number }

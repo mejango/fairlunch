@@ -434,4 +434,9 @@ Testnet recheck of the exact limits (`0xb0444b7cb03dc5926a441a6967845cd22f0310cb
 | Sell 1,000 fundraise tokens into the dear-limit pool | 0.00094 ETH, under the 0.001 they cost |
 | Liquidity added ahead of a `burn` on project 10, removed after | Attacker put in 0.000614 ETH and took out 0.000623: 0.000009 gained from a burn that spent 0.00102 (0.9%) |
 
-- [ ] Codex pass 10 on the exact limits.
+- [x] Codex pass 10 on the exact limits (run on Daybreak Blue: gpt-6.1-sol withheld it for the hardware key). The serve Low is closed, rounding and all six boundary cases correct, no new revert, no profitable `serve` or `collect` sequence. **HOLD** on one thing: I had called 2% of a burn's spend the ceiling on what added liquidity takes. That holds from a quiet price (1.985%). Inventory bought cheaply after someone else's large sale takes more: 2.8% after a 600 tick drop, 4.7% after 1,000. RISKS.md and the test's name and comment now say so. Codex: a tighter bound doesn't make a ceiling, and hard prevention needs a different way to execute burns.
+
+**Open for jango:** accept liquidity added ahead of burns as described in RISKS.md, or change how burns execute.
+
+Site nits from jango (2026-11-12): action card left and numbers right, a two-sided swap box where either side can be typed with an arrow to switch, buttons as wide as their text, the phase card as wide as its text, "Cooking lunch" and "🥪 Lunch is served", a bar for the fundraise's time gone, "Lunch ingredients" on the create form, small Burn and Collect buttons beside what they'd move (with a new pool fees number), and a link to the pool on Uniswap. The pool's quoter only answers for an exact input, so typing the other side asks it a few times (`quoteSwapFor`).
+

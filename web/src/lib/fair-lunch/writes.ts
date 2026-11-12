@@ -112,6 +112,24 @@ export function quoteSwap(lunch: Pick<Lunch, 'chainId' | 'poolKey'>, amountIn: b
 }
 
 /**
+ * What has to go in for `amountOut` to come out. The pool's quoter only answers the other way round, so this asks it
+ * a few times, scaling the input by how far off the last answer was.
+ */
+export async function quoteSwapFor(lunch: Pick<Lunch, 'chainId' | 'poolKey' | 'price'>, amountOut: bigint, selling: boolean): Promise<bigint> {
+  if (!lunch.price) throw new Error('No price yet.')
+  // Start from the pool's price: tokens are worth `price` ETH each.
+  const scale = 10n ** 18n
+  const price = BigInt(Math.round(lunch.price * 1e18))
+  let amountIn = selling ? (amountOut * scale) / price : (amountOut * price) / scale
+  for (let round = 0; round < 4 && amountIn > 0n; round++) {
+    const out = await quoteSwap(lunch, amountIn, selling)
+    if (out === 0n) break
+    amountIn = (amountIn * amountOut) / out + 1n
+  }
+  return amountIn
+}
+
+/**
  * A trade with a served lunch's pool, through its project: paying buys for the payer, cashing out sells. The Juicebox
  * buyback hook does the swap and refuses less than `minimumOut`. Selling needs no approval, since the terminal burns
  * the seller's own tokens.

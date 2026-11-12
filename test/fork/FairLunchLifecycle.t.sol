@@ -1072,9 +1072,10 @@ contract FairLunchLifecycle is Test {
     }
 
     /// @notice Someone can buy a little, lend it to the pool as liquidity right where a burn is about to buy, and take
-    /// it back after: they sell into the burn and earn its fee instead of paying one. That pays, and the burn's price
-    /// bound is what limits it: they never take more than 2% of what the burn spent.
-    function test_burn_liquidityAddedAheadTakesNoMoreThanTheBound() public {
+    /// it back after: they sell into the burn and earn its fee instead of paying one. That pays. Starting from a quiet
+    /// price the burn's bound keeps it under 2% of what the burn spent. Tokens bought cheaply after someone else's
+    /// large sale carry that gain on top: the bound limits what the burn pays, not what a seller paid.
+    function test_burn_liquidityAddedAheadFromAQuietPriceTakesUnderTheBound() public {
         uint256 id = _served(0, 0, 0);
         PoolKey memory key = lunch.poolKeyOf(id);
         PoolProbe probe = new PoolProbe(POSITION_MANAGER, PERMIT2);

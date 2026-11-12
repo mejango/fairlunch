@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LunchView } from '@/components/LunchView'
 import type { Copy, Lunch } from '@/lib/fair-lunch/reads'
 
-const reads = vi.hoisted(() => ({ readLunch: vi.fn(), readCopies: vi.fn(), readHostOf: vi.fn() }))
+const reads = vi.hoisted(() => ({ readLunch: vi.fn(), readCopies: vi.fn(), readHostOf: vi.fn(), readPoolFees: vi.fn() }))
 vi.mock('@/lib/fair-lunch/reads', () => reads)
 vi.mock('@/hooks/useWallet', () => ({ useWallet: () => ({ address: undefined, isConnected: false }) }))
 // The page's buttons and chart are their own units: a label is all the page decides about them.
@@ -16,7 +16,7 @@ vi.mock('@/components/ChainIcon', () => ({ ChainIcon: () => null }))
 const ETH = 10n ** 18n
 const NOW = 1_800_000_000
 const lunch = (over: Partial<Lunch>): Lunch => ({
-  chainId: 8453, projectId: 7, hostChainId: 8453, deadline: NOW + 3600, servedAt: 0, creator: '0x0000000000000000000000000000000000000001',
+  chainId: 8453, projectId: 7, hostChainId: 8453, startedAt: NOW - 3600, deadline: NOW + 3600, servedAt: 0, creator: '0x0000000000000000000000000000000000000001',
   keepPercent: 200_000_000n, keepCap: ETH, tokenPercent: 100_000_000n, vestingDuration: 52 * 604800, vestingWallet: '0x0000000000000000000000000000000000000002',
   token: '0x0000000000000000000000000000000000000003', name: 'Sandwich', symbol: 'SAND', uri: '', balance: 3n * ETH, supply: 3_000_000n * ETH,
   poolKey: { currency0: '0x0000000000000000000000000000000000000000', currency1: '0x0000000000000000000000000000000000000003', fee: 10000, tickSpacing: 200, hooks: '0x0000000000000000000000000000000000000004' },
@@ -24,10 +24,11 @@ const lunch = (over: Partial<Lunch>): Lunch => ({
 })
 
 let root: Root | null = null
-async function show(found: Lunch | null, copies: Copy[] = []): Promise<string> {
+async function show(found: Lunch | null, copies: Copy[] = [], fees = { tokens: 5n * ETH, eth: ETH / 100n }): Promise<string> {
   vi.spyOn(Date, 'now').mockReturnValue(NOW * 1000)
   reads.readLunch.mockResolvedValue(found)
   reads.readCopies.mockResolvedValue(copies)
+  reads.readPoolFees.mockResolvedValue(fees)
   const node = document.body.appendChild(document.createElement('div'))
   root = createRoot(node)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -49,8 +50,11 @@ afterEach(() => {
 describe('LunchView', () => {
   it('takes payments while cooking, and nothing else', async () => {
     const text = await show(lunch({}))
-    expect(text).toContain('Cooking')
+    expect(text).toContain('Cooking lunch')
     expect(text).toContain('1h 0m left')
+    // Half the fundraise's time is gone.
+    const bar = document.querySelector<HTMLProgressElement>('progress[aria-label="Time gone of the fundraise"]')
+    expect([bar?.value, bar?.max]).toEqual([3600, 7200])
     expect(text).toContain('No refunds')
     expect(buttons()).toEqual(['Pay'])
   })
@@ -69,21 +73,22 @@ describe('LunchView', () => {
 
   it('swaps but does not burn while the price average builds', async () => {
     const text = await show(lunch({ deadline: NOW - 600, servedAt: NOW - 60, price: 0.000001 }))
-    expect(text).toContain('Served')
+    expect(text).toContain('Lunch is served')
     expect(text).toContain('buybacks start in 29m 0s')
-    expect(buttons()).toEqual(['Buy', 'Sell', 'Buy SAND', '🧾 Collect pool fees'])
+    expect(text).toContain('See the pool on Uniswap')
+    expect(buttons()).toEqual(['↓', 'Buy SAND', 'Collect'])
   })
 
   it('swaps, burns what waits and collects once eating', async () => {
     const text = await show(lunch({ deadline: NOW - 9000, servedAt: NOW - 7200, price: 0.000001, balance: ETH / 4n }))
-    expect(text).toContain('Eating')
-    expect(buttons()).toEqual(['Buy', 'Sell', 'Buy SAND', '🔥 Burn with 0.25 ETH', '🧾 Collect pool fees'])
+    expect(text).toContain('Lunch is served')
+    expect(text).toContain('0.01 ETH, 5 SAND')
+    expect(buttons()).toEqual(['↓', 'Buy SAND', '🔥 Burn', 'Collect'])
   })
 
-  it('hides Burn when nothing waits', async () => {
-    await show(lunch({ deadline: NOW - 9000, servedAt: NOW - 7200, price: 0.000001, balance: 0n }))
-    expect(buttons()).not.toContain('🔥 Burn with 0 ETH')
-    expect(buttons()).toContain('🧾 Collect pool fees')
+  it('hides Burn and Collect when there is nothing for them to move', async () => {
+    await show(lunch({ deadline: NOW - 9000, servedAt: NOW - 7200, price: 0.000001, balance: 0n }), [], { tokens: 0n, eth: 0n })
+    expect(buttons()).toEqual(['↓', 'Buy SAND'])
   })
 
   it('lists other chains with only the buttons that have something to move', async () => {
