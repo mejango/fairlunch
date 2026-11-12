@@ -161,6 +161,7 @@ export function CreateForm() {
         <li>Sell a new token at a fixed price until the deadline. No refunds.</li>
         <li>Then you get your share of the raise and of the tokens.</li>
         <li>The rest becomes permanently locked Uniswap liquidity.</li>
+        <li>Supply is the tokens sold, a matching amount for the pool, and your share. After that it only shrinks.</li>
         <li>Later payments on any chain buy the token on the main chain and burn it.</li>
       </ul>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -179,7 +180,7 @@ export function CreateForm() {
       </div>
       {others.length ? (
         <fieldset className="text-sm">
-          <legend className="font-semibold">🥗 Also collect on</legend>
+          <legend className="font-semibold">🥗 Also accept payments and bridge from</legend>
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
             {others.map(chain => <label key={chain.id} className="flex min-h-[44px] items-center gap-2"><input type="checkbox" name={`also-${chain.id}`} /> {chainName(chain.id)}</label>)}
           </div>
