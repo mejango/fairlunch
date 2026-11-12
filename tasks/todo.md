@@ -246,3 +246,14 @@ Found on the way:
 
 Codex confirmed the swap calldata (recipient, amounts, minimum, deadline), the matching terms and host-first order of a multi-chain create, and that claims use registry pairs and verified proofs.
 
+Second pass, on the fixed tree and the create form. It confirmed the minimum is exact for every amount and found no High.
+
+| Finding | Call | Result |
+|---|---|---|
+| Medium: a Safe's swap expired in 10 minutes and its sale allowance in 30, shorter than co-signing takes | Real | Swaps use the SDK's `swapDeadline(isSafe)`; the allowance lasts 20 minutes past it, and the review states when it ends |
+| Medium: a multi-chain create lost its terms and salt on reload, so the remaining chains could never pair | Real | The attempt is kept in the browser until every chain is made, and restored on return |
+| Medium (contract): a copy could not be created after the deadline, so a chain that failed in time was lost for good | Real | `createFor` requires a future deadline on the host only. Test `test_createFor_copyAfterTheDeadline`. 45 tests pass, 24,501 bytes, 75 margin |
+| Low: Collect could be signed with no fees to collect | Real | Simulated when prepared; an empty collect is refused |
+| Low: the create review's keep reads as ETH received | Real | Says "before the 2.5% fee" |
+| Low: Send home can still race another send while the wallet prompt is open | Open | Needs a zero-balance check inside `sendHome`, which costs bytes the contract barely has. For jango |
+

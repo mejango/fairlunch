@@ -12,6 +12,8 @@ import { readCopies, readHostOf, readLunch, type Lunch } from '@/lib/fair-lunch/
 import { PERCENT_TOTAL, splitOf, TOKENS_PER_ETH } from '@/lib/fair-lunch/split'
 import { claimTx, payTx, quoteSwap, sellApprovalTx, sendHomeTx, swapTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import { useWallet } from '@/hooks/useWallet'
+import { isSafeConnection } from '@/lib/safe-connector'
+import { wagmiConfig } from '@/providers/Providers'
 import Link from 'next/link'
 import { chainName, projectPath } from '@/lib/urn'
 
@@ -88,7 +90,7 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
   })
   const approval = useQuery({
     queryKey: ['fair-lunch', 'sell-approval', ...key, address],
-    queryFn: () => sellApprovalTx(lunch, address!, amount),
+    queryFn: () => sellApprovalTx(lunch, address!, amount, isSafeConnection(wagmiConfig)),
     enabled: selling && amount > 0n && !!address,
   })
   const step = selling ? approval.data?.label : undefined
@@ -115,16 +117,19 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
       <TxAction chainId={lunch.chainId} label={verb} title={verb} doneTitle="Done" onDone={() => { if (!step) setText('') }}
         prepare={async account => {
           if (amount === 0n) throw new Error('Enter an amount.')
-          const approve = selling ? await sellApprovalTx(lunch, account, amount) : null
-          if (approve) {
+          // Read once, as the send does: a Safe's owners sign one after another, so its deadlines are longer.
+          const isSafe = isSafeConnection(wagmiConfig)
+          const found = selling ? await sellApprovalTx(lunch, account, amount, isSafe) : null
+          if (found) {
+            const { expiration, ...approve } = found
             return { request: approve, rows: [
-              { label: 'Does', value: approve.label === 'Approve' ? `Lets Uniswap move your ${lunch.symbol} when you sell` : `Lets this sale take ${format(amount, from)} for 30 minutes` },
+              { label: 'Does', value: expiration ? `Lets this sale take ${format(amount, from)} until ${new Date(expiration * 1000).toLocaleString()}` : `Lets Uniswap move your ${lunch.symbol} when you sell` },
               { label: 'Costs you', value: 'Network fee only' },
             ] }
           }
           const out = await quoteSwap(lunch, amount, selling)
           const minimum = out - (out * SLIPPAGE_BPS) / 10_000n
-          return { request: swapTx(lunch, amount, minimum, account, selling), rows: [
+          return { request: swapTx(lunch, amount, minimum, account, selling, isSafe), rows: [
             { label: 'You pay', value: format(amount, from), strong: true },
             { label: 'You get at least', value: format(minimum, to) },
           ] }
@@ -135,8 +140,8 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
 
 /** The calls anyone can make to move a lunch along, shown only when there's something for them to do. */
 function Upkeep({ lunch, phase }: { lunch: Lunch; phase: Phase }) {
-  const call = (functionName: 'serve' | 'burn' | 'collect', says: string) => async () => ({
-    request: { ...(await upkeepTx(lunch.chainId, lunch.projectId, functionName)), label: says },
+  const call = (functionName: 'serve' | 'burn' | 'collect', says: string) => async (account: `0x${string}`) => ({
+    request: { ...(await upkeepTx(lunch.chainId, lunch.projectId, functionName, account)), label: says },
     rows: [{ label: 'Does', value: says }, { label: 'Costs you', value: 'Network fee only' }],
   })
   const secondary = 'btn-secondary min-h-[44px] w-full px-5'

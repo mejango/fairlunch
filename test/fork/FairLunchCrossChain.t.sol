@@ -175,6 +175,27 @@ contract FairLunchCrossChain is Test {
         lunch.createFor{value: fee}(bridgeless);
     }
 
+    /// @notice A copy that couldn't be made in time can still be made after the deadline, with the host's terms, and
+    /// pairs with the host. The host itself can't be made late.
+    function test_createFor_copyAfterTheDeadline() public {
+        uint256 fee = PROJECTS.creationFee();
+        vm.selectFork(baseFork);
+        FairLunchConfig memory hostConfig = _config(false);
+        address hostSucker = REGISTRY.suckersOf(lunch.createFor{value: fee}(hostConfig))[0];
+
+        vm.selectFork(optimismFork);
+        vm.warp(uint256(hostConfig.deadline) + 1 days);
+        FairLunchConfig memory copyConfig = _config(true);
+        copyConfig.deadline = hostConfig.deadline;
+        assertEq(REGISTRY.suckersOf(lunch.createFor{value: fee}(copyConfig))[0], hostSucker, "pairs with the host");
+
+        vm.selectFork(baseFork);
+        vm.warp(uint256(hostConfig.deadline) + 1 days);
+        hostConfig.salt = bytes32(uint256(hostConfig.salt) + 1);
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(hostConfig);
+    }
+
     /// @notice A chosen peer could be any project's sucker, minting this lunch's token from nothing.
     function test_createFor_revertsWithAChosenPeer() public {
         vm.selectFork(baseFork);

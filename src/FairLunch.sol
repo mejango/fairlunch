@@ -411,15 +411,17 @@ contract FairLunch is
     /// @param config The lunch's configuration.
     /// @return projectId The ID of the lunch's project on this chain.
     function createFor(FairLunchConfig calldata config) external payable override returns (uint256 projectId) {
+        bool isHost = config.hostChainId == block.chainid;
+
+        // Only the host sells tokens, so only the host needs time left to sell them. A copy on another chain can be
+        // made after the deadline: its terms, deadline included, must match the host's to pair with it.
         if (
-            config.creator == address(0) || config.hostChainId == 0 || config.deadline <= block.timestamp
+            config.creator == address(0) || config.hostChainId == 0 || (isHost && config.deadline <= block.timestamp)
                 || config.keepPercent > MAX_CREATOR_PERCENT || config.tokenPercent > MAX_CREATOR_PERCENT
         ) revert FairLunch_InvalidConfig();
 
         // A lunch needs this chain's Uniswap addresses.
         if (address(POSITION_MANAGER) == address(0)) revert FairLunch_NotConfigured();
-
-        bool isHost = config.hostChainId == block.chainid;
 
         // Scope the salt to the caller so nobody else can take a lunch's addresses on another chain, and to the
         // lunch's terms so only copies with the very same terms are bridged to each other. A copy with another host,

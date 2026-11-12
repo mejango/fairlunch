@@ -1,4 +1,5 @@
 import { jbDirectoryAbi, jbMultiTerminalAbi, jbProjectsAbi, jbTerminalStoreAbi, MappableAsset, NATIVE_TOKEN, parseSuckerDeployerConfig, type JBChainId } from '@bananapus/nana-sdk-core'
+import { swapDeadline } from '@bananapus/nana-sdk-core/safe-service'
 import { buildPermit2ApproveTx, buildUniswapV4ExactInputSwapTx, quoteUniswapV4ExactInputSingle, UNISWAP_PERMIT2_ADDRESS, UNISWAP_V4_UNIVERSAL_ROUTER_ADDRESSES } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { buildBridgeClaimTx, CCIP_SUCKER_TRANSPORT_VALUES, findSuckerTransportValue, type JBClaim } from '@bananapus/nana-sdk-core/v6'
 import { erc20Abi, maxUint256, pad, parseAbi, zeroHash, type Abi, type Address, type Hex } from 'viem'
@@ -61,10 +62,15 @@ export async function payTx(lunch: Pick<Lunch, 'chainId' | 'projectId'>, amount:
     args: [BigInt(lunch.projectId), NATIVE_TOKEN, amount, payer, amount * TOKENS_PER_ETH, '', '0x'], value: amount, label: 'Pay' }
 }
 
-/** One of the calls anyone can make for a lunch on its host chain. */
-export async function upkeepTx(chainId: number, projectId: number, functionName: 'serve' | 'burn' | 'collect'): Promise<TxRequest> {
+/** One of the calls anyone can make for a lunch on its host chain. A collect with no fees to collect is refused. */
+export async function upkeepTx(chainId: number, projectId: number, functionName: 'serve' | 'burn' | 'collect', account: Address): Promise<TxRequest> {
   const { lunch } = await wiringOn(chainId)
-  return { chainId, address: lunch, abi: fairLunchAbi as Abi, functionName, args: [BigInt(projectId)] }
+  const call = { address: lunch, abi: fairLunchAbi, functionName, args: [BigInt(projectId)] } as const
+  if (functionName === 'collect') {
+    const { result } = await jbCenterPublicClient(chainId).simulateContract({ ...call, functionName, account })
+    if (result[0] === 0n && result[1] === 0n) throw new Error('No pool fees to collect yet.')
+  }
+  return { chainId, ...call, abi: fairLunchAbi as Abi }
 }
 
 /**
@@ -94,21 +100,22 @@ export function quoteSwap(lunch: Pick<Lunch, 'chainId' | 'poolKey'>, amountIn: b
   return quoteUniswapV4ExactInputSingle(jbCenterPublicClient(lunch.chainId), { chainId: lunch.chainId as JBChainId, poolKey: lunch.poolKey, zeroForOne: !selling, amountIn })
 }
 
-/** A swap with the pool through Uniswap's router, refusing less than `minimumOut`. */
-export function swapTx(lunch: Pick<Lunch, 'chainId' | 'poolKey'>, amountIn: bigint, minimumOut: bigint, recipient: Address, selling: boolean): TxRequest {
-  const tx = buildUniswapV4ExactInputSwapTx({ chainId: lunch.chainId as JBChainId, poolKey: lunch.poolKey, zeroForOne: !selling, amountIn, minimumAmountOut: minimumOut, recipient, deadline: BigInt(Math.floor(Date.now() / 1000) + 600) })
+/** A swap with the pool through Uniswap's router, refusing less than `minimumOut`. A Safe gets the SDK's longer
+ * deadline, since its owners sign one after another. */
+export function swapTx(lunch: Pick<Lunch, 'chainId' | 'poolKey'>, amountIn: bigint, minimumOut: bigint, recipient: Address, selling: boolean, isSafe: boolean): TxRequest {
+  const tx = buildUniswapV4ExactInputSwapTx({ chainId: lunch.chainId as JBChainId, poolKey: lunch.poolKey, zeroForOne: !selling, amountIn, minimumAmountOut: minimumOut, recipient, deadline: swapDeadline(isSafe) })
   return { ...tx, abi: tx.abi as Abi, label: selling ? 'Sell' : 'Buy' }
 }
 
 const permit2Abi = parseAbi(['function allowance(address owner, address token, address spender) view returns (uint160 amount, uint48 expiration, uint48 nonce)'])
-/** How long the router may pull a sale's tokens: long enough to press Sell, no longer. */
-const SALE_ALLOWANCE_SECONDS = 1800
+/** How long past a sale's own deadline the router may pull its tokens: the time to press Sell after allowing it. */
+const SALE_ALLOWANCE_SECONDS = 1200
 
 /**
  * The approval a sale of `amount` still needs from `owner`, or null when it can go. Uniswap pulls tokens through
  * Permit2: the token approves Permit2 once, then Permit2 lets the router take this sale's amount for a short while.
  */
-export async function sellApprovalTx(lunch: Pick<Lunch, 'chainId' | 'token'>, owner: Address, amount: bigint): Promise<TxRequest | null> {
+export async function sellApprovalTx(lunch: Pick<Lunch, 'chainId' | 'token'>, owner: Address, amount: bigint, isSafe: boolean): Promise<(TxRequest & { expiration?: number }) | null> {
   const chainId = lunch.chainId as JBChainId
   const client = jbCenterPublicClient(chainId)
   const router = UNISWAP_V4_UNIVERSAL_ROUTER_ADDRESSES[chainId]
@@ -122,6 +129,7 @@ export async function sellApprovalTx(lunch: Pick<Lunch, 'chainId' | 'token'>, ow
   }
   const now = Math.floor(Date.now() / 1000)
   if (allowed >= amount && expiration > now + 60) return null
-  const tx = buildPermit2ApproveTx({ chainId, token: lunch.token, amount, expiration: now + SALE_ALLOWANCE_SECONDS })
-  return { ...tx, abi: tx.abi as Abi, label: 'Allow' }
+  const until = Number(swapDeadline(isSafe)) + SALE_ALLOWANCE_SECONDS
+  const tx = buildPermit2ApproveTx({ chainId, token: lunch.token, amount, expiration: until })
+  return { ...tx, abi: tx.abi as Abi, label: 'Allow', expiration: until }
 }

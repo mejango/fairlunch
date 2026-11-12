@@ -2,7 +2,7 @@
 
 import { JBCenterClient } from '@bananapus/nana-sdk-core/jbcenter'
 import { useRouter } from 'next/navigation'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { parseEther, parseEventLogs, toHex, type Hex } from 'viem'
 import { TxAction } from '@/components/TxAction'
 import { TxError } from '@/components/ui/TxError'
@@ -40,6 +40,19 @@ export function CreateForm() {
   const [hostId, setHostId] = useState<number>(CHAINS[0]?.id ?? 0)
   const [made, setMade] = useState<Record<number, Hex | null>>({})
   const [hostPath, setHostPath] = useState<string | null>(null)
+
+  // Pick an unfinished create back up, and keep it as it moves.
+  const [restored, setRestored] = useState(false)
+  useEffect(() => {
+    const attempt = loadAttempt()
+    if (attempt) { setTerms(attempt.terms); setMade(attempt.made); setHostPath(attempt.hostPath) }
+    setRestored(true)
+  }, [])
+  useEffect(() => {
+    if (!restored) return
+    const finished = terms && [terms.hostChainId, ...terms.otherChainIds].every(chainId => chainId in made)
+    saveAttempt(terms && !finished ? { terms, made, hostPath } : null)
+  }, [restored, terms, made, hostPath])
 
   if (!CHAINS.length) return <p className="card p-6">🧑‍🍳 Fair Lunch isn&apos;t live yet.</p>
   const others = CHAINS.filter(chain => chain.id !== hostId && environmentForChainIds([chain.id]) === environmentForChainIds([hostId]))
@@ -94,7 +107,7 @@ export function CreateForm() {
                     return { request: await createTx(terms, chainId), rows: [
                       { label: 'Token', value: `${terms.name} (${terms.symbol})` },
                       { label: 'Raise ends', value: new Date(terms.deadline * 1000).toLocaleString() },
-                      { label: 'You keep', value: `${terms.keepPercent}% of the raise, up to ${text18(terms.keepCapWei)} ETH` },
+                      { label: 'You keep', value: `${terms.keepPercent}% of the raise, up to ${text18(terms.keepCapWei)} ETH, before the 2.5% fee` },
                       { label: 'Your tokens', value: `${terms.tokenPercent}% over ${terms.vestingSeconds / WEEK} weeks` },
                       { label: 'Can change later', value: 'Nothing', strong: true },
                     ] }
@@ -114,7 +127,7 @@ export function CreateForm() {
         {terms.hostChainId in made ? (
           <button type="button" className="btn-secondary min-h-[44px] w-full px-5" onClick={() => router.push(hostPath ?? '/')}>🥪 See your lunch</button>
         ) : (
-          <button type="button" className="btn-link" onClick={() => setTerms(null)}>Back</button>
+          <button type="button" className="btn-link" onClick={() => { setTerms(null); setMade({}) }}>Back</button>
         )}
       </section>
     )
@@ -162,3 +175,20 @@ export function CreateForm() {
 }
 
 const text18 = (wei: bigint) => (Number(wei) / 1e18).toString()
+
+/** A create in progress, kept in this browser: a lunch's chains only pair if every one gets these exact terms, so a
+ * reload between chains must not make new ones. */
+const ATTEMPT_KEY = 'fair-lunch:create:v1'
+type Attempt = { terms: LunchTerms; made: Record<number, Hex | null>; hostPath: string | null }
+function saveAttempt(attempt: Attempt | null) {
+  try {
+    if (!attempt) return localStorage.removeItem(ATTEMPT_KEY)
+    localStorage.setItem(ATTEMPT_KEY, JSON.stringify(attempt, (_, value) => (typeof value === 'bigint' ? value.toString() : value)))
+  } catch { /* private window: the create still works in this tab */ }
+}
+function loadAttempt(): Attempt | null {
+  try {
+    const attempt = JSON.parse(localStorage.getItem(ATTEMPT_KEY) ?? 'null') as Attempt | null
+    return attempt ? { ...attempt, terms: { ...attempt.terms, keepCapWei: BigInt(attempt.terms.keepCapWei) } } : null
+  } catch { return null }
+}
