@@ -1,16 +1,16 @@
-import type { Abi } from 'viem'
+import { buildBuybackCashOutMetadata, buildBuybackPayMetadata } from '@bananapus/nana-sdk-core/v6'
 import { describe, expect, it, vi } from 'vitest'
 import { assetUrl } from '@/lib/format'
 import { tokenAddressOf } from '@/lib/fair-lunch/reads'
-import { payTx, swapTx } from '@/lib/fair-lunch/writes'
+import { payTx, tradeTx } from '@/lib/fair-lunch/writes'
 
 vi.mock('@/lib/fair-lunch/reads', async original => ({
   ...(await original<typeof import('@/lib/fair-lunch/reads')>()),
-  wiringOn: async () => ({ terminal: '0x00000000000000000000000000000000000000aa' }),
+  wiringOn: async () => ({ terminal: '0x00000000000000000000000000000000000000aa', buyback: '0x00000000000000000000000000000000000000bb' }),
 }))
 
 const ETH = 10n ** 18n
-const poolKey = { currency0: '0x0000000000000000000000000000000000000000', currency1: '0x0000000000000000000000000000000000000003', fee: 10000, tickSpacing: 200, hooks: '0x0000000000000000000000000000000000000004' } as const
+const registry = '0x00000000000000000000000000000000000000bb'
 
 describe('payTx', () => {
   // A payment still waiting when the lunch is served would mint nothing: the minimum makes it revert instead.
@@ -21,20 +21,18 @@ describe('payTx', () => {
   })
 })
 
-describe('swapTx', () => {
-  const deadlineOf = (tx: { abi: Abi; args: readonly unknown[] }) => tx.args[2] as bigint
-  it('never promises a sale longer than its allowance lasts', () => {
-    const soon = Math.floor(Date.now() / 1000) + 300
-    const sale = swapTx({ chainId: 8453, poolKey }, ETH, 1n, '0x0000000000000000000000000000000000000001', true, true, soon)
-    expect(sale.deadline).toBe(soon)
-    expect(deadlineOf(sale)).toBe(BigInt(soon))
+describe('tradeTx', () => {
+  const me = '0x0000000000000000000000000000000000000001'
+  // The terminal's own minimum counts only what it mints, which is nothing once served: the hook's minimum is the one.
+  it('buys by paying the project, with the minimum in the buyback metadata', async () => {
+    const tx = await tradeTx({ chainId: 8453, projectId: 7 }, ETH, 990_000n * ETH, me, false)
+    expect([tx.functionName, tx.value, tx.args[4]]).toEqual(['pay', ETH, 0n])
+    expect(tx.args[6]).toBe(buildBuybackPayMetadata({ hook: registry, amountToSwapWith: 0n, minimumSwapAmountOut: 990_000n * ETH, skipSplits: true }))
   })
-  it("gives a Safe's owners days and a wallet minutes", () => {
-    const now = Math.floor(Date.now() / 1000)
-    const wallet = swapTx({ chainId: 8453, poolKey }, ETH, 1n, '0x0000000000000000000000000000000000000001', false, false)
-    const safe = swapTx({ chainId: 8453, poolKey }, ETH, 1n, '0x0000000000000000000000000000000000000001', false, true)
-    expect(wallet.deadline - now).toBeLessThanOrEqual(3600)
-    expect(safe.deadline - now).toBeGreaterThan(86_400)
+  it('sells by cashing out to the seller, with the minimum in the buyback metadata', async () => {
+    const tx = await tradeTx({ chainId: 8453, projectId: 7 }, 1000n * ETH, ETH / 1000n, me, true)
+    expect([tx.functionName, tx.value, tx.args[0], tx.args[2], tx.args[5]]).toEqual(['cashOutTokensOf', undefined, me, 1000n * ETH, me])
+    expect(tx.args[6]).toBe(buildBuybackCashOutMetadata({ hook: registry, minimumSwapAmountOut: ETH / 1000n }))
   })
 })
 

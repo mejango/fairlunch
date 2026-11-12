@@ -48,7 +48,7 @@ const oracleAbi = [
 const priceAt = (tick: number) => uniswapV4PriceAtTick(tick, true, 18)
 
 /** The Juicebox contracts a chain's Fair Lunch was deployed with. They never change. */
-const wiring = new Map<number, Promise<{ lunch: Address; terminal: Address; store: Address; tokens: Address; controller: Address }>>()
+const wiring = new Map<number, Promise<{ lunch: Address; terminal: Address; store: Address; tokens: Address; controller: Address; buyback: Address }>>()
 export function wiringOn(chainId: number) {
   const known = wiring.get(chainId)
   if (known) return known
@@ -57,10 +57,10 @@ export function wiringOn(chainId: number) {
   const client = jbCenterPublicClient(chainId)
   const lunch = deployment.address
   const read = (async () => {
-    const [terminal, tokens, controller] = await Promise.all((['TERMINAL', 'TOKENS', 'CONTROLLER'] as const).map(functionName =>
+    const [terminal, tokens, controller, buyback] = await Promise.all((['TERMINAL', 'TOKENS', 'CONTROLLER', 'BUYBACK_REGISTRY'] as const).map(functionName =>
       client.readContract({ address: lunch, abi: fairLunchAbi, functionName })))
     const store = await client.readContract({ address: terminal, abi: jbMultiTerminalAbi, functionName: 'STORE' })
-    return { lunch, terminal, store, tokens, controller }
+    return { lunch, terminal, store, tokens, controller, buyback }
   })()
   wiring.set(chainId, read)
   read.catch(() => wiring.delete(chainId))

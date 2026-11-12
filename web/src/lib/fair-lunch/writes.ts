@@ -1,8 +1,7 @@
 import { jbDirectoryAbi, jbMultiTerminalAbi, jbProjectsAbi, jbTerminalStoreAbi, MappableAsset, NATIVE_TOKEN, parseSuckerDeployerConfig, type JBChainId } from '@bananapus/nana-sdk-core'
-import { swapDeadline } from '@bananapus/nana-sdk-core/safe-service'
-import { buildPermit2ApproveTx, buildUniswapV4ExactInputSwapTx, quoteUniswapV4ExactInputSingle, UNISWAP_PERMIT2_ADDRESS, UNISWAP_V4_UNIVERSAL_ROUTER_ADDRESSES } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
-import { buildBridgeClaimTx, CCIP_SUCKER_TRANSPORT_VALUES, findSuckerTransportValue, type JBClaim } from '@bananapus/nana-sdk-core/v6'
-import { erc20Abi, maxUint256, pad, parseAbi, zeroHash, type Abi, type Address, type Hex } from 'viem'
+import { quoteUniswapV4ExactInputSingle } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
+import { buildBridgeClaimTx, buildBuybackCashOutMetadata, buildBuybackPayMetadata, CCIP_SUCKER_TRANSPORT_VALUES, findSuckerTransportValue, type JBClaim } from '@bananapus/nana-sdk-core/v6'
+import { pad, zeroHash, type Abi, type Address, type Hex } from 'viem'
 import type { TxRequest } from '@/hooks/useSafeTx'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
@@ -61,7 +60,7 @@ export async function createTx(terms: LunchTerms, chainId: number): Promise<TxRe
 
 /**
  * A payment into a cooking lunch, for tokens at the fixed price. It refuses to land for fewer: a payment still
- * waiting when the lunch is served would otherwise go to a buyback and mint nothing.
+ * waiting when the lunch is served would otherwise mint nothing.
  */
 export async function payTx(lunch: Pick<Lunch, 'chainId' | 'projectId'>, amount: bigint, payer: Address): Promise<TxRequest> {
   const { terminal } = await wiringOn(lunch.chainId)
@@ -70,7 +69,7 @@ export async function payTx(lunch: Pick<Lunch, 'chainId' | 'projectId'>, amount:
 }
 
 /** One of the calls anyone can make for a lunch on its host chain. One that would do nothing is refused: a collect
- * with no fees, or a burn the price limit stops before it buys anything. */
+ * with no fees, or a burn the pool's price is too far off its average to buy with. */
 export async function upkeepTx(chainId: number, projectId: number, functionName: 'serve' | 'burn' | 'collect', account: Address): Promise<TxRequest> {
   const { lunch } = await wiringOn(chainId)
   const call = { address: lunch, abi: fairLunchAbi, functionName, args: [BigInt(projectId)] } as const
@@ -80,7 +79,7 @@ export async function upkeepTx(chainId: number, projectId: number, functionName:
   }
   if (functionName === 'burn') {
     const { result } = await jbCenterPublicClient(chainId).simulateContract({ ...call, functionName, account })
-    if (result[0] === 0n && result[1] === 0n) throw new Error("The price is at its limit for now. Try again in a few minutes.")
+    if (result[0] === 0n && result[1] === 0n) throw new Error("The pool's price is off its average for now. Try again in a few minutes.")
   }
   return { chainId, ...call, abi: fairLunchAbi as Abi }
 }
@@ -112,41 +111,20 @@ export function quoteSwap(lunch: Pick<Lunch, 'chainId' | 'poolKey'>, amountIn: b
   return quoteUniswapV4ExactInputSingle(jbCenterPublicClient(lunch.chainId), { chainId: lunch.chainId as JBChainId, poolKey: lunch.poolKey, zeroForOne: !selling, amountIn })
 }
 
-/** A swap with the pool through Uniswap's router, refusing less than `minimumOut`. A Safe gets the SDK's longer
- * deadline, since its owners sign one after another. A sale can't run after its allowance ends (`until`), so its
- * deadline never promises longer. */
-export function swapTx(lunch: Pick<Lunch, 'chainId' | 'poolKey'>, amountIn: bigint, minimumOut: bigint, recipient: Address, selling: boolean, isSafe: boolean, until?: number): TxRequest & { deadline: number } {
-  const deadline = Math.min(Number(swapDeadline(isSafe)), until ?? Infinity)
-  const tx = buildUniswapV4ExactInputSwapTx({ chainId: lunch.chainId as JBChainId, poolKey: lunch.poolKey, zeroForOne: !selling, amountIn, minimumAmountOut: minimumOut, recipient, deadline: BigInt(deadline) })
-  return { ...tx, abi: tx.abi as Abi, label: selling ? 'Sell' : 'Buy', deadline }
-}
-
-const permit2Abi = parseAbi(['function allowance(address owner, address token, address spender) view returns (uint160 amount, uint48 expiration, uint48 nonce)'])
-/** How long past a sale's own deadline the router may pull its tokens: the time to press Sell after allowing it. */
-const SALE_ALLOWANCE_SECONDS = 1200
-/** The least time an allowance must have left for a sale to use it. A Safe's owners need a day to sign. */
-const saleNeedsSeconds = (isSafe: boolean) => (isSafe ? 86_400 : 60)
-
 /**
- * The approval a sale of `amount` still needs from `owner` (`step`), or when the allowance it can go on ends
- * (`until`). Uniswap pulls tokens through Permit2: the token approves Permit2 once, then Permit2 lets the router take
- * this sale's amount for a while.
+ * A trade with a served lunch's pool, through its project: paying buys for the payer, cashing out sells. The Juicebox
+ * buyback hook does the swap and refuses less than `minimumOut`. Selling needs no approval, since the terminal burns
+ * the seller's own tokens.
  */
-export async function sellApprovalTx(lunch: Pick<Lunch, 'chainId' | 'token'>, owner: Address, amount: bigint, isSafe: boolean): Promise<{ step: TxRequest & { expiration?: number } } | { step: null; until: number }> {
-  const chainId = lunch.chainId as JBChainId
-  const client = jbCenterPublicClient(chainId)
-  const router = UNISWAP_V4_UNIVERSAL_ROUTER_ADDRESSES[chainId]
-  if (!router) throw new Error('Swaps are not on this chain.')
-  const [approved, [allowed, expiration]] = await Promise.all([
-    client.readContract({ address: lunch.token, abi: erc20Abi, functionName: 'allowance', args: [owner, UNISWAP_PERMIT2_ADDRESS] }),
-    client.readContract({ address: UNISWAP_PERMIT2_ADDRESS, abi: permit2Abi, functionName: 'allowance', args: [owner, lunch.token, router] }),
-  ])
-  if (approved < amount) {
-    return { step: { chainId, address: lunch.token, abi: erc20Abi as Abi, functionName: 'approve', args: [UNISWAP_PERMIT2_ADDRESS, maxUint256], label: 'Approve' } }
+export async function tradeTx(lunch: Pick<Lunch, 'chainId' | 'projectId'>, amount: bigint, minimumOut: bigint, account: Address, selling: boolean): Promise<TxRequest> {
+  const { terminal, buyback } = await wiringOn(lunch.chainId)
+  const id = BigInt(lunch.projectId)
+  const call = { chainId: lunch.chainId, address: terminal, abi: jbMultiTerminalAbi as Abi }
+  if (selling) {
+    const metadata = buildBuybackCashOutMetadata({ hook: buyback, minimumSwapAmountOut: minimumOut })
+    return { ...call, functionName: 'cashOutTokensOf', args: [account, id, amount, NATIVE_TOKEN, 0n, account, metadata], label: 'Sell' }
   }
-  const now = Math.floor(Date.now() / 1000)
-  if (allowed >= amount && expiration > now + saleNeedsSeconds(isSafe)) return { step: null, until: expiration }
-  const until = Number(swapDeadline(isSafe)) + SALE_ALLOWANCE_SECONDS
-  const tx = buildPermit2ApproveTx({ chainId, token: lunch.token, amount, expiration: until })
-  return { step: { ...tx, abi: tx.abi as Abi, label: 'Allow', expiration: until } }
+  // The buyback hook delivers the tokens, so the terminal's own minimum stays zero and the hook's holds.
+  const metadata = buildBuybackPayMetadata({ hook: buyback, amountToSwapWith: 0n, minimumSwapAmountOut: minimumOut, skipSplits: true })
+  return { ...call, functionName: 'pay', args: [id, NATIVE_TOKEN, amount, account, 0n, '', metadata], value: amount, label: 'Buy' }
 }

@@ -10,10 +10,7 @@ import { assetUrl, formatEth, formatPrice, formatTokens } from '@/lib/format'
 import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib/fair-lunch/phase'
 import { readCopies, readHostOf, readLunch, type Lunch } from '@/lib/fair-lunch/reads'
 import { PERCENT_TOTAL, splitOf, TOKENS_PER_ETH } from '@/lib/fair-lunch/split'
-import { claimTx, payTx, quoteSwap, sellApprovalTx, sendHomeTx, swapTx, upkeepTx } from '@/lib/fair-lunch/writes'
-import { useWallet } from '@/hooks/useWallet'
-import { isSafeConnection } from '@/lib/safe-connector'
-import { wagmiConfig } from '@/providers/Providers'
+import { claimTx, payTx, quoteSwap, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
 import { chainName, projectPath } from '@/lib/urn'
 
@@ -73,28 +70,20 @@ function PayCard({ lunch }: { lunch: Lunch }) {
   )
 }
 
-/** Once served: buy from the pool, or sell back to it. A sale's approvals come first, one press each. */
+/** Once served: buy from the pool, or sell back to it, through the lunch's project. */
 function SwapCard({ lunch }: { lunch: Lunch }) {
-  const { address } = useWallet()
   const [selling, setSelling] = useState(false)
   const [text, setText] = useState('')
   const amount = amountOf(text)
   const [from, to] = selling ? [lunch.symbol, 'ETH'] : ['ETH', lunch.symbol]
   const format = (wei: bigint, unit: string) => `${unit === 'ETH' ? formatEth(wei) : formatTokens(wei)} ${unit}`
-  const key = [lunch.chainId, lunch.projectId, selling, amount.toString()]
   const quote = useQuery({
-    queryKey: ['fair-lunch', 'quote', ...key],
+    queryKey: ['fair-lunch', 'quote', lunch.chainId, lunch.projectId, selling, amount.toString()],
     queryFn: () => quoteSwap(lunch, amount, selling),
     enabled: amount > 0n,
     refetchInterval: 15_000,
   })
-  const approval = useQuery({
-    queryKey: ['fair-lunch', 'sell-approval', ...key, address],
-    queryFn: () => sellApprovalTx(lunch, address!, amount, isSafeConnection(wagmiConfig)),
-    enabled: selling && amount > 0n && !!address,
-  })
-  const step = selling ? approval.data?.step?.label : undefined
-  const verb = step === 'Approve' ? `Approve ${lunch.symbol}` : step === 'Allow' ? 'Allow this sale' : `${selling ? 'Sell' : 'Buy'} ${lunch.symbol}`
+  const verb = `${selling ? 'Sell' : 'Buy'} ${lunch.symbol}`
   return (
     <section className="card space-y-3 p-4">
       <div className="flex items-center justify-between">
@@ -111,30 +100,17 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
       <AmountInput label={from} value={text} onChange={setText} />
       <p className="text-sm text-muted">
         {amount === 0n ? (selling ? `Sell ${lunch.symbol} to the pool.` : `Buy ${lunch.symbol} from the pool.`)
-          : quote.data !== undefined ? `You get about ${format(quote.data, to)}.${step ? ' Approve first.' : ''}`
+          : quote.data !== undefined ? `You get about ${format(quote.data, to)}.`
           : quote.isError ? 'No quote right now.' : 'Getting a quote…'}
       </p>
-      <TxAction chainId={lunch.chainId} label={verb} title={verb} doneTitle="Done" onDone={() => { if (!step) setText('') }}
+      <TxAction chainId={lunch.chainId} label={verb} title={verb} doneTitle="Done" onDone={() => setText('')}
         prepare={async account => {
           if (amount === 0n) throw new Error('Enter an amount.')
-          // Read once, as the send does: a Safe's owners sign one after another, so its deadlines are longer.
-          const isSafe = isSafeConnection(wagmiConfig)
-          const sale = selling ? await sellApprovalTx(lunch, account, amount, isSafe) : null
-          if (sale?.step) {
-            const { expiration, ...approve } = sale.step
-            return { request: approve, rows: [
-              { label: 'Does', value: expiration ? `Lets this sale take ${format(amount, from)} until ${new Date(expiration * 1000).toLocaleString()}` : `Lets Uniswap move your ${lunch.symbol} when you sell` },
-              { label: 'Costs you', value: 'Network fee only' },
-            ] }
-          }
           const out = await quoteSwap(lunch, amount, selling)
           const minimum = out - (out * SLIPPAGE_BPS) / 10_000n
-          const { deadline, ...request } = swapTx(lunch, amount, minimum, account, selling, isSafe, sale?.until)
-          return { request, rows: [
+          return { request: await tradeTx(lunch, amount, minimum, account, selling), rows: [
             { label: 'You pay', value: format(amount, from), strong: true },
             { label: 'You get at least', value: format(minimum, to) },
-            // A Safe's owners sign over days: say when the swap stops being good.
-            ...(isSafe ? [{ label: 'Must run by', value: new Date(deadline * 1000).toLocaleString() }] : []),
           ] }
         }} />
     </section>

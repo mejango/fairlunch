@@ -29,7 +29,7 @@ After a deployment, add each chain's address to `src/lib/fair-lunch/deployments.
 
 ## Against a local fork
 
-`../script/Rehearse.s.sol` deploys Fair Lunch and two lunches to an anvil fork of Base. Point the site at it with `NEXT_PUBLIC_FAIR_LUNCH_ADDRESS` and a `NEXT_PUBLIC_JBCENTER_URL` that serves the fork's RPC. `scripts/shots.mjs` screenshots pages at desktop and phone widths, and `scripts/sell-check.mjs` sells on the fork with the same swap builders the site uses. Bendystraw doesn't index a fork, so the list and burn marks stay empty there.
+`../script/Rehearse.s.sol` deploys Fair Lunch and two lunches to an anvil fork of Base. Point the site at it with `NEXT_PUBLIC_FAIR_LUNCH_ADDRESS` and a `NEXT_PUBLIC_JBCENTER_URL` that serves the fork's RPC. `scripts/shots.mjs` screenshots pages at desktop and phone widths. Bendystraw doesn't index a fork, so the list and burn marks stay empty there.
 
 For a lunch with a copy on another chain, fork that chain too, run `Rehearse.deployOnly()` on it from the same sender (Fair Lunch lands at the same address), and serve each chain's RPC at `<NEXT_PUBLIC_JBCENTER_URL>/v1/rpc/<chainId>`. `scripts/copy-check.mjs` then makes a two-chain lunch, pays its copy and sends that home. A fork can't deliver the bridge's message, so bringing the ETH in on the host is not covered.
 

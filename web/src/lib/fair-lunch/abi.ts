@@ -9,6 +9,11 @@ export const fairLunchAbi = [
         "internalType": "contract IJBOmnichainDeployer"
       },
       {
+        "name": "buybackRegistry",
+        "type": "address",
+        "internalType": "contract IJBBuybackHookRegistry"
+      },
+      {
         "name": "terminal",
         "type": "address",
         "internalType": "contract IJBMultiTerminal"
@@ -42,6 +47,19 @@ export const fairLunchAbi = [
   },
   {
     "type": "function",
+    "name": "BUYBACK_REGISTRY",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IJBBuybackHookRegistry"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "CONTROLLER",
     "inputs": [],
     "outputs": [
@@ -49,6 +67,19 @@ export const fairLunchAbi = [
         "name": "",
         "type": "address",
         "internalType": "contract IJBController"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "DATA_HOOK",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract FairLunchDataHook"
       }
     ],
     "stateMutability": "view"
@@ -224,19 +255,6 @@ export const fairLunchAbi = [
   },
   {
     "type": "function",
-    "name": "TWAP_MAX_DEVIATION",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "int24",
-        "internalType": "int24"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "TWAP_WINDOW",
     "inputs": [],
     "outputs": [
@@ -257,370 +275,6 @@ export const fairLunchAbi = [
         "name": "",
         "type": "address",
         "internalType": "contract FairLunchVestingDeployer"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "afterPayRecordedWith",
-    "inputs": [
-      {
-        "name": "context",
-        "type": "tuple",
-        "internalType": "struct JBAfterPayRecordedContext",
-        "components": [
-          {
-            "name": "payer",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "projectId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "rulesetId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "amount",
-            "type": "tuple",
-            "internalType": "struct JBTokenAmount",
-            "components": [
-              {
-                "name": "token",
-                "type": "address",
-                "internalType": "address"
-              },
-              {
-                "name": "decimals",
-                "type": "uint8",
-                "internalType": "uint8"
-              },
-              {
-                "name": "currency",
-                "type": "uint32",
-                "internalType": "uint32"
-              },
-              {
-                "name": "value",
-                "type": "uint256",
-                "internalType": "uint256"
-              }
-            ]
-          },
-          {
-            "name": "forwardedAmount",
-            "type": "tuple",
-            "internalType": "struct JBTokenAmount",
-            "components": [
-              {
-                "name": "token",
-                "type": "address",
-                "internalType": "address"
-              },
-              {
-                "name": "decimals",
-                "type": "uint8",
-                "internalType": "uint8"
-              },
-              {
-                "name": "currency",
-                "type": "uint32",
-                "internalType": "uint32"
-              },
-              {
-                "name": "value",
-                "type": "uint256",
-                "internalType": "uint256"
-              }
-            ]
-          },
-          {
-            "name": "weight",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "newlyIssuedTokenCount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "beneficiary",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "hookMetadata",
-            "type": "bytes",
-            "internalType": "bytes"
-          },
-          {
-            "name": "payerMetadata",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "beforeCashOutRecordedWith",
-    "inputs": [
-      {
-        "name": "context",
-        "type": "tuple",
-        "internalType": "struct JBBeforeCashOutRecordedContext",
-        "components": [
-          {
-            "name": "terminal",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "holder",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "projectId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "rulesetId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "cashOutCount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "totalSupply",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "surplus",
-            "type": "tuple",
-            "internalType": "struct JBTokenAmount",
-            "components": [
-              {
-                "name": "token",
-                "type": "address",
-                "internalType": "address"
-              },
-              {
-                "name": "decimals",
-                "type": "uint8",
-                "internalType": "uint8"
-              },
-              {
-                "name": "currency",
-                "type": "uint32",
-                "internalType": "uint32"
-              },
-              {
-                "name": "value",
-                "type": "uint256",
-                "internalType": "uint256"
-              }
-            ]
-          },
-          {
-            "name": "scopeCashOutsToLocalBalances",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "cashOutTaxRate",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "beneficiaryIsFeeless",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "metadata",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "cashOutTaxRate",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "cashOutCount",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "totalSupply",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "effectiveSurplusValue",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "hookSpecifications",
-        "type": "tuple[]",
-        "internalType": "struct JBCashOutHookSpecification[]",
-        "components": [
-          {
-            "name": "hook",
-            "type": "address",
-            "internalType": "contract IJBCashOutHook"
-          },
-          {
-            "name": "noop",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "amount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "metadata",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "beforePayRecordedWith",
-    "inputs": [
-      {
-        "name": "context",
-        "type": "tuple",
-        "internalType": "struct JBBeforePayRecordedContext",
-        "components": [
-          {
-            "name": "terminal",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "payer",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "amount",
-            "type": "tuple",
-            "internalType": "struct JBTokenAmount",
-            "components": [
-              {
-                "name": "token",
-                "type": "address",
-                "internalType": "address"
-              },
-              {
-                "name": "decimals",
-                "type": "uint8",
-                "internalType": "uint8"
-              },
-              {
-                "name": "currency",
-                "type": "uint32",
-                "internalType": "uint32"
-              },
-              {
-                "name": "value",
-                "type": "uint256",
-                "internalType": "uint256"
-              }
-            ]
-          },
-          {
-            "name": "projectId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "rulesetId",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "beneficiary",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
-            "name": "weight",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "reservedPercent",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "metadata",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
-      }
-    ],
-    "outputs": [
-      {
-        "name": "weight",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "hookSpecifications",
-        "type": "tuple[]",
-        "internalType": "struct JBPayHookSpecification[]",
-        "components": [
-          {
-            "name": "hook",
-            "type": "address",
-            "internalType": "contract IJBPayHook"
-          },
-          {
-            "name": "noop",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "amount",
-            "type": "uint256",
-            "internalType": "uint256"
-          },
-          {
-            "name": "metadata",
-            "type": "bytes",
-            "internalType": "bytes"
-          }
-        ]
       }
     ],
     "stateMutability": "view"
@@ -799,82 +453,6 @@ export const fairLunchAbi = [
       }
     ],
     "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "hasMintPermissionFor",
-    "inputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "",
-        "type": "tuple",
-        "internalType": "struct JBRuleset",
-        "components": [
-          {
-            "name": "cycleNumber",
-            "type": "uint48",
-            "internalType": "uint48"
-          },
-          {
-            "name": "id",
-            "type": "uint48",
-            "internalType": "uint48"
-          },
-          {
-            "name": "basedOnId",
-            "type": "uint48",
-            "internalType": "uint48"
-          },
-          {
-            "name": "start",
-            "type": "uint48",
-            "internalType": "uint48"
-          },
-          {
-            "name": "duration",
-            "type": "uint32",
-            "internalType": "uint32"
-          },
-          {
-            "name": "weight",
-            "type": "uint112",
-            "internalType": "uint112"
-          },
-          {
-            "name": "weightCutPercent",
-            "type": "uint32",
-            "internalType": "uint32"
-          },
-          {
-            "name": "approvalHook",
-            "type": "address",
-            "internalType": "contract IJBRulesetApprovalHook"
-          },
-          {
-            "name": "metadata",
-            "type": "uint256",
-            "internalType": "uint256"
-          }
-        ]
-      },
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -1102,25 +680,6 @@ export const fairLunchAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "supportsInterface",
-    "inputs": [
-      {
-        "name": "interfaceId",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -1355,22 +914,6 @@ export const fairLunchAbi = [
     "inputs": [
       {
         "name": "projectId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "FairLunch_Closed",
-    "inputs": [
-      {
-        "name": "projectId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "deadline",
         "type": "uint256",
         "internalType": "uint256"
       }
