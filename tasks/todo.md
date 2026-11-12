@@ -106,7 +106,7 @@ File: `test/fork/FairLunchSpikes.t.sol`. Each test uses a throwaway harness cont
 - [x] `script/Deploy.s.sol` in the Sticky and Homerun Sphinx shape, constructor arguments from the packages' deployment records; a rehearsal test that runs it on a fork. No proposal is sent.
 - [x] `forge fmt --check`, warnings-denied build, `forge build --sizes` under 24,576 bytes, STYLE_GUIDE pass over every declaration, `README.md`, `RISKS.md` (singleton custody, 7-day bridge, TWAP limit behaviour).
 - [x] Two adversarial Codex passes (`gpt-6.1-sol`, read-only, stdin closed); fix; rerun affected tests. Commit.
-- [ ] Check-in with jango: repo creation and PR.
+- [ ] Check-in with jango: repo creation and PR. On hold, and testnet deployment too, until jango says (2026-11-12).
 
 ## Phase B: website
 
@@ -138,6 +138,7 @@ File: `test/fork/FairLunchSpikes.t.sol`. Each test uses a throwaway harness cont
 ## Phase C: automation
 
 ### Task 16: keeper job
+- Deferred by jango 2026-11-12: anyone can call upkeep from the site, no automation for now.
 - [ ] Read `extensions/keeper/DESIGN.md`; add the smallest job that calls `serve`, `burn`, `collect`, `sendHome` and sucker `claim` when `dueCalls` says so, through its existing Relayr execution. Tests with a mocked chain. Check-in with jango.
 
 ## Spike results
@@ -242,7 +243,7 @@ Found on the way:
 |---|---|---|
 | High: a cooking payment carried no minimum, so one still waiting when the lunch is served would pay into a buyback and mint nothing | Real | `payTx` asks for `amount x 1,000,000` tokens. On the fork: the exact amount passes, one wei more reverts, a served lunch reverts |
 | Low: Send home reviewed a balance up to 60 s old and could pay the bridge to send nothing | Real | The balance is reread when the call is prepared; zero refuses; the review shows the reread amount. A send racing another in the same block is not covered |
-| Low: a sale approves Permit2 for the maximum | Kept | It is Uniswap's own convention, the router's allowance is exact and 30 minutes, and an exact approval adds a press to every sale |
+| Low: a sale approves Permit2 for the maximum | Kept, confirmed by jango 2026-11-12 | It is Uniswap's own convention, the router's allowance is exact and 30 minutes, and an exact approval adds a press to every sale |
 
 Codex confirmed the swap calldata (recipient, amounts, minimum, deadline), the matching terms and host-first order of a multi-chain create, and that claims use registry pairs and verified proofs.
 
@@ -255,7 +256,7 @@ Second pass, on the fixed tree and the create form. It confirmed the minimum is 
 | Medium (contract): a copy could not be created after the deadline, so a chain that failed in time was lost for good | Real | `createFor` requires a future deadline on the host only. Test `test_createFor_copyAfterTheDeadline`. 45 tests pass, 24,501 bytes, 75 margin |
 | Low: Collect could be signed with no fees to collect | Real | Simulated when prepared; an empty collect is refused |
 | Low: the create review's keep reads as ETH received | Real | Says "before the 2.5% fee" |
-| Low: Send home can still race another send while the wallet prompt is open | Open | Needs a zero-balance check inside `sendHome`, which costs bytes the contract barely has. For jango |
+| Low: Send home can still race another send while the wallet prompt is open | Accepted by jango 2026-11-12 | A zero-balance check inside `sendHome` is reasonable but not necessary. Not built |
 
 Codex pass 4, on the late-copy contract change alone: no findings, verdict MERGE for the diff. It notes a copy made with no host behind it is the already documented host-first risk, and that late creation after `serve` through delivery and burn has no test.
 
