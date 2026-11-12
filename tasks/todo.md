@@ -440,3 +440,27 @@ Testnet recheck of the exact limits (`0xb0444b7cb03dc5926a441a6967845cd22f0310cb
 
 Site nits from jango (2026-11-12): action card left and numbers right, a two-sided swap box where either side can be typed with an arrow to switch, buttons as wide as their text, the phase card as wide as its text, "Cooking lunch" and "🥪 Lunch is served", a bar for the fundraise's time gone, "Lunch ingredients" on the create form, small Burn and Collect buttons beside what they'd move (with a new pool fees number), and a link to the pool on Uniswap. The pool's quoter only answers for an exact input, so typing the other side asks it a few times (`quoteSwapFor`).
 
+
+## Router terminal and ERC-20 fundraises (2026-11-12)
+
+jango: "juiceboxes can be set with a router terminal (use the registry) so that people can pay in other tokens and it resolves to the project's desired currency. make sure we support this. also allow lunch fundraises to be in ETH, USDC, or other ERC-20 with the whole system continuing to work as expected, well tested."
+
+Refinement record. Objective: a lunch names one fundraise token (ETH or an ERC-20), every phase works the same in it, and anyone can pay in another token through the router terminal registry. System fit: the registry is a second terminal after `JBMultiTerminal` with no accounting contexts, as `REVDeployer` and `HomerunDeployer` wire it, so the router converts and then pays the project in its own token and the data hook sees a normal payment. Reuse: buyback hook 2.0.1 already sorts the pool's currencies and takes any terminal token, CCIP suckers already carry ERC-20s, core already scales weight by the token's decimals. Evidence: two research reports in this session (router at `origin/main` 1.4.1, registry `0xe0427f250fdb0379c8e98e884ee4570521208cbc` on every chain with the gateway as default, checked on-chain 2026-11-12; a full list of the ETH assumptions in `src` and `web`). Unknowns: whether JBP6 takes a given ERC-20 as a fee, and which CCIP lanes carry a given token. Verification: the lifecycle fork tests run for ETH, USDC (6 decimals) and an 18-decimal ERC-20 on both sides of the token ordering, a routed payment test, two Codex passes, a testnet walk. Budget: contracts first, the site after the ABI settles; replan if `FairLunch` can't get under the size limit with the pool moved out.
+
+Decisions taken, open to jango's correction:
+
+- Price stays 1,000,000 tokens per whole unit of the fundraise token (per ETH, per USDC), whatever its decimals.
+- The pool's work (open, corrective swap, burn's swap, collect, the price bound) moves to its own contract that only `FairLunch` can call and that holds every position. `FairLunch` has 770 bytes spare and token ordering makes every direction two-sided.
+- An ERC-20 lunch with copies names each chain's token address in its config. Nothing on chain can check that two addresses are the same asset, so a wrong one strands what's paid on that copy, the same as a pair Chainlink doesn't carry today. Payers on copies get no tokens either way.
+- If JBP6 can't take the token, the payout fee is forgiven into the lunch's balance by core (it then gets burned) and `collect` adds the token-side fees to the lunch's balance instead of reverting.
+- A token that takes a fee on transfer or rebases isn't supported: `createFor` can't detect it, RISKS.md says so.
+
+Tasks:
+
+- [ ] Refactor, no behavior change: move pool code to `FairLunchPool`, 59 tests green.
+- [ ] Add the registry as the second terminal on hosts and copies; test a USDC payment into an ETH lunch while cooking and a quoted one after serve.
+- [ ] `token` in the config and record; accounting context, base currency, payouts, balance reads, add to balance, sucker mappings and `sendHome` use it.
+- [ ] Pool: sorted currencies, raise price and serve limits from decimals and ordering, both-direction settle, burn bound on the right side.
+- [ ] Tests: the lifecycle suite parameterized over ETH, USDC and an 18-decimal token ground to each ordering; cross-chain USDC; fuzz the sandwich and early-pool cases in each.
+- [ ] Site: token choice on create, amounts in the token's decimals and symbol, approvals for ERC-20 pays, "pay with another token" through the registry with a router quote.
+- [ ] RISKS.md, README, two Codex passes, testnet redeploy and walk.
