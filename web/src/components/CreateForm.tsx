@@ -211,7 +211,7 @@ export function CreateForm() {
           </label>
         ) : null}
       </div>
-      <label className="field">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
+      <label className="field w-32">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">🧀 You keep, % of the raise<input name="keep" className="input" inputMode="numeric" defaultValue="10" required /></label>
         <label className="field">🧈 But no more than, {raiseIn === 'other' ? 'tokens' : raiseIn}<input name="cap" className="input" inputMode="decimal" defaultValue="10" required /></label>
