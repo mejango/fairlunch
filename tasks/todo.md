@@ -293,3 +293,36 @@ Site:
 | The list reads the newest 200 projects and the burned total the newest 500 burns | Kept | Marked `ponytail:` in `indexed.ts` with the way up |
 
 `npm run check` passes with 18 tests. Rendered `/base:39` and `/base:40` at 390px and 1280px: no overflow, no console errors.
+
+## Review: follow-ups jango asked for, and the testnet walk (2026-11-12)
+
+- Create form: "Pay your share to", prefilled with the connected wallet. The signing wallet (`sender`) and the paid address (`creator`) are separate in the terms and in the create recovery.
+- Three contract tests: `test_sendHome_returnsAFeeTheSuckerCouldntPay`, `test_burn_ignoresPriceHistoryFromBeforeServing`, and the carrier assertion in `test_host_claimBeforeServe_countsAsRaised`. 49 tests pass.
+
+Codex pass 5, on the route-home change: MERGE for the diff. It found one older gap.
+
+| Finding | Call | Result |
+|---|---|---|
+| Medium, older: a copy's ETH mapping could carry gas no bridge message can hold, so it could never send | Real, a creator's own odd configuration | `createFor` requires the mapping's gas to be `_SUCKER_MIN_GAS`. Normalizing the input instead cost 135 bytes and didn't fit. 24,554 bytes, 22 margin |
+
+Codex pass 6, on that change and the three tests: the gas check is sound; verdict HOLD for one more route condition.
+
+| Finding | Call | Result |
+|---|---|---|
+| Medium, conditional: a copy could map ETH to wrapped ETH on the host, which the host can't credit | Open, for jango | It needs the sucker registry to approve that mapping, which Codex did not establish any deployment does. The check is one more word, and puts the contract 9 bytes over the limit |
+| Low: the fee test would pass with the fee lost | Real | Compares against the same call with the fee paid: exactly the fee more |
+| Low: the carrier test proved conservation, not zero dilution | Real | Compares the supply against a serve of the same ETH with no carrier: equal to the wei |
+
+Testnet, from a throwaway key (`~/.config/fair-lunch/testnet-deployer.key`), not the Sphinx deployment. Fair Lunch is at `0x5b572319a362683a6735a00876709e3dd10b0557` on Sepolia, Base Sepolia and Arbitrum Sepolia. Walk with `web/scripts/testnet-walk.mjs`: host project 9 on Arbitrum Sepolia, copy project 17 on Sepolia.
+
+| Step | Result |
+|---|---|
+| Create on both, pay 0.05 ETH on the host and 0.02 ETH on the copy | Went through |
+| `sendHome` from Sepolia | Sent 0.02 ETH, the bridge took 0.0015 ETH, the copy is empty |
+| `serve` on the host | Went through, 2 wei left in the balance |
+| Chainlink delivery, then `claim` on the host | Claimable about 25 minutes after sending. The host's balance rose by exactly 0.02 ETH |
+
+What the testnets showed:
+
+- Chainlink carries ETH between Sepolia and Arbitrum Sepolia only. Base Sepolia's wrapped ETH has no pool, and Sepolia's pool has no Base Sepolia lane. A copy on Sepolia with a Base Sepolia host (projects 16 and 64) was created and paid, and its `sendHome` reverts with `ChainNotAllowed`. All twelve mainnet pairs carry ETH. In RISKS.
+- Sepolia runs Glamsterdam. Deploying Fair Lunch there took 38.2M gas against about 8M elsewhere, and forge's estimate failed twice. Sent with the node's estimate. `createFor` took 5.6M there against 1.55M on Arbitrum Sepolia.

@@ -174,22 +174,31 @@ contract FairLunchCrossChain is Test {
         _pay(id, 1 ether);
         address sucker = REGISTRY.suckersOf(id)[0];
 
-        // A fee is due, and JBP6 won't take it.
+        // A fee is due.
         vm.mockCall(
             address(REGISTRY), abi.encodeWithSelector(IJBSuckerRegistry.toRemoteFee.selector), abi.encode(0.01 ether)
         );
-        vm.mockCallRevert(address(TERMINAL), abi.encodeWithSelector(IJBTerminal.pay.selector, uint256(1)), "");
 
         address caller = address(0xCA11E40002);
         vm.deal(caller, 1 ether);
+
+        // First with the fee paid, to know what the same call leaves the caller when it is.
+        uint256 snapshot = vm.snapshotState();
+        vm.prank(caller);
+        lunch.sendHome{value: 0.1 ether}(id);
+        uint256 leftWhenPaid = caller.balance;
+        assertGt(TOKENS.totalBalanceOf(caller, 1), 0, "the paid fee bought the caller JBP6");
+        vm.revertToState(snapshot);
+
+        // Then with JBP6 refusing it.
+        vm.mockCallRevert(address(TERMINAL), abi.encodeWithSelector(IJBTerminal.pay.selector, uint256(1)), "");
         vm.prank(caller);
         lunch.sendHome{value: 0.1 ether}(id);
 
         assertEq(_balance(id), 0, "the balance still left");
+        assertEq(caller.balance, leftWhenPaid + 0.01 ether, "the caller has exactly the fee back");
         assertEq(IJBSuckerFees(sucker).retainedToRemoteFeeOf(address(lunch)), 0, "nothing left in the sucker");
         assertEq(address(lunch).balance, 0, "nothing left on the lunch contract");
-        // Without the fee coming back, at most 0.99 ETH could.
-        assertGt(caller.balance, 0.99 ether - 0.05 ether, "the caller keeps the fee");
         assertEq(TOKENS.totalBalanceOf(caller, 1), 0, "no JBP6 was bought");
     }
 
@@ -333,6 +342,17 @@ contract FairLunchCrossChain is Test {
         uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(_config(false));
         _pay(id, 10 ether);
 
+        // What serving leaves when the same 1 ETH arrives with no token carrying it.
+        uint256 snapshot = vm.snapshotState();
+        address sucker = REGISTRY.suckersOf(id)[0];
+        vm.deal(sucker, 1 ether);
+        vm.prank(sucker);
+        TERMINAL.addToBalanceOf{value: 1 ether}(id, JBConstants.NATIVE_TOKEN, 1 ether, false, "", "");
+        vm.warp(uint256(deadline) + 1);
+        lunch.serve(id);
+        uint256 supplyWithoutCarrier = TOKENS.totalSupplyOf(id);
+        vm.revertToState(snapshot);
+
         // A remote chain with no holders sends 1 ETH home carried by one wei of token.
         _claimOnHost({id: id, eth: 1 ether, tokens: 1});
         assertEq(_balance(id), 11 ether);
@@ -345,7 +365,9 @@ contract FairLunchCrossChain is Test {
         assertEq(TOKENS.totalBalanceOf(address(lunch), id), 0);
         assertEq(address(lunch).balance, 0);
 
-        // To the wei: payers hold what they bought, and every other token is in the pool. The carrier diluted nobody.
+        // To the wei: the supply is what it would be had no carrier come, payers hold what they bought, and every
+        // other token is in the pool. The carrier diluted nobody.
+        assertEq(TOKENS.totalSupplyOf(id), supplyWithoutCarrier, "the same supply as with no carrier");
         IERC20 token = IERC20(address(TOKENS.tokenOf(id)));
         assertEq(token.balanceOf(alice), 10_000_000e18, "the payer's tokens");
         assertEq(
