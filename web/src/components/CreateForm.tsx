@@ -161,7 +161,7 @@ export function CreateForm() {
         <li>Sell a new token at a fixed price until the deadline. No refunds.</li>
         <li>Then you get your share of the raise and of the tokens.</li>
         <li>The rest becomes permanently locked Uniswap liquidity.</li>
-        <li>Later payments buy the token and burn it.</li>
+        <li>Later payments on any chain buy the token on the main chain and burn it.</li>
       </ul>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">🍞 Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
