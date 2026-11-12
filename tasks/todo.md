@@ -234,3 +234,15 @@ Found on the way:
 - A bare gas estimate for `createFor` ran out of gas every other run. The creation fee's JBP6 buyback writes an oracle slot once per second, so an estimate made in the same second as another JBP6 swap is 22,100 gas short of a later block. The site sends with the SDK's headroom, so it is covered; a script sending bare estimates is not.
 - The SDK's fallback log scan asks for 45,000 blocks, which the public Optimism RPC behind the fork rejects (10,000 cap). Center's RPC limit for the same scan is unchecked.
 
+### Phase B, Codex pass on the site's transactions (2026-11-12)
+
+`gpt-6.1-sol`, read-only, over `writes.ts`, `reads.ts`, `LunchView.tsx`, `CreateForm.tsx`, `TxAction.tsx` against the contract and SDK 2.41.3.
+
+| Finding | Call | Result |
+|---|---|---|
+| High: a cooking payment carried no minimum, so one still waiting when the lunch is served would pay into a buyback and mint nothing | Real | `payTx` asks for `amount x 1,000,000` tokens. On the fork: the exact amount passes, one wei more reverts, a served lunch reverts |
+| Low: Send home reviewed a balance up to 60 s old and could pay the bridge to send nothing | Real | The balance is reread when the call is prepared; zero refuses; the review shows the reread amount. A send racing another in the same block is not covered |
+| Low: a sale approves Permit2 for the maximum | Kept | It is Uniswap's own convention, the router's allowance is exact and 30 minutes, and an exact approval adds a press to every sale |
+
+Codex confirmed the swap calldata (recipient, amounts, minimum, deadline), the matching terms and host-first order of a multi-chain create, and that claims use registry pairs and verified proofs.
+

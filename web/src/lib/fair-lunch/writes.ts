@@ -1,4 +1,4 @@
-import { jbDirectoryAbi, jbMultiTerminalAbi, jbProjectsAbi, MappableAsset, NATIVE_TOKEN, parseSuckerDeployerConfig, type JBChainId } from '@bananapus/nana-sdk-core'
+import { jbDirectoryAbi, jbMultiTerminalAbi, jbProjectsAbi, jbTerminalStoreAbi, MappableAsset, NATIVE_TOKEN, parseSuckerDeployerConfig, type JBChainId } from '@bananapus/nana-sdk-core'
 import { buildPermit2ApproveTx, buildUniswapV4ExactInputSwapTx, quoteUniswapV4ExactInputSingle, UNISWAP_PERMIT2_ADDRESS, UNISWAP_V4_UNIVERSAL_ROUTER_ADDRESSES } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { buildBridgeClaimTx, CCIP_SUCKER_TRANSPORT_VALUES, findSuckerTransportValue, type JBClaim } from '@bananapus/nana-sdk-core/v6'
 import { erc20Abi, maxUint256, pad, parseAbi, zeroHash, type Abi, type Address, type Hex } from 'viem'
@@ -7,6 +7,7 @@ import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
 import type { Copy, Lunch } from './reads'
 import { wiringOn } from './reads'
+import { TOKENS_PER_ETH } from './split'
 
 /** What a creator chooses. Percents are whole numbers, 0 to 50. */
 export type LunchTerms = {
@@ -50,11 +51,14 @@ export async function createTx(terms: LunchTerms, chainId: number): Promise<TxRe
   return { chainId, address: lunch, abi: fairLunchAbi as Abi, functionName: 'createFor', args: [config], value: fee, label: 'Make lunch' }
 }
 
-/** A payment into a lunch: tokens while it's cooking, a buy and burn once it's served. */
+/**
+ * A payment into a cooking lunch, for tokens at the fixed price. It refuses to land for fewer: a payment still
+ * waiting when the lunch is served would otherwise go to a buyback and mint nothing.
+ */
 export async function payTx(lunch: Pick<Lunch, 'chainId' | 'projectId'>, amount: bigint, payer: Address): Promise<TxRequest> {
   const { terminal } = await wiringOn(lunch.chainId)
   return { chainId: lunch.chainId, address: terminal, abi: jbMultiTerminalAbi as Abi, functionName: 'pay',
-    args: [BigInt(lunch.projectId), NATIVE_TOKEN, amount, payer, 0n, '', '0x'], value: amount, label: 'Pay' }
+    args: [BigInt(lunch.projectId), NATIVE_TOKEN, amount, payer, amount * TOKENS_PER_ETH, '', '0x'], value: amount, label: 'Pay' }
 }
 
 /** One of the calls anyone can make for a lunch on its host chain. */
@@ -67,13 +71,16 @@ export async function upkeepTx(chainId: number, projectId: number, functionName:
  * Sending a copy's ETH to the host. The call carries the bridge's payment, and the contract returns what the bridge
  * doesn't use, so this sends the smallest of the SDK's amounts that the call goes through with.
  */
-export async function sendHomeTx(copy: Pick<Copy, 'chainId' | 'projectId'>, account: Address): Promise<TxRequest & { value: bigint }> {
-  const { lunch } = await wiringOn(copy.chainId)
+export async function sendHomeTx(copy: Pick<Copy, 'chainId' | 'projectId'>, account: Address): Promise<TxRequest & { value: bigint; sending: bigint }> {
+  const { lunch, terminal, store } = await wiringOn(copy.chainId)
   const call = { address: lunch, abi: fairLunchAbi, functionName: 'sendHome', args: [BigInt(copy.projectId)] } as const
   const client = jbCenterPublicClient(copy.chainId)
+  // Someone else may have sent it since the page last looked. An empty send still pays the bridge.
+  const sending = await client.readContract({ address: store, abi: jbTerminalStoreAbi, functionName: 'balanceOf', args: [terminal, BigInt(copy.projectId), NATIVE_TOKEN] })
+  if (sending === 0n) throw new Error('Nothing is waiting there now.')
   const value = await findSuckerTransportValue(CCIP_SUCKER_TRANSPORT_VALUES, amount => client.simulateContract({ ...call, account, value: amount }))
   if (value === null) throw new Error("This can't be sent right now. Check you have ETH for the bridge.")
-  return { chainId: copy.chainId, ...call, abi: fairLunchAbi as Abi, value, label: 'Send home' }
+  return { chainId: copy.chainId, ...call, abi: fairLunchAbi as Abi, value, sending, label: 'Send home' }
 }
 
 /** Bringing delivered ETH into the host lunch. Anyone can; it goes to the lunch whoever calls. */

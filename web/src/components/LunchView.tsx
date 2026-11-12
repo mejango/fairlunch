@@ -185,9 +185,9 @@ function Copies({ lunch }: { lunch: Lunch }) {
                 {copy.balance > 0n ? (
                   <TxAction chainId={copy.chainId} className={secondary} label="Send home" title={`Send to ${host}`} doneTitle="Sent"
                     prepare={async account => {
-                      const request = await sendHomeTx(copy, account)
+                      const { sending, ...request } = await sendHomeTx(copy, account)
                       return { request, rows: [
-                        { label: 'Sends', value: `${formatEth(copy.balance)} ETH to ${lunch.name} on ${host}`, strong: true },
+                        { label: 'Sends', value: `${formatEth(sending)} ETH to ${lunch.name} on ${host}`, strong: true },
                         { label: 'You pay up to', value: `${formatEth(request.value)} ETH for the bridge` },
                         { label: 'You get back', value: "What the bridge doesn't use" },
                       ] }
