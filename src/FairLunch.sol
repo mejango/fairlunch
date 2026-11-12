@@ -158,6 +158,13 @@ contract FairLunch is
     /// currency0, so the pool's price is tokens per ETH.
     uint160 internal constant _RAISE_SQRT_PRICE_X96 = 1000 << 96;
 
+    /// @notice The tick of the fundraise's price.
+    int24 internal constant _RAISE_TICK = 138_162;
+
+    /// @notice How far from the fundraise's price, in ticks, `serve` stops trading through a pool someone made early.
+    /// @dev 110 ticks is 1.1%, just past the pool's 1% fee.
+    int24 internal constant _SERVE_MARGIN = 110;
+
     //*********************************************************************//
     // --------------- public immutable stored properties ---------------- //
     //*********************************************************************//
@@ -836,19 +843,27 @@ contract FairLunch is
             // Nobody made the pool yet. Open it at the fundraise's price.
             // slither-disable-next-line unused-return
             POOL_MANAGER.initialize({key: key, sqrtPriceX96: _RAISE_SQRT_PRICE_X96});
-        } else if (sqrtPriceX96 > _RAISE_SQRT_PRICE_X96) {
-            // Tokens are cheaper than the fundraise's price. Buy them down to it, with at most half the ETH so there's
-            // always a position left to make however much liquidity is in the way.
-            (uint256 spent, uint256 received) =
-                _swap({key: key, zeroForOne: true, amountIn: eth / 2, sqrtPriceLimitX96: _RAISE_SQRT_PRICE_X96});
-            eth -= spent;
-            tokens += received;
-        } else if (sqrtPriceX96 < _RAISE_SQRT_PRICE_X96) {
-            // Tokens are dearer than the fundraise's price. Sell them up to it, with at most half the tokens.
-            (uint256 spent, uint256 received) =
-                _swap({key: key, zeroForOne: false, amountIn: tokens / 2, sqrtPriceLimitX96: _RAISE_SQRT_PRICE_X96});
-            tokens -= spent;
-            eth += received;
+        } else {
+            // Trade toward the fundraise's price only where the pool's price beats it by more than the pool's fee.
+            // The fee goes to whoever left liquidity there, so trading any closer would sell them tokens for less
+            // than the fundraise charged, or buy tokens back from them for more.
+            uint160 cheapest = TickMath.getSqrtPriceAtTick(_RAISE_TICK + _SERVE_MARGIN);
+            uint160 dearest = TickMath.getSqrtPriceAtTick(_RAISE_TICK - _SERVE_MARGIN);
+
+            if (sqrtPriceX96 > cheapest) {
+                // Tokens are cheaper than that. Buy them down to it, with at most half the ETH so there's always a
+                // position left to make however much liquidity is in the way.
+                (uint256 spent, uint256 received) =
+                    _swap({key: key, zeroForOne: true, amountIn: eth / 2, sqrtPriceLimitX96: cheapest});
+                eth -= spent;
+                tokens += received;
+            } else if (sqrtPriceX96 < dearest) {
+                // Tokens are dearer than that. Sell them up to it, with at most half the tokens.
+                (uint256 spent, uint256 received) =
+                    _swap({key: key, zeroForOne: false, amountIn: tokens / 2, sqrtPriceLimitX96: dearest});
+                tokens -= spent;
+                eth += received;
+            }
         }
 
         // Size the position at wherever the price ended up.
