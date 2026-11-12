@@ -41,7 +41,7 @@ function Stat({ label, value, action }: { label: ReactNode; value: string; actio
 }
 
 /** The pie's colors: where a raise goes. */
-const POOL = '#2e7d32', CREATOR = '#f5b942', FEE = '#b9a98f'
+const POOL = '#2e7d32', CREATOR = '#f5b942'
 const Swatch = ({ color }: { color: string }) => <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />
 
 /** Uniswap's own page for a lunch's pool, on the chains its app shows. */
@@ -321,12 +321,11 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
               <div className="mt-4 flex items-center gap-5">
                 {lunch.balance > 0n ? (
                   <div role="img" aria-label="Where the raise goes" className="h-24 w-24 shrink-0 rounded-full border border-line"
-                    style={{ background: `conic-gradient(${POOL} 0 ${slice(split.poolEth)}%, ${CREATOR} 0 ${slice(split.poolEth + split.creatorEth)}%, ${FEE} 0)` }} />
+                    style={{ background: `conic-gradient(${POOL} 0 ${slice(split.poolEth)}%, ${CREATOR} 0)` }} />
                 ) : null}
                 <dl className="space-y-2">
                   <Stat label={<><Swatch color={POOL} />🔒 To the pool</>} value={`${formatEth(split.poolEth)} ETH`} />
-                  <Stat label={<><Swatch color={CREATOR} />👩‍🍳 To the creator</>} value={`${formatEth(split.creatorEth)} ETH`} />
-                  <Stat label={<><Swatch color={FEE} />Juicebox fee</>} value={`${formatEth(split.fee)} ETH`} />
+                  <Stat label={<><Swatch color={CREATOR} />👩‍🍳 To the creator and fees</>} value={`${formatEth(split.creatorEth + split.fee)} ETH`} />
                 </dl>
               </div>
             </>
