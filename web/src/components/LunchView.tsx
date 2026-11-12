@@ -35,7 +35,8 @@ function Stat({ label, value, action }: { label: ReactNode; value: string; actio
   return (
     <div>
       <dt className="text-sm text-muted">{label}</dt>
-      <dd className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xl font-bold tabular-nums">{value}{action}</dd>
+      <dd className="whitespace-pre-line text-xl font-bold tabular-nums">{value}</dd>
+      {action ? <dd className="mt-2">{action}</dd> : null}
     </div>
   )
 }
@@ -164,7 +165,7 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
         ) : null} />
         <Stat label="🔥 Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
         <Stat label="🔒 In the pool" value={lunch.pooledEth === null ? '…' : `${formatEth(lunch.pooledEth)} ETH`} />
-        <Stat label="🧾 Pool fees" value={fees ? `${formatEth(fees.eth)} ETH, ${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} action={fees && (fees.eth > 0n || fees.tokens > 0n) ? (
+        <Stat label="🧾 Pool fees" value={fees ? `${formatEth(fees.eth)} ETH\n${formatTokens(fees.tokens)} ${lunch.symbol}` : '…'} action={fees && (fees.eth > 0n || fees.tokens > 0n) ? (
           <TxAction chainId={lunch.chainId} className={SMALL} label="Collect" title="Collect pool fees" doneTitle="Collected"
             prepare={upkeep(lunch, 'collect', `Burns the pool's ${lunch.symbol} fees, pays its ETH fees into JBP6 for the creator`)} />
         ) : null} />
