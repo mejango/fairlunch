@@ -156,7 +156,7 @@ export function CreateForm() {
 
   return (
     <form onSubmit={event => void submit(event)} className="card mx-auto max-w-xl space-y-4 p-5">
-      <h1 className="text-2xl font-bold">🥪 Ingredients</h1>
+      <h1 className="text-2xl font-bold">🛒 Ingredients</h1>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">🍞 Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
         <label className="field">🥓 Ticker<input name="symbol" className="input uppercase" maxLength={10} required placeholder="SAND" /></label>
