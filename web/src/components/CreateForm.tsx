@@ -262,6 +262,9 @@ export function CreateForm() {
             {UNLOCK_OPTIONS}
           </select>
         </label>
+        <label className="field sm:col-span-2">🥑 Pay your share to
+          <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
+        </label>
         <label className="field">🫒 Airdrop, % of supply<input name="airdrop" className="input" inputMode="numeric" defaultValue="0" /></label>
         <label className="field">🫑 Unlocking over
           <select name="airdropVesting" className="input select-caret" defaultValue="0">
@@ -272,9 +275,6 @@ export function CreateForm() {
       <label className="field">🥜 Airdrop list<input name="list" type="file" accept=".csv,.txt,text/csv,text/plain"
         className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
       <p className="-mt-2 text-sm text-muted">One address,amount per line.</p>
-      <label className="field">🥑 Pay your share to
-        <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
-      </label>
       <div className="rounded-xl border border-line/60 p-3">
         <label className="field">🍽️ Preview: if it raises, {moneySymbol}
           <input className="input" inputMode="decimal" placeholder="10" value={hypothetical} onChange={event => setHypothetical(event.target.value)} />
