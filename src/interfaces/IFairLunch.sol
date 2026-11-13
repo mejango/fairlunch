@@ -93,8 +93,9 @@ interface IFairLunch {
     /// @notice The directory of terminals and controllers.
     function DIRECTORY() external view returns (IJBDirectory);
 
-    /// @notice The most the creator can keep of the raise, out of `JBConstants.SPLITS_TOTAL_PERCENT`.
-    function MAX_CREATOR_PERCENT() external view returns (uint256);
+    /// @notice The most of the token supply the creator and the airdrop can get together, out of
+    /// `JBConstants.SPLITS_TOTAL_PERCENT`.
+    function MAX_GRANTED_PERCENT() external view returns (uint256);
 
     /// @notice The deployer every lunch is launched through, which wires up its suckers.
     function OMNICHAIN_DEPLOYER() external view returns (IJBOmnichainDeployer);

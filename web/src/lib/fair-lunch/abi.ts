@@ -117,7 +117,7 @@ export const fairLunchAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_CREATOR_PERCENT",
+    "name": "MAX_GRANTED_PERCENT",
     "inputs": [],
     "outputs": [
       {

@@ -99,8 +99,10 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     // ------------------------- public constants ------------------------ //
     //*********************************************************************//
 
-    /// @notice The most the creator can keep of the raise, out of `JBConstants.SPLITS_TOTAL_PERCENT`.
-    uint256 public constant override MAX_CREATOR_PERCENT = JBConstants.SPLITS_TOTAL_PERCENT / 2;
+    /// @notice The most of the token supply the creator and the airdrop can get together, out of
+    /// `JBConstants.SPLITS_TOTAL_PERCENT`. Payers and the pool share the rest, so the supply is at most 100 times
+    /// theirs.
+    uint256 public constant override MAX_GRANTED_PERCENT = uint256(JBConstants.SPLITS_TOTAL_PERCENT) * 99 / 100;
 
     /// @notice The fee of every lunch's pool, in hundredths of a basis point (1%).
     uint24 public constant override POOL_FEE = 10_000;
@@ -385,6 +387,8 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             if (mappings.length != 0) token = mappings[0].localToken;
         }
 
+        // A creator can't keep the whole raise: `serve` needs something to open the pool with, and without it the raise
+        // would be stuck.
         // A lunch that raises ETH takes ETH everywhere, and one that raises an ERC-20 takes ERC-20s everywhere. None
         // takes JBP6: this contract passes on all the JBP6 it holds as fee proceeds.
         if (
@@ -392,8 +396,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                 || (isHost && config.deadline <= block.timestamp + 1)
                 || config.deadline > block.timestamp + type(uint32).max || config.token == address(0)
                 || (config.token == JBConstants.NATIVE_TOKEN) != (token == JBConstants.NATIVE_TOKEN)
-                || token == address(TOKENS.tokenOf(_FEE_PROJECT_ID)) || config.keepPercent > MAX_CREATOR_PERCENT
-                || uint256(config.tokenPercent) + config.claimsPercent >= JBConstants.SPLITS_TOTAL_PERCENT
+                || token == address(TOKENS.tokenOf(_FEE_PROJECT_ID))
+                || config.keepPercent >= JBConstants.SPLITS_TOTAL_PERCENT
+                || uint256(config.tokenPercent) + config.claimsPercent > MAX_GRANTED_PERCENT
                 || (config.claimsPercent == 0) != (config.claimsRoot == bytes32(0))
         ) revert FairLunch_InvalidConfig();
 

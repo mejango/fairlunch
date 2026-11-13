@@ -3,7 +3,7 @@
 import { JBCenterClient } from '@bananapus/nana-sdk-core/jbcenter'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { NATIVE_TOKEN, USDC_ADDRESSES, type JBChainId } from '@bananapus/nana-sdk-core'
 import { formatUnits, getAddress, isAddress, isAddressEqual, parseEventLogs, parseUnits, toHex, zeroAddress, zeroHash, type Address, type Hex, type PublicClient } from 'viem'
 import { TxAction } from '@/components/TxAction'
@@ -14,7 +14,9 @@ import { fairLunchAbi } from '@/lib/fair-lunch/abi'
 import { deploymentOn } from '@/lib/fair-lunch/deployments'
 import { readMoney } from '@/lib/fair-lunch/reads'
 import { claimEntriesOf, claimsRootOf, type ClaimEntry } from '@/lib/fair-lunch/claims'
+import { projectedCapOf, tokensFor } from '@/lib/fair-lunch/split'
 import { createTx, madeOn, type LunchTerms } from '@/lib/fair-lunch/writes'
+import { formatEth } from '@/lib/format'
 import { jbCenterBaseUrl } from '@/lib/jbcenter-config'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { chainName, projectPath } from '@/lib/urn'
@@ -40,6 +42,10 @@ export function CreateForm() {
   const { address, isConnected, openSignIn } = useWallet()
   const [terms, setTerms] = useState<LunchTerms | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const formRef = useRef<HTMLFormElement>(null)
+  // Bumped on every edit so the preview reads the form again.
+  const [typed, setTyped] = useState(0)
+  const [hypothetical, setHypothetical] = useState('')
   const [busy, setBusy] = useState(false)
   const [hostId, setHostId] = useState<number>(CHAINS[0]?.id ?? 0)
   const [raiseIn, setRaiseIn] = useState<'ETH' | 'USDC' | 'other'>('ETH')
@@ -79,12 +85,32 @@ export function CreateForm() {
   if (!CHAINS.length) return <p className="card p-6">🧑‍🍳 Fair Lunch isn&apos;t live yet.</p>
   const others = CHAINS.filter(chain => chain.id !== hostId && environmentForChainIds([chain.id]) === environmentForChainIds([hostId]))
 
+  // What the token would start at if the fundraise raised a made-up amount, under the terms typed so far.
+  const moneySymbol = raiseIn === 'other' ? 'tokens' : raiseIn
+  const moneyDecimals = raiseIn === 'USDC' ? 6 : 18
+  const preview = (() => {
+    void typed
+    const form = formRef.current && new FormData(formRef.current)
+    const field = (name: string) => String(form?.get(name) ?? '').trim()
+    const keep = whole(field('keep'), 0, 99), share = whole(field('share'), 0, 99)
+    const airdrop = share === null ? null : whole(field('airdrop') || '0', 0, 99 - share)
+    if (!form || keep === null || share === null || airdrop === null) return null
+    try {
+      const raised = parseUnits(hypothetical.trim() || '0', moneyDecimals)
+      if (raised === 0n) return null
+      return projectedCapOf(raised, tokensFor(raised, moneyDecimals), {
+        keepPercent: BigInt(keep) * 10_000_000n, keepCap: parseUnits(field('cap') || '0', moneyDecimals),
+        tokenPercent: BigInt(share) * 10_000_000n, claimsPercent: BigInt(airdrop) * 10_000_000n,
+      }, moneyDecimals)
+    } catch { return null }
+  })()
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!isConnected || !address) return void openSignIn()
     const form = new FormData(event.currentTarget)
     const text = (name: string) => String(form.get(name) ?? '').trim()
-    const days = whole(text('days'), 1, 365), keep = whole(text('keep'), 0, 50), share = whole(text('share'), 0, 99)
+    const days = whole(text('days'), 1, 365), keep = whole(text('keep'), 0, 99), share = whole(text('share'), 0, 99)
     const otherChainIds = others.filter(chain => form.get(`also-${chain.id}`)).map(chain => chain.id)
     const chainIds = [hostId, ...otherChainIds]
     // ETH and USDC have a known address on every chain. Any other token is only known where the creator names it.
@@ -96,9 +122,9 @@ export function CreateForm() {
     if (chainIds.some(chainId => !tokenOn[chainId])) return setError('USDC isn’t on one of those chains.')
     if (!text('name') || !text('symbol')) return setError('Give it a name and a ticker.')
     if (days === null) return setError('Raise for 1 to 365 days.')
-    if (keep === null) return setError('Keep 0 to 50 percent of the raise.')
+    if (keep === null) return setError('Keep 0 to 99 percent of the raise.')
     const airdrop = share === null ? null : whole(text('airdrop') || '0', 0, 99 - share)
-    if (share === null || airdrop === null) return setError('Your tokens and the airdrop have to add up to under 100 percent.')
+    if (share === null || airdrop === null) return setError('Your tokens and the airdrop have to add up to 99 percent or less.')
     const list = form.get('list')
     let entries: ClaimEntry[] = []
     if (airdrop) {
@@ -182,7 +208,7 @@ export function CreateForm() {
   }
 
   return (
-    <form onSubmit={event => void submit(event)} className="card mx-auto max-w-xl space-y-4 p-5">
+    <form ref={formRef} onInput={() => setTyped(count => count + 1)} onSubmit={event => void submit(event)} className="card mx-auto max-w-xl space-y-4 p-5">
       <h1 className="text-2xl font-bold">🛒 Ingredients</h1>
       <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
         <li>Sell a new token at a fixed price until the deadline. Funders can take refunds until then.</li>
@@ -243,6 +269,14 @@ export function CreateForm() {
       <label className="field">🥑 Pay your share to
         <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
       </label>
+      <div className="rounded-xl border border-line/60 p-3">
+        <label className="field">🍽️ Preview: if it raises, {moneySymbol}
+          <input className="input" inputMode="decimal" placeholder="10" value={hypothetical} onChange={event => setHypothetical(event.target.value)} />
+        </label>
+        <p className="mt-2 text-sm text-muted" aria-live="polite">
+          {preview === null ? 'Enter an amount to see the market cap the token would start at.' : `The token would start at a market cap of ${formatEth(preview, moneyDecimals)} ${moneySymbol}.`}
+        </p>
+      </div>
       <p className="text-sm text-muted">🔒 Nothing can be changed after.</p>
       <TxError error={error} />
       <button type="submit" className="btn-primary min-h-[48px] px-5 text-lg" disabled={busy}>{busy ? 'Saving…' : 'Start cooking'}</button>

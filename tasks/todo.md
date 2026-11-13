@@ -545,3 +545,14 @@ jango: "can we move the clock into the rulesets too?" then "do it".
 - [x] Codex pass 20: no findings, MERGE, 121 tests passed in its run. Verdict only: the PR stays unmerged until jango approves.
 - [x] Local fork rebuilt on the new contract. Refund of 1M tokens returned exactly 1 ETH, copy payment refused by the pause, pages render.
 - [x] Testnet: deployed at `0x60a59ae55a70daba2088a9e14afcc2c0d587b637` on Arbitrum Sepolia and Sepolia. Lunch 21 (copy 21, 60% airdrop): copy payment refused by the pause during the raise, 1,000 tokens refunded for 0.001 ETH, a refund after the deadline reverted (reason not captured), served at 1794528594 with `servedAtOf` matching, copy payment taken after the deadline, airdrop claimed. Not yet run on this deployment: send home, burn, collect.
+
+## Caps, partial refunds and the create preview
+
+jango's answers: site hosting "Not yet"; keep cap "remove it"; "the create flow should also have a 'preview market cap' field"; burn JIT "Look for a stronger fix"; old Mediums "Cap shares at 99%"; a partial refund amount field; last-second refunds "go on without it".
+
+- [x] Refund row takes an amount in the lunch's money, empty for everything held. Clicked through with a stand-in wallet to the final agreement step.
+- [x] Keep of the raise: anything under 100%. Exactly 100% is refused: `serve` mints nothing for an empty pool and reverts, which would lock the raise (`test_serve_withNearlyAllOfTheRaiseKept`, bad-config test).
+- [x] Chef plus airdrop token shares: 99% or less (`MAX_GRANTED_PERCENT`), closing Codex pass 15's supply-ceiling Medium.
+- [x] Create form: keep 0 to 99, shares 99 or less, and a preview of the starting market cap for a typed raise.
+- [ ] Full suite, Codex pass, fork and testnet redeploy.
+- [ ] Burn JIT: investigate stronger fixes and bring jango a recommendation. No code change before that.

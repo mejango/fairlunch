@@ -283,7 +283,8 @@ contract FairLunchLifecycle is Test {
     function test_createFor_revertsOnBadConfig() public {
         uint256 fee = PROJECTS.creationFee();
 
-        FairLunchConfig memory config = _config(creator, HALF + 1, 0, 0);
+        // The whole raise, which would leave nothing to open the pool with.
+        FairLunchConfig memory config = _config(creator, 10 * TENTH, 0, 0);
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(config);
 
@@ -486,9 +487,9 @@ contract FairLunchLifecycle is Test {
     function test_createFor_revertsOnBadClaims() public {
         uint256 fee = PROJECTS.creationFee();
 
-        // The chef and the list can't get the whole supply together.
+        // The chef and the list can't get more than 99% of the supply together.
         FairLunchConfig memory config = _config(creator, 0, 0, 6 * TENTH);
-        config.claimsPercent = 4 * TENTH;
+        config.claimsPercent = 390_000_001;
         config.claimsRoot = bytes32(uint256(1));
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(config);
@@ -598,6 +599,17 @@ contract FairLunchLifecycle is Test {
         // What's left of the raise is served as usual.
         lunch.serve(id);
         assertEq(_token(id).balanceOf(alice), 1_500_000e18, "kept the rest");
+    }
+
+    /// @notice A chef can keep nearly all of the raise. What's left still opens the pool.
+    function test_serve_withNearlyAllOfTheRaiseKept() public {
+        uint256 id = _create(10 * TENTH - 1, type(uint104).max, TENTH);
+        _pay(id, alice, 2 ether);
+        vm.warp(deadline);
+        uint256 before = creator.balance;
+        lunch.serve(id);
+        assertApproxEqAbs(creator.balance - before, 1.95 ether, 1e10, "the raise less the Juicebox fee");
+        assertGt(lunch.servedAtOf(id), 0, "served");
     }
 
     function test_unlockCallback_onlyPoolManager() public {
