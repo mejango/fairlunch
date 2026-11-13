@@ -582,3 +582,4 @@ jango: "do we need OpenZepplins vesting wallet here? is it over complicated?" th
 - [x] Site reads `creatorTokenCountOf` and `creatorClaimedOf`; Release calls `FairLunchClaims.release`.
 - Behaviour change: the chef's unlocking position can't be handed to another address any more.
 - Codex pass 23 (before this change): MERGE for the list-wide cap.
+- Full suite on `24e3621`: 127 passed, 0 failed. Codex pass 24: no High or Medium, contract accounting sound, FIX THEN MERGE for one Low (release preview and circulating cap use the browser's clock, so a clock set far ahead previews more than `release` sends). Left as is, my call: the whole page already runs on the browser's clock, and a wrong preview sends less than shown, never more.
