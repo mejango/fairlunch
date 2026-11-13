@@ -277,7 +277,7 @@ function TokenPie({ lunch, title, funders, poolTokens, creatorTokens, claimsToke
           <Stat label={<><Swatch color={FUNDERS} />🥬 Funders</>} value={formatTokens(funders)} />
           <Stat label={<><Swatch color={POOL} />🔒 The pool</>} value={formatTokens(poolTokens)} />
           <Stat label={<><Swatch color={CREATOR} />👩‍🍳 The chef{lunch.vestingDuration ? ', vested' : ''}</>} value={formatTokens(creatorTokens)} />
-          {claimsTokens ? <Stat label={<><Swatch color={AIRDROP} />🫒 Airdrop</>} value={formatTokens(claimsTokens)} /> : null}
+          {claimsTokens ? <Stat label={<><Swatch color={AIRDROP} />🫒 Airdrop{lunch.claimsVestingDuration ? ', vested' : ''}</>} value={formatTokens(claimsTokens)} /> : null}
         </dl>
       </div>
       <UnlockChart lunch={lunch} total={total} funders={funders} free={funders + poolTokens} creatorTokens={creatorTokens} claimsTokens={claimsTokens} elapsed={elapsed} />
