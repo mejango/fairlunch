@@ -227,8 +227,11 @@ export function CreateForm() {
         <label className="field min-w-0 flex-1">🍞 Name<input name="name" className="input" maxLength={32} required placeholder="Sandwich" /></label>
         <label className="field w-32 shrink-0">🥓 Ticker<input name="symbol" className="input uppercase" maxLength={10} required placeholder="SAND" /></label>
       </div>
-      <label className="field">🍅 Logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif"
+      <div className="flex gap-4">
+      <label className="field min-w-0 flex-1">🍅 Logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif"
         className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
+        <label className="field w-32 shrink-0">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
+      </div>
       <div className="flex flex-wrap gap-4">
         <label className="field w-44 shrink-0">🧅 Chain
           <select name="host" className="input select-caret" value={hostId} onInput={event => setHostId(Number(event.currentTarget.value))} onChange={event => setHostId(Number(event.target.value))}>
@@ -244,15 +247,14 @@ export function CreateForm() {
           </fieldset>
         ) : null}
       </div>
-      <div className="flex gap-4">
-        <label className="field w-32 shrink-0">🍋 Raise in
+      <div>
+        <label className="field w-32">🍋 Raise in
           <select className="input select-caret" value={raiseIn} onInput={event => setRaiseIn(event.currentTarget.value as typeof raiseIn)} onChange={event => setRaiseIn(event.target.value as typeof raiseIn)}>
             <option value="ETH">ETH</option>
             <option value="USDC">USDC</option>
             <option value="other">Other</option>
           </select>
         </label>
-        <label className="field w-32 shrink-0">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
       </div>
       {raiseIn === 'other' ? (
         <label className="field">🧂 Token address
