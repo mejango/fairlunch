@@ -285,7 +285,7 @@ export function CreateForm() {
           </span>
         </label>
         <p className="mt-2 text-sm text-muted" aria-live="polite">
-          {preview === null ? 'Enter an amount to see the market cap the token would start at.' : `The token would start at a market cap of ${formatEth(preview.circulating, moneyDecimals)} ${moneySymbol}${preview.diluted === preview.circulating ? '' : `, or ${formatEth(preview.diluted, moneyDecimals)} ${moneySymbol} fully diluted`}.`}
+          {preview === null ? 'Enter an amount to see the market cap the token would start at.' : `Market cap of ${formatEth(preview.circulating, moneyDecimals)} ${moneySymbol}${preview.diluted === preview.circulating ? '' : `, or ${formatEth(preview.diluted, moneyDecimals)} ${moneySymbol} fully diluted`}.`}
         </p>
       </div>
       <p className="text-sm text-muted">🔒 Nothing can be changed after.</p>
