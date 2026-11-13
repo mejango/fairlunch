@@ -41,7 +41,7 @@ for (const side of sides) {
   const { deployerConfigurations } = parseSuckerDeployerConfig(side.chain.id, chainIds, [MappableAsset.NATIVE], { version: 6, bridge: 'ccip' })
   const config = {
     name: process.env.LUNCH_NAME ?? 'Burrito', symbol: process.env.LUNCH_SYMBOL ?? 'BRTO', projectUri: '', hostChainId: BigInt(chainIds[0]), token: '0x000000000000000000000000000000000000EEEe', deadline: terms.deadline, creator: account,
-    keepPercent: 200_000_000, keepCap: parseEther('0.5'), tokenPercent: 100_000_000, vestingDuration: 52 * 604800, claimsPercent: claims.percent, claimsRoot: claims.root, salt: terms.salt,
+    keepPercent: 200_000_000, keepCap: parseEther('0.5'), tokenPercent: 100_000_000, vestingDuration: 52 * 604800, claimsPercent: claims.percent, claimsRoot: claims.root, claimsVestingDuration: Number(process.env.LUNCH_AIRDROP_WEEKS ?? 0) * 604800, salt: terms.salt,
     suckerDeploymentConfiguration: { salt: zeroHash, deployerConfigurations: deployerConfigurations.map(({ deployer }) => ({
       deployer, peer: zeroHash, mappings: isHost ? [] : [{ localToken: NATIVE_TOKEN, minGas: 200_000, remoteToken: pad(NATIVE_TOKEN, { size: 32 }) }],
     })) },

@@ -40,6 +40,9 @@ export type Lunch = {
   /** The airdrop list's share of supply, and the tokens minted for it at serve. */
   claimsPercent: bigint
   claimsTokens: bigint
+  /** Seconds the airdrop unlocks over, from `claimsFundedAt`, when `serve` funded it. */
+  claimsVestingDuration: number
+  claimsFundedAt: number
   token: Address
   name: string
   symbol: string
@@ -108,7 +111,7 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
   const { lunch, terminal, store, tokens, controller, claims } = await wiringOn(chainId)
   const client = jbCenterPublicClient(chainId, signal)
   const id = BigInt(projectId)
-  const [record, poolKey, token, supply, uri, clock, claimsPercent, claimsTokens] = await Promise.all([
+  const [record, poolKey, token, supply, uri, clock, claimsPercent, claimsTokens, claimsVestingDuration, claimsFundedAt] = await Promise.all([
     client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'recordOf', args: [id] }),
     client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'poolKeyOf', args: [id] }),
     client.readContract({ address: tokens, abi: jbTokensAbi, functionName: 'tokenOf', args: [id] }),
@@ -117,6 +120,8 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
     readClock(chainId, projectId, signal),
     client.readContract({ address: claims, abi: claimsAbi, functionName: 'percentOf', args: [id] }),
     client.readContract({ address: claims, abi: claimsAbi, functionName: 'tokenCountOf', args: [id] }),
+    client.readContract({ address: claims, abi: claimsAbi, functionName: 'vestingDurationOf', args: [id] }),
+    client.readContract({ address: claims, abi: claimsAbi, functionName: 'fundedAt', args: [id] }),
   ])
   if (Number(record.hostChainId) !== chainId) return null
   const moneyIs0 = !isAddressEqual(poolKey.currency0, token)
@@ -133,7 +138,7 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
   return {
     chainId, projectId, hostChainId: Number(record.hostChainId), ...clock,
     creator: record.creator, keepPercent: BigInt(record.keepPercent), keepCap: record.keepCap, tokenPercent: BigInt(record.tokenPercent),
-    vestingDuration: record.vestingDuration, vestingWallet: record.vestingWallet, claimsPercent: BigInt(claimsPercent), claimsTokens, token, name, symbol, uri, money, moneyIs0, balance, supply, poolKey,
+    vestingDuration: record.vestingDuration, vestingWallet: record.vestingWallet, claimsPercent: BigInt(claimsPercent), claimsTokens, claimsVestingDuration, claimsFundedAt, token, name, symbol, uri, money, moneyIs0, balance, supply, poolKey,
     price: slot0 ? priceAt(slot0[1], { money, moneyIs0 }) : null,
     // The position spans every price, so its currency0 is its liquidity over the square root of the price, and its
     // currency1 is its liquidity times it.
@@ -150,10 +155,15 @@ export async function readPoolFees(lunch: Pick<Lunch, 'chainId' | 'projectId'>, 
 
 const vestingAbi = parseAbi(['function releasable(address token) view returns (uint256)', 'function release(address token)'])
 
-/** How many of the chef's tokens have vested and not been released yet. */
-export async function readReleasable(lunch: Pick<Lunch, 'chainId' | 'vestingWallet' | 'token'>, signal?: AbortSignal): Promise<bigint> {
-  if (BigInt(lunch.vestingWallet) === 0n) return 0n
-  return jbCenterPublicClient(lunch.chainId, signal).readContract({ address: lunch.vestingWallet, abi: vestingAbi, functionName: 'releasable', args: [lunch.token] })
+/** The chef's tokens: `releasable` have vested and not been released yet, `locked` haven't vested. */
+export async function readVesting(lunch: Pick<Lunch, 'chainId' | 'vestingWallet' | 'token'>, signal?: AbortSignal): Promise<{ releasable: bigint; locked: bigint }> {
+  if (BigInt(lunch.vestingWallet) === 0n) return { releasable: 0n, locked: 0n }
+  const client = jbCenterPublicClient(lunch.chainId, signal)
+  const [releasable, held] = await Promise.all([
+    client.readContract({ address: lunch.vestingWallet, abi: vestingAbi, functionName: 'releasable', args: [lunch.token] }),
+    client.readContract({ address: lunch.token, abi: erc20Abi, functionName: 'balanceOf', args: [lunch.vestingWallet] }),
+  ])
+  return { releasable, locked: held - releasable }
 }
 
 /** The lunch's tokens an account holds, claimed or not. */
@@ -206,8 +216,8 @@ export async function readClaimList(lunch: Pick<Lunch, 'chainId' | 'projectId' |
   return claimsRootOf(entries) === root ? entries : null
 }
 
-/** Whether each account has been sent its airdrop. */
-export async function readClaimed(lunch: Pick<Lunch, 'chainId' | 'projectId'>, accounts: readonly Address[], signal?: AbortSignal): Promise<boolean[]> {
+/** The airdrop tokens each account has been sent so far. */
+export async function readClaimed(lunch: Pick<Lunch, 'chainId' | 'projectId'>, accounts: readonly Address[], signal?: AbortSignal): Promise<bigint[]> {
   const { claims } = await wiringOn(lunch.chainId)
   const client = jbCenterPublicClient(lunch.chainId, signal)
   return Promise.all(accounts.map(account => client.readContract({ address: claims, abi: claimsAbi, functionName: 'claimedBy', args: [BigInt(lunch.projectId), account] })))
@@ -252,14 +262,14 @@ export async function readPriceHistory(lunch: Pick<Lunch, 'chainId' | 'poolKey' 
   })) }
 }
 
-export type MadeTerms = { /** The wallet that sends the create. */ sender: Address; salt: Hex; hostChainId: number; /** The host's money. */ token: Address; deadline: number; creator: Address; keepPercent: bigint; keepCap: bigint; tokenPercent: bigint; vestingDuration: number; claimsPercent: bigint; claimsRoot: Hex }
+export type MadeTerms = { /** The wallet that sends the create. */ sender: Address; salt: Hex; hostChainId: number; /** The host's money. */ token: Address; deadline: number; creator: Address; keepPercent: bigint; keepCap: bigint; tokenPercent: bigint; vestingDuration: number; claimsPercent: bigint; claimsRoot: Hex; claimsVestingDuration: number }
 
 /** Where `createFor` deploys a lunch's token: fixed by the terms and the wallet that sent them. */
 export function tokenAddressOf(terms: MadeTerms, on: { lunch: Address; controller: Address; tokens: Address; implementation: Address }): Address {
   // FairLunch's salt, then the controller's, then the token store's: each scopes the one before to its caller.
   const lunchSalt = keccak256(encodeAbiParameters(
-    [{ type: 'address' }, { type: 'bytes32' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes32' }],
-    [terms.sender, terms.salt, BigInt(terms.hostChainId), terms.token, BigInt(terms.deadline), terms.creator, terms.keepPercent, terms.keepCap, terms.tokenPercent, BigInt(terms.vestingDuration), terms.claimsPercent, terms.claimsRoot]))
+    [{ type: 'address' }, { type: 'bytes32' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'bytes32' }, { type: 'uint256' }],
+    [terms.sender, terms.salt, BigInt(terms.hostChainId), terms.token, BigInt(terms.deadline), terms.creator, terms.keepPercent, terms.keepCap, terms.tokenPercent, BigInt(terms.vestingDuration), terms.claimsPercent, terms.claimsRoot, BigInt(terms.claimsVestingDuration)]))
   const controllerSalt = keccak256(encodePacked(['address', 'bytes32'], [on.lunch, lunchSalt]))
   const salt = keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'bytes32' }], [on.controller, controllerSalt]))
   // An ERC-1167 clone's creation code.

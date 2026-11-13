@@ -554,7 +554,8 @@ jango's answers: site hosting "Not yet"; keep cap "remove it"; "the create flow 
 - [x] Keep of the raise: anything under 100%. Exactly 100% is refused: `serve` mints nothing for an empty pool and reverts, which would lock the raise (`test_serve_withNearlyAllOfTheRaiseKept`, bad-config test).
 - [x] Chef plus airdrop token shares: 99% or less (`MAX_GRANTED_PERCENT`), closing Codex pass 15's supply-ceiling Medium.
 - [x] Create form: keep 0 to 99, shares 99 or less, and a preview of the starting market cap for a typed raise.
-- [ ] Full suite, Codex pass, fork and testnet redeploy.
+- [x] Codex pass 21: DO NOT MERGE for a Medium (99% shares still overflow Juicebox's supply at a raise of 4.1e36 units of a zero-decimal token) and a Low (a 10 wei raise with a near-total keep can be blocked by a hostile empty pool until someone moves its price). Both left as they are and written into RISKS.md: my call that a raise needing 4.1e36 units of the money token, and a 10 wei raise, are contrived. Flagged to jango.
+- [ ] Full suite, fork and testnet redeploy.
 - [x] Burn JIT investigated on the fork. With a just-in-time position five times the pool's size the provider gained 0.99% of a 0.1 ETH burn, 1.61% of a 2 ETH burn, 1.31% and 1.29% after 600K and 1M token dumps. With no such position the same burn hit its 200-tick bound after 0.099 ETH at 980.1K tokens per ETH; with it the burn spent everything at 983K to 990K per ETH. So the take is the pool's 1% fee (which would have reached the chef through `collect`) plus a small spread, and the burn itself does better. A tighter bound can't remove the fee part. Recommendation for jango: accept; a Dutch auction is the only real fix and isn't worth its size. Kept as `test_burn_liquidityAheadOnlyHelpsIt`.
 
 ## Todo from jango: airdrop vesting and fully diluted market cap

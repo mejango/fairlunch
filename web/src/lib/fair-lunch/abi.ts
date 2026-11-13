@@ -420,6 +420,11 @@ export const fairLunchAbi = [
             "internalType": "bytes32"
           },
           {
+            "name": "claimsVestingDuration",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
             "name": "salt",
             "type": "bytes32",
             "internalType": "bytes32"

@@ -16,7 +16,7 @@ export const raisedOf = (balance: bigint, supply: bigint, decimals: number) => {
 const FEE = 25n
 const FEE_TOTAL = 1000n
 
-export type Terms = { keepPercent: bigint; keepCap: bigint; tokenPercent: bigint; /** The airdrop list's share of supply. */ claimsPercent?: bigint }
+export type Terms = { keepPercent: bigint; keepCap: bigint; tokenPercent: bigint; /** The airdrop list's share of supply. */ claimsPercent?: bigint; /** Seconds the chef's tokens and the airdrop's unlock over. */ vestingDuration?: number; claimsVestingDuration?: number }
 export type Split = { creatorEth: bigint; poolEth: bigint; fee: bigint; poolTokens: bigint; creatorTokens: bigint; claimsTokens: bigint }
 
 const less = (a: bigint, b: bigint) => (a < b ? a : b)
@@ -37,8 +37,18 @@ export function splitOf(raised: bigint, supply: bigint, terms: Terms, decimals =
   return { creatorEth, poolEth, fee: raised - creatorEth - poolEth, poolTokens, creatorTokens: granted - claimsTokens, claimsTokens }
 }
 
-/** Every token there'd be if a raise were served now, valued at the price the pool opens at. */
-export function projectedCapOf(raised: bigint, supply: bigint, terms: Terms, decimals = 18): bigint {
+/** A market cap two ways: `circulating` leaves out tokens still vesting, `diluted` counts every token. */
+export type Caps = { circulating: bigint; diluted: bigint }
+
+/** The caps there'd be if a raise were served now, at the price the pool opens at. Nothing has vested yet then. */
+export function projectedCapOf(raised: bigint, supply: bigint, terms: Terms, decimals = 18): Caps {
   const split = splitOf(raised, supply, terms, decimals)
-  return moneyFor(supply + split.poolTokens + split.creatorTokens + split.claimsTokens, decimals)
+  const free = supply + split.poolTokens
+  const locked = (terms.vestingDuration ? split.creatorTokens : 0n) + (terms.claimsVestingDuration ? split.claimsTokens : 0n)
+  const all = free + split.creatorTokens + split.claimsTokens
+  return { circulating: moneyFor(all - locked, decimals), diluted: moneyFor(all, decimals) }
 }
+
+/** How many of `tokens` are still locked at `now`, unlocking evenly over `duration` seconds from `start`. */
+export const unvestedOf = (tokens: bigint, start: number, duration: number, now: number) =>
+  !duration || now >= start + duration ? 0n : tokens - (tokens * BigInt(Math.max(now - start, 0))) / BigInt(duration)

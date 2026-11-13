@@ -460,8 +460,36 @@ contract FairLunchLifecycle is Test {
         claims.claim(id, creator, 0.75e18, _proof(bob, 0.25e18));
 
         claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
-        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_AlreadyClaimed.selector, id, alice));
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NothingToClaim.selector, id, alice));
         claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
+    }
+
+    /// @notice A list's tokens vest from the serve, and each claim sends what has vested since the last.
+    function test_claims_vest() public {
+        vm.deal(address(0xFEED), 10 ether);
+        FairLunchConfig memory config = _config(creator, 0, 0, 0);
+        config.claimsPercent = 6 * TENTH;
+        config.claimsRoot = _root(alice, 0.75e18, bob, 0.25e18);
+        config.claimsVestingDuration = 52 weeks;
+        uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(config);
+        _pay(id, address(0xFEED), 10 ether);
+        vm.warp(deadline);
+        lunch.serve(id);
+        FairLunchClaims claims = lunch.CLAIMS();
+        uint256 whole = claims.tokenCountOf(id) * 3 / 4;
+
+        // Nothing has vested in the block it's served in.
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NothingToClaim.selector, id, alice));
+        claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
+
+        vm.warp(uint256(deadline) + 13 weeks);
+        assertEq(claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18)), whole / 4, "a quarter after a quarter");
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NothingToClaim.selector, id, alice));
+        claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
+
+        vm.warp(uint256(deadline) + 80 weeks);
+        claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
+        assertEq(_token(id).balanceOf(alice), whole, "all of it once it's over");
     }
 
     function test_claims_waitForServe() public {
@@ -479,7 +507,7 @@ contract FairLunchLifecycle is Test {
     function test_claims_onlyFairLunchSetsAndFunds() public {
         FairLunchClaims claims = lunch.CLAIMS();
         vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_Unauthorized.selector, address(this)));
-        claims.setTermsOf(1, TENTH, bytes32(uint256(1)));
+        claims.setTermsOf(1, TENTH, bytes32(uint256(1)), 0);
         vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_Unauthorized.selector, address(this)));
         claims.fund(1, IERC20(address(1)), 1);
     }
@@ -494,7 +522,14 @@ contract FairLunchLifecycle is Test {
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
         lunch.createFor{value: fee}(config);
 
+        // Vesting with nothing to vest.
+        config = _config(creator, 0, 0, 0);
+        config.claimsVestingDuration = 1;
+        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        lunch.createFor{value: fee}(config);
+
         // A share with no list, and a list with no share.
+        config = _config(creator, 0, 0, 0);
         config.claimsPercent = TENTH;
         config.claimsRoot = bytes32(0);
         vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
@@ -510,7 +545,8 @@ contract FairLunchLifecycle is Test {
     function testFuzz_claims_anySplit(uint32 tokenPercent, uint32 claimsPercent, uint256 aliceShares) public {
         tokenPercent = uint32(bound(tokenPercent, 0, 9 * TENTH));
         claimsPercent = uint32(bound(claimsPercent, 1, 990_000_000 - tokenPercent));
-        aliceShares = bound(aliceShares, 0, 1e18);
+        // A share too small to be worth a token has nothing to claim.
+        aliceShares = bound(aliceShares, 1e9, 1e18 - 1e9);
 
         FairLunchConfig memory config = _config(creator, 0, 0, tokenPercent);
         config.claimsPercent = claimsPercent;

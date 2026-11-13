@@ -101,6 +101,7 @@ export function CreateForm() {
       return projectedCapOf(raised, tokensFor(raised, moneyDecimals), {
         keepPercent: BigInt(keep) * 10_000_000n, keepCap: parseUnits(field('cap') || '0', moneyDecimals),
         tokenPercent: BigInt(share) * 10_000_000n, claimsPercent: BigInt(airdrop) * 10_000_000n,
+        vestingDuration: Number(field('vesting')) * WEEK, claimsVestingDuration: Number(field('airdropVesting')) * WEEK,
       }, moneyDecimals)
     } catch { return null }
   })()
@@ -151,7 +152,7 @@ export function CreateForm() {
         hostChainId: hostId, otherChainIds, tokenOn, money: { symbol: money.symbol, decimals: money.decimals },
         deadline: Math.floor(Date.now() / 1000) + days * 86_400, sender: address, creator: getAddress(payout),
         keepPercent: keep, keepCapWei: cap, tokenPercent: share, vestingSeconds: Number(text('vesting')) * WEEK,
-        claimsPercent: airdrop, claimsRoot: entries.length ? claimsRootOf(entries) : zeroHash, claimsCount: entries.length,
+        claimsPercent: airdrop, claimsRoot: entries.length ? claimsRootOf(entries) : zeroHash, claimsCount: entries.length, claimsVestingSeconds: airdrop ? Number(text('airdropVesting')) * WEEK : 0,
         salt: toHex(crypto.getRandomValues(new Uint8Array(32))),
       })
     } catch {
@@ -181,7 +182,7 @@ export function CreateForm() {
                       { label: 'Raise ends', value: new Date(terms.deadline * 1000).toLocaleString() },
                       { label: 'You keep', value: `${terms.keepPercent}% of the raise, up to ${formatUnits(terms.keepCapWei, terms.money.decimals)} ${terms.money.symbol}, before the 2.5% fee` },
                       { label: 'Your tokens', value: `${terms.tokenPercent}% over ${terms.vestingSeconds / WEEK} weeks` },
-                      ...(terms.claimsPercent ? [{ label: 'Airdrop', value: `${terms.claimsPercent}% of supply to ${terms.claimsCount} addresses, at serve` }] : []),
+                      ...(terms.claimsPercent ? [{ label: 'Airdrop', value: `${terms.claimsPercent}% of supply to ${terms.claimsCount} addresses, ${terms.claimsVestingSeconds ? `over ${terms.claimsVestingSeconds / WEEK} weeks` : 'at serve'}` }] : []),
                       { label: 'Paid to', value: isAddressEqual(terms.creator, account) ? 'This wallet' : terms.creator },
                       { label: 'Can change later', value: 'Nothing', strong: true },
                     ] }
@@ -265,7 +266,13 @@ export function CreateForm() {
         <label className="field min-w-0 flex-1">🥜 To this list<input name="list" type="file" accept=".csv,.txt,text/csv,text/plain"
           className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
       </div>
-      <p className="-mt-2 text-sm text-muted">One address,amount per line. Sent out when lunch is served.</p>
+      <p className="-mt-2 text-sm text-muted">One address,amount per line.</p>
+      <label className="field w-fit">🫑 Airdrop unlocks
+          <select name="airdropVesting" className="input select-caret" defaultValue="0">
+            <option value="0">When lunch is served</option>
+            {VESTING_WEEKS.map(weeks => <option key={weeks} value={weeks}>Over {weeks >= 52 ? `${weeks / 52} ${weeks === 52 ? 'year' : 'years'}` : '6 months'}</option>)}
+          </select>
+      </label>
       <label className="field">🥑 Pay your share to
         <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
       </label>
@@ -274,7 +281,7 @@ export function CreateForm() {
           <input className="input" inputMode="decimal" placeholder="10" value={hypothetical} onChange={event => setHypothetical(event.target.value)} />
         </label>
         <p className="mt-2 text-sm text-muted" aria-live="polite">
-          {preview === null ? 'Enter an amount to see the market cap the token would start at.' : `The token would start at a market cap of ${formatEth(preview, moneyDecimals)} ${moneySymbol}.`}
+          {preview === null ? 'Enter an amount to see the market cap the token would start at.' : `The token would start at a market cap of ${formatEth(preview.circulating, moneyDecimals)} ${moneySymbol}${preview.diluted === preview.circulating ? '' : `, or ${formatEth(preview.diluted, moneyDecimals)} ${moneySymbol} fully diluted`}.`}
         </p>
       </div>
       <p className="text-sm text-muted">🔒 Nothing can be changed after.</p>

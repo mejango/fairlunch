@@ -400,6 +400,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                 || config.keepPercent >= JBConstants.SPLITS_TOTAL_PERCENT
                 || uint256(config.tokenPercent) + config.claimsPercent > MAX_GRANTED_PERCENT
                 || (config.claimsPercent == 0) != (config.claimsRoot == bytes32(0))
+                || (config.claimsPercent == 0 && config.claimsVestingDuration != 0)
         ) revert FairLunch_InvalidConfig();
 
         // A lunch needs this chain's Uniswap addresses.
@@ -421,7 +422,8 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                 config.tokenPercent,
                 config.vestingDuration,
                 config.claimsPercent,
-                config.claimsRoot
+                config.claimsRoot,
+                config.claimsVestingDuration
             )
         );
 
@@ -537,7 +539,12 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
         // The host hands out the claims.
         if (isHost && config.claimsPercent != 0) {
-            CLAIMS.setTermsOf({projectId: projectId, percent: config.claimsPercent, root: config.claimsRoot});
+            CLAIMS.setTermsOf({
+                projectId: projectId,
+                percent: config.claimsPercent,
+                root: config.claimsRoot,
+                vestingDuration: config.claimsVestingDuration
+            });
         }
 
         emit Create({

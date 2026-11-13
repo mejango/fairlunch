@@ -10,9 +10,9 @@ import { TxAction } from '@/components/TxAction'
 import { assetUrl, formatEth, formatPrice, formatTokens } from '@/lib/format'
 import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib/fair-lunch/phase'
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
-import { claimCallOf, readServed, readClaimed, readClaimList, readCopies, readHeld, readHostOf, readLunch, readPoolFees, readReleasable, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
+import { claimCallOf, readServed, readClaimed, readClaimList, readCopies, readHeld, readHostOf, readLunch, readPoolFees, readVesting, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
 import { SHARES_TOTAL } from '@/lib/fair-lunch/claims'
-import { moneyFor, PERCENT_TOTAL, projectedCapOf, raisedOf, splitOf, tokensFor } from '@/lib/fair-lunch/split'
+import { moneyFor, PERCENT_TOTAL, projectedCapOf, raisedOf, splitOf, tokensFor, unvestedOf } from '@/lib/fair-lunch/split'
 import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, refundTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
 import { chainName, projectPath } from '@/lib/urn'
@@ -68,6 +68,16 @@ function Stat({ label, value, action }: { label: ReactNode; value: string; actio
   )
 }
 
+/** A small "?" beside a label that opens one line on what the number counts. */
+function Info({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <>
+      <button type="button" popoverTarget={id} aria-label="What this counts" className="ml-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full border border-line text-xs font-semibold">?</button>
+      <span id={id} popover="auto" className="m-auto max-w-xs rounded-xl border border-line bg-card p-3 text-sm text-ink">{children}</span>
+    </>
+  )
+}
+
 /** The pie's colors: where a raise goes. */
 const POOL = '#2e7d32', CREATOR = '#f5b942', FUNDERS = '#2f6fed', AIRDROP = '#c2410c'
 const Swatch = ({ color }: { color: string }) => <span aria-hidden className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />
@@ -113,7 +123,7 @@ function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
       </label>
       <p className="text-sm text-muted">
         {routed ? `Swapped to ${lunch.money.symbol} first, then 1M ${lunch.symbol} per ${lunch.money.symbol}. Refunds until the fundraise ends.` : `You get ${formatTokens(tokens)} ${lunch.symbol}. Refunds until the fundraise ends.`}
-        {amount > 0n && !routed ? <span className="block">{`Projected initial market cap becomes ${moneyText(lunch, projectedCapOf(raisedOf(lunch.balance, lunch.supply, lunch.money.decimals) + amount, lunch.supply + tokens, lunch, lunch.money.decimals))}.`}</span> : null}
+        {amount > 0n && !routed ? <span className="block">{(caps => `Projected initial market cap becomes ${moneyText(lunch, caps.circulating)}${caps.diluted === caps.circulating ? '' : `, ${moneyText(lunch, caps.diluted)} fully diluted`}.`)(projectedCapOf(raisedOf(lunch.balance, lunch.supply, lunch.money.decimals) + amount, lunch.supply + tokens, lunch, lunch.money.decimals))}</span> : null}
       </p>
       <div className="flex flex-col items-end gap-2">
         {short > 0n ? <Allow lunch={lunch} amount={short} paying={paying} /> : <TxAction chainId={lunch.chainId} label="Fund" title={`Fund ${lunch.name}`} doneTitle="Funded" onDone={() => setText('')}
@@ -248,7 +258,7 @@ function TokenPie({ lunch, title, funders, poolTokens, creatorTokens, claimsToke
 const RECIPIENTS_SHOWN = 20
 
 /** The airdrop and who it goes to. Once lunch is served, anyone can send an address its tokens. */
-function Airdrop({ lunch, tokens }: { lunch: Lunch; tokens: bigint }) {
+function Airdrop({ lunch, tokens, now }: { lunch: Lunch; tokens: bigint; now: number }) {
   const { address } = useWallet()
   const [find, setFind] = useState('')
   const { data: entries } = useQuery({
@@ -273,7 +283,7 @@ function Airdrop({ lunch, tokens }: { lunch: Lunch; tokens: bigint }) {
   return (
     <details className="mt-4 border-t border-line/50 pt-3">
       <summary className="cursor-pointer">
-        <span className="text-sm text-muted">Airdrop{entries ? ` to ${entries.length.toLocaleString()} ${entries.length === 1 ? 'address' : 'addresses'}` : ''}</span>
+        <span className="text-sm text-muted">Airdrop{entries ? ` to ${entries.length.toLocaleString()} ${entries.length === 1 ? 'address' : 'addresses'}` : ''}{lunch.claimsVestingDuration ? `, unlocking over ${Math.round(lunch.claimsVestingDuration / 604800)} weeks` : ''}</span>
         <span className="block text-xl font-bold tabular-nums">{tokens ? `${formatTokens(tokens)} ${lunch.symbol}` : percent(lunch.claimsPercent)}</span>
       </summary>
       {entries === undefined ? <p className="mt-3 text-sm text-muted">…</p> : entries === null ? (
@@ -284,18 +294,20 @@ function Airdrop({ lunch, tokens }: { lunch: Lunch; tokens: bigint }) {
           <ul className="mt-2 divide-y divide-line/50">
             {shown.map(({ account, shares, index }, row) => {
               const amount = (tokens * shares) / SHARES_TOTAL
+              const sent = claimed?.[row] ?? 0n
+              const claimable = amount - unvestedOf(amount, lunch.claimsFundedAt, lunch.claimsVestingDuration, now) - sent
               return (
                 <li key={account} className="flex min-h-[44px] flex-wrap items-center justify-between gap-x-3 py-1 text-sm">
                   <span className="font-mono" title={account}>{account.slice(0, 6)}…{account.slice(-4)}{yours(account) ? <span className="ml-2 font-sans font-bold">You</span> : null}</span>
                   <span className="flex items-center gap-3 tabular-nums">
                     {tokens ? `${formatTokens(amount)} ${lunch.symbol}` : `${formatUnits(shares * 100n, 18).replace(/(\.\d{2})\d+$/, '$1')}%`}
-                    {!lunch.servedAt ? null : claimed?.[row] ? <span className="text-muted">Claimed</span> : (
-                      <TxAction chainId={lunch.chainId} className={SMALL} label="Claim" title="Claim the airdrop" doneTitle="Claimed" disabled={!claimed}
+                    {!lunch.servedAt ? null : sent >= amount ? <span className="text-muted">Claimed</span> : (
+                      <TxAction chainId={lunch.chainId} className={SMALL} label="Claim" title="Claim the airdrop" doneTitle="Claimed" disabled={!claimed || claimable <= 0n}
                         prepare={async () => {
                           const call = await claimCallOf(lunch, entries, index)
                           return {
                             request: { ...call, abi: call.abi as Abi, label: `Sends ${lunch.symbol} from the airdrop` },
-                            rows: [{ label: 'Sends', value: `${formatTokens(amount)} ${lunch.symbol} to ${account.slice(0, 6)}…${account.slice(-4)}`, strong: true }, { label: 'Costs you', value: 'Network fee only' }],
+                            rows: [{ label: 'Sends', value: `${formatTokens(claimable)} ${lunch.symbol} to ${account.slice(0, 6)}…${account.slice(-4)}`, strong: true }, { label: 'Costs you', value: 'Network fee only' }],
                           }
                         }} />
                     )}
@@ -319,9 +331,9 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
     queryFn: ({ signal }) => readPoolFees(lunch, signal),
     refetchInterval: 60_000,
   })
-  const { data: releasable } = useQuery({
-    queryKey: ['fair-lunch', 'releasable', lunch.chainId, lunch.projectId],
-    queryFn: ({ signal }) => readReleasable(lunch, signal),
+  const { data: vesting } = useQuery({
+    queryKey: ['fair-lunch', 'vesting', lunch.chainId, lunch.projectId],
+    queryFn: ({ signal }) => readVesting(lunch, signal),
     refetchInterval: 60_000,
   })
   const { data: served } = useQuery({
@@ -330,11 +342,16 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
     staleTime: Infinity,
   })
   const uniswap = UNISWAP_CHAIN[lunch.chainId]
+  const releasable = vesting?.releasable
+  const cap = (tokens: bigint) => `${formatPrice(Number(formatUnits(tokens, 18)) * lunch.price!)} ${lunch.money.symbol}`
+  const locked = vesting ? vesting.locked + unvestedOf(lunch.claimsTokens, lunch.claimsFundedAt, lunch.claimsVestingDuration, now) : null
   return (
     <>
       <dl className="grid grid-cols-2 gap-4">
+        <Stat label={<>Market cap<Info id="cap-info">Tokens held by funders, the pool and anyone whose tokens have unlocked. Tokens still vesting aren’t counted.</Info></>}
+          value={lunch.price && locked !== null ? cap(lunch.supply > locked ? lunch.supply - locked : 0n) : '…'} />
+        <Stat label="Fully diluted market cap" value={lunch.price ? cap(lunch.supply) : '…'} />
         <Stat label="Current price" value={lunch.price ? `${formatPrice(lunch.price)} ${lunch.money.symbol}` : '…'} />
-        <Stat label="Market cap" value={lunch.price ? `${formatPrice(Number(formatUnits(lunch.supply, 18)) * lunch.price)} ${lunch.money.symbol}` : '…'} />
         <Stat label="Supply" value={formatTokens(lunch.supply)} />
         <Stat label="In the pool" value={lunch.pooled === null ? '…' : moneyText(lunch, lunch.pooled)} />
         <Stat label="Burned" value={formatTokens(burns.reduce((sum, burn) => sum + BigInt(burn.amount), 0n))} />
@@ -364,7 +381,7 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
         </div>
       </dl>
       {served ? <div className="mt-4 border-t border-line/50"><TokenPie lunch={lunch} title="Tokens when served" {...served} /></div> : null}
-      <Airdrop lunch={lunch} tokens={lunch.claimsTokens} />
+      <Airdrop lunch={lunch} tokens={lunch.claimsTokens} now={now} />
       {uniswap ? (
         <p className="mt-4 text-sm">
           <a className="text-accent underline" target="_blank" rel="noreferrer" href={`https://app.uniswap.org/explore/pools/${uniswap}/${uniswapV4PoolId(lunch.poolKey)}`}>See the pool on Uniswap</a>
@@ -455,6 +472,7 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
   const raised = raisedOf(lunch.balance, lunch.supply, lunch.money.decimals)
   const phase = phaseOf(lunch, raised, now)
   const split = splitOf(raised, lunch.supply, lunch, lunch.money.decimals)
+  const caps = projectedCapOf(raised, lunch.supply, lunch, lunch.money.decimals)
   const logo = assetUrl(logoUri)
   // Each part of the raise as a percent of it, for the pie.
   const slice = (wei: bigint) => (raised > 0n ? Number((wei * 10_000n) / raised) / 100 : 0)
@@ -513,7 +531,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
             <>
               <dl className="grid grid-cols-2 items-end gap-4">
                 <Stat label="Raised" value={moneyText(lunch, raised)} />
-                <Stat label="Projected initial market cap" value={moneyText(lunch, projectedCapOf(raised, lunch.supply, lunch, lunch.money.decimals))} />
+                <Stat label={<>Projected initial market cap<Info id="cap-info">Funders’ tokens and the pool’s. Tokens that vest aren’t counted.</Info></>} value={moneyText(lunch, caps.circulating)} />
+                <Stat label="Projected fully diluted market cap" value={moneyText(lunch, caps.diluted)} />
               </dl>
               <div className="mt-4 flex items-center gap-5">
                 {raised > 0n ? (
@@ -529,7 +548,7 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
                 The chef keeps {percent(lunch.keepPercent)} of the raise, up to {formatUnits(lunch.keepCap, lunch.money.decimals)} {lunch.money.symbol}. The rest is locked in the pool.
               </p>
               <TokenPie lunch={lunch} title="Tokens if served now" funders={lunch.supply} poolTokens={split.poolTokens} creatorTokens={split.creatorTokens} claimsTokens={split.claimsTokens} />
-              <Airdrop lunch={lunch} tokens={split.claimsTokens} />
+              <Airdrop lunch={lunch} tokens={split.claimsTokens} now={now} />
             </>
           )}
           <p className="mt-3 text-sm text-muted">

@@ -23,6 +23,8 @@ import {JBSuckerDeploymentConfig} from "@bananapus/omnichain-deployers-v6/src/st
 /// @custom:member claimsPercent The share of the total token supply at launch that goes to a list of addresses, out
 /// of `JBConstants.SPLITS_TOTAL_PERCENT`. Zero for none.
 /// @custom:member claimsRoot The merkle root of that list, as `FairLunchClaims` reads it. Zero for none.
+/// @custom:member claimsVestingDuration The number of seconds over which the list's tokens vest linearly, starting
+/// when the lunch is served. Zero if they're claimable at once, and zero for no list.
 /// @custom:member salt A salt for the token's and suckers' deterministic addresses. It is scoped to the caller, so the
 /// same caller using the same salt on each chain gets matching deployments.
 /// @custom:member suckerDeploymentConfiguration The suckers connecting this chain's copy of the lunch to the others.
@@ -41,6 +43,7 @@ struct FairLunchConfig {
     uint32 vestingDuration;
     uint32 claimsPercent;
     bytes32 claimsRoot;
+    uint32 claimsVestingDuration;
     bytes32 salt;
     JBSuckerDeploymentConfig suckerDeploymentConfiguration;
 }

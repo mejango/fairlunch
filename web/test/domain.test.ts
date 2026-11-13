@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { countdown, phaseOf } from '@/lib/fair-lunch/phase'
-import { splitOf } from '@/lib/fair-lunch/split'
+import { projectedCapOf, splitOf, unvestedOf } from '@/lib/fair-lunch/split'
 
 const ETH = 10n ** 18n
 
@@ -37,5 +37,25 @@ describe('phaseOf', () => {
     expect(countdown(3 * 86400 + 4 * 3600 + 5)).toBe('3d 4h')
     expect(countdown(65)).toBe('1m 5s')
     expect(countdown(-1)).toBe('0s')
+  })
+})
+
+describe('market caps', () => {
+  const terms = { keepPercent: 0n, keepCap: 0n, tokenPercent: 100_000_000n, claimsPercent: 400_000_000n }
+  it('leaves vesting tokens out of the circulating cap and counts them fully diluted', () => {
+    const all = projectedCapOf(10n * ETH, 10_000_000n * ETH, terms)
+    expect(all.circulating).toBe(all.diluted)
+    const chef = projectedCapOf(10n * ETH, 10_000_000n * ETH, { ...terms, vestingDuration: 1 })
+    const both = projectedCapOf(10n * ETH, 10_000_000n * ETH, { ...terms, vestingDuration: 1, claimsVestingDuration: 1 })
+    expect(chef.diluted).toBe(all.diluted)
+    // A tenth of supply is the chef's, four tenths the airdrop's.
+    expect(Number(chef.circulating) / Number(all.diluted)).toBeCloseTo(0.9)
+    expect(Number(both.circulating) / Number(all.diluted)).toBeCloseTo(0.5)
+  })
+  it('unlocks evenly', () => {
+    expect(unvestedOf(100n, 1000, 100, 1000)).toBe(100n)
+    expect(unvestedOf(100n, 1000, 100, 1025)).toBe(75n)
+    expect(unvestedOf(100n, 1000, 100, 1100)).toBe(0n)
+    expect(unvestedOf(100n, 1000, 0, 999)).toBe(0n)
   })
 })
