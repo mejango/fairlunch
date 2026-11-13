@@ -232,7 +232,37 @@ const SMALL = 'btn-secondary min-h-[36px] px-3 text-sm'
 const ACTION_ROW = 'col-span-2 flex flex-wrap items-end justify-between gap-3 border-t border-line/50 pt-3'
 
 /** Who gets the tokens: funders, the pool, the chef and the airdrop list. */
-function TokenPie({ lunch, title, funders, poolTokens, creatorTokens, claimsTokens }: { lunch: Lunch; title: string; funders: bigint; poolTokens: bigint; creatorTokens: bigint; claimsTokens: bigint }) {
+/** How the tokens unlock from the serve on: time across, supply up. Funders' and the pool's are there from the start. */
+function UnlockChart({ lunch, total, funders, free, creatorTokens, claimsTokens, elapsed }: { lunch: Lunch; total: bigint; funders: bigint; /** Funders' tokens and the pool's. */ free: bigint; creatorTokens: bigint; claimsTokens: bigint; elapsed?: number }) {
+  const chefFor = creatorTokens ? lunch.vestingDuration : 0, listFor = claimsTokens ? lunch.claimsVestingDuration : 0
+  const end = Math.max(chefFor, listFor)
+  if (!end) return null
+  const W = 300, H = 110
+  const share = (tokens: bigint) => Number((tokens * 10_000n) / total) / 10_000
+  const ramp = (tokens: bigint, duration: number, at: number) => share(tokens) * (duration ? Math.min(1, at / duration) : 1)
+  const times = [...new Set([0, chefFor, listFor, end])].sort((a, b) => a - b)
+  const point = (at: number, level: number) => `${((at / end) * W).toFixed(1)},${(H - level * H).toFixed(1)}`
+  // Each band sits on the one below: its top edge forward in time, then the edge below it back.
+  const band = (bottom: (at: number) => number, top: (at: number) => number) =>
+    [...times.map(at => point(at, top(at))), ...[...times].reverse().map(at => point(at, bottom(at)))].join(' ')
+  const chefTop = (at: number) => share(free) + ramp(creatorTokens, chefFor, at)
+  const weeks = Math.round(end / 604800)
+  return (
+    <figure className="mt-4">
+      <figcaption className="text-sm text-muted">Unlocked over time</figcaption>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={`Tokens unlocked from the serve to ${weeks} weeks after`} className="mt-2 h-28 w-full rounded-lg border border-line">
+        <polygon fill={FUNDERS} points={band(() => 0, () => share(funders))} />
+        <polygon fill={POOL} points={band(() => share(funders), () => share(free))} />
+        <polygon fill={CREATOR} points={band(() => share(free), chefTop)} />
+        <polygon fill={AIRDROP} points={band(chefTop, at => chefTop(at) + ramp(claimsTokens, listFor, at))} />
+        {elapsed !== undefined && elapsed < end ? <line x1={(elapsed / end) * W} x2={(elapsed / end) * W} y1={0} y2={H} stroke="currentColor" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" /> : null}
+      </svg>
+      <p className="mt-1 flex justify-between text-xs text-muted"><span>Served</span><span>{elapsed !== undefined && elapsed < end ? 'Dashed line is now' : `Up to ${formatTokens(total)}`}</span><span>{weeks >= 52 ? `${weeks / 52} ${weeks === 52 ? 'year' : 'years'}` : `${weeks} weeks`}</span></p>
+    </figure>
+  )
+}
+
+function TokenPie({ lunch, title, funders, poolTokens, creatorTokens, claimsTokens, elapsed }: { lunch: Lunch; title: string; funders: bigint; poolTokens: bigint; creatorTokens: bigint; claimsTokens: bigint; /** Seconds since the serve, once served. */ elapsed?: number }) {
   const total = funders + poolTokens + creatorTokens + claimsTokens
   if (total === 0n) return null
   const part = (tokens: bigint) => Number((tokens * 10_000n) / total) / 100
@@ -250,6 +280,7 @@ function TokenPie({ lunch, title, funders, poolTokens, creatorTokens, claimsToke
           {claimsTokens ? <Stat label={<><Swatch color={AIRDROP} />🫒 Airdrop</>} value={formatTokens(claimsTokens)} /> : null}
         </dl>
       </div>
+      <UnlockChart lunch={lunch} total={total} funders={funders} free={funders + poolTokens} creatorTokens={creatorTokens} claimsTokens={claimsTokens} elapsed={elapsed} />
     </>
   )
 }
@@ -380,7 +411,7 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
           )}
         </div>
       </dl>
-      {served ? <div className="mt-4 border-t border-line/50"><TokenPie lunch={lunch} title="Tokens when served" {...served} /></div> : null}
+      {served ? <div className="mt-4 border-t border-line/50"><TokenPie lunch={lunch} title="Tokens when served" {...served} elapsed={now - lunch.servedAt} /></div> : null}
       <Airdrop lunch={lunch} tokens={lunch.claimsTokens} now={now} />
       {uniswap ? (
         <p className="mt-4 text-sm">
