@@ -41,6 +41,11 @@
     @apply flex flex-col gap-1 text-sm font-semibold;
   }
 
+  /* A line of copy with its fields inline, filling its blanks. */
+  .sentence {
+    @apply flex flex-wrap items-center gap-2 text-sm font-semibold;
+  }
+
   /* --- Cards: the card surface with a thin Line border --- */
   .card {
     @apply rounded-xl border border-line bg-card;

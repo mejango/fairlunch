@@ -259,25 +259,25 @@ export function CreateForm() {
           <input name="money" className="input font-mono text-sm" placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
         </label>
       ) : null}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="field">🧀 You keep, % of the raise<input name="keep" className="input" inputMode="numeric" defaultValue="10" required /></label>
-        <label className="field">🧈 But no more than, {raiseIn === 'other' ? 'tokens' : raiseIn}<input name="cap" className="input" inputMode="decimal" defaultValue="10" required /></label>
-        <label className="field">🥬 Your tokens, % of supply<input name="share" className="input" inputMode="numeric" defaultValue="10" required /></label>
-        <label className="field">🥒 Your tokens unlock
-          <select name="vesting" className="input select-caret" defaultValue="52">
-            {UNLOCK_OPTIONS}
-          </select>
-        </label>
-        <label className="field sm:col-span-2">🥑 Pay your share to
-          <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
-        </label>
-        <label className="field">🫒 Airdrop, % of supply<input name="airdrop" className="input" inputMode="numeric" defaultValue="0" /></label>
-        <label className="field">🫑 Airdrops unlock
-          <select name="airdropVesting" className="input select-caret" defaultValue="0">
-            {UNLOCK_OPTIONS}
-          </select>
-        </label>
-      </div>
+      <p className="sentence">🧀 You keep
+        <input name="keep" aria-label="Percent of the raise you keep" className="input w-16" inputMode="numeric" defaultValue="10" required />
+        % of the raise, but no more than
+        <input name="cap" aria-label="The most you keep" className="input w-24" inputMode="decimal" defaultValue="10" required />
+        {raiseIn === 'other' ? 'tokens' : raiseIn}.
+      </p>
+      <p className="sentence">🥬 You get
+        <input name="share" aria-label="Percent of the tokens you get" className="input w-16" inputMode="numeric" defaultValue="10" required />
+        % of the tokens, unlocking
+        <select name="vesting" aria-label="When your tokens unlock" className="input select-caret w-40 lowercase" defaultValue="52">{UNLOCK_OPTIONS}</select>
+      </p>
+      <label className="field">🥑 Pay your share to
+        <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
+      </label>
+      <p className="sentence">🫒 Airdrop
+        <input name="airdrop" aria-label="Percent of the tokens airdropped" className="input w-16" inputMode="numeric" defaultValue="0" />
+        % of the tokens, unlocking
+        <select name="airdropVesting" aria-label="When airdrops unlock" className="input select-caret w-40 lowercase" defaultValue="0">{UNLOCK_OPTIONS}</select>
+      </p>
       <label className="field">🥜 Airdrop list<input name="list" type="file" accept=".csv,.txt,text/csv,text/plain"
         className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
       <p className="-mt-2 text-sm text-muted">One address,amount per line.</p>
