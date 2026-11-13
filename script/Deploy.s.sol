@@ -30,10 +30,10 @@ contract Deploy is Script, Sphinx {
     // ----------------------- internal constants ------------------------ //
     //*********************************************************************//
 
-    /// @notice The canonical Permit2, at the same address on every chain.
     /// @notice The router terminal registry, at the same address on every chain.
     IJBTerminal internal constant _ROUTER_TERMINAL_REGISTRY = IJBTerminal(0xe0427F250fdb0379c8E98e884Ee4570521208CbC);
 
+    /// @notice The canonical Permit2, at the same address on every chain.
     IAllowanceTransfer internal constant _PERMIT2 = IAllowanceTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 
     /// @notice The salt both contracts are deployed with.
