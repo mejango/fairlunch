@@ -6,6 +6,8 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
+import {IFairLunch} from "./interfaces/IFairLunch.sol";
+
 /// @notice Holds the parts of each lunch's token supply that go to its creator and to a list of addresses, and hands
 /// them out.
 /// @dev `FairLunch` mints both here when the lunch is served. The creator's tokens vest linearly over the duration
@@ -85,10 +87,6 @@ contract FairLunchClaims {
     /// @notice The number of tokens a lunch's claims have sent out so far.
     /// @custom:param projectId The ID of the lunch's project.
     mapping(uint256 projectId => uint256) public totalClaimedOf;
-
-    /// @notice When a lunch's claims were funded, which is when it was served and when they start vesting.
-    /// @custom:param projectId The ID of the lunch's project.
-    mapping(uint256 projectId => uint48) public fundedAt;
 
     /// @notice The number of seconds over which a lunch's claims vest. Zero if they're all claimable at once.
     /// @custom:param projectId The ID of the lunch's project.
@@ -201,7 +199,6 @@ contract FairLunchClaims {
         creatorOf[projectId] = creator;
         creatorTokenCountOf[projectId] = creatorTokenCount;
         creatorVestingDurationOf[projectId] = creatorVestingDuration;
-        fundedAt[projectId] = uint48(block.timestamp);
         emit Fund({
             projectId: projectId,
             token: token,
@@ -257,7 +254,7 @@ contract FairLunchClaims {
     /// @param duration The number of seconds they vest over.
     /// @return The number of them that has vested.
     function _vestedOf(uint256 projectId, uint256 tokenCount, uint256 duration) internal view returns (uint256) {
-        uint256 elapsed = block.timestamp - fundedAt[projectId];
+        uint256 elapsed = block.timestamp - IFairLunch(LUNCH).servedAtOf(projectId);
         return elapsed < duration ? Math.mulDiv(tokenCount, elapsed, duration) : tokenCount;
     }
 }

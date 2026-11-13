@@ -39,9 +39,8 @@ export type Lunch = {
   /** The airdrop list's share of supply, and the tokens minted for it at serve. */
   claimsPercent: bigint
   claimsTokens: bigint
-  /** Seconds the airdrop unlocks over, from `claimsFundedAt`: when `serve` funded it and the chef's tokens. */
+  /** Seconds the airdrop unlocks over, from `servedAt`. */
   claimsVestingDuration: number
-  claimsFundedAt: number
   token: Address
   name: string
   symbol: string
@@ -110,7 +109,7 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
   const { lunch, terminal, store, tokens, controller, claims } = await wiringOn(chainId)
   const client = jbCenterPublicClient(chainId, signal)
   const id = BigInt(projectId)
-  const [record, poolKey, token, supply, uri, clock, claimsPercent, claimsTokens, claimsVestingDuration, claimsFundedAt] = await Promise.all([
+  const [record, poolKey, token, supply, uri, clock, claimsPercent, claimsTokens, claimsVestingDuration] = await Promise.all([
     client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'recordOf', args: [id] }),
     client.readContract({ address: lunch, abi: fairLunchAbi, functionName: 'poolKeyOf', args: [id] }),
     client.readContract({ address: tokens, abi: jbTokensAbi, functionName: 'tokenOf', args: [id] }),
@@ -120,7 +119,6 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
     client.readContract({ address: claims, abi: claimsAbi, functionName: 'percentOf', args: [id] }),
     client.readContract({ address: claims, abi: claimsAbi, functionName: 'tokenCountOf', args: [id] }),
     client.readContract({ address: claims, abi: claimsAbi, functionName: 'vestingDurationOf', args: [id] }),
-    client.readContract({ address: claims, abi: claimsAbi, functionName: 'fundedAt', args: [id] }),
   ])
   if (Number(record.hostChainId) !== chainId) return null
   const moneyIs0 = !isAddressEqual(poolKey.currency0, token)
@@ -137,7 +135,7 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
   return {
     chainId, projectId, hostChainId: Number(record.hostChainId), ...clock,
     creator: record.creator, keepPercent: BigInt(record.keepPercent), keepCap: record.keepCap, tokenPercent: BigInt(record.tokenPercent),
-    vestingDuration: record.vestingDuration, claimsPercent: BigInt(claimsPercent), claimsTokens, claimsVestingDuration, claimsFundedAt, token, name, symbol, uri, money, moneyIs0, balance, supply, poolKey,
+    vestingDuration: record.vestingDuration, claimsPercent: BigInt(claimsPercent), claimsTokens, claimsVestingDuration, token, name, symbol, uri, money, moneyIs0, balance, supply, poolKey,
     price: slot0 ? priceAt(slot0[1], { money, moneyIs0 }) : null,
     // The position spans every price, so its currency0 is its liquidity over the square root of the price, and its
     // currency1 is its liquidity times it.

@@ -767,7 +767,6 @@ contract FairLunchLifecycle is Test {
         assertApproxEqAbs(total * 10, token.totalSupply(), 1e6, "10% of supply");
         assertEq(token.balanceOf(address(claims)), total, "held");
         assertEq(claims.creatorOf(id), creator);
-        assertEq(claims.fundedAt(id), _servedAt());
         assertEq(claims.creatorVestingDurationOf(id), 52 weeks);
 
         // Nothing has vested in the block it's served in.

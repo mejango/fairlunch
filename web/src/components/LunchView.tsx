@@ -326,7 +326,7 @@ function Airdrop({ lunch, tokens, now }: { lunch: Lunch; tokens: bigint; now: nu
             {shown.map(({ account, shares, index }, row) => {
               const amount = (tokens * shares) / SHARES_TOTAL
               const sent = claimed?.[row] ?? 0n
-              const claimable = amount - unvestedOf(amount, lunch.claimsFundedAt, lunch.claimsVestingDuration, now) - sent
+              const claimable = amount - unvestedOf(amount, lunch.servedAt, lunch.claimsVestingDuration, now) - sent
               return (
                 <li key={account} className="flex min-h-[44px] flex-wrap items-center justify-between gap-x-3 py-1 text-sm">
                   <span className="font-mono" title={account}>{account.slice(0, 6)}…{account.slice(-4)}{yours(account) ? <span className="ml-2 font-sans font-bold">You</span> : null}</span>
@@ -373,10 +373,10 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
     staleTime: Infinity,
   })
   const uniswap = UNISWAP_CHAIN[lunch.chainId]
-  const chefLocked = vesting ? unvestedOf(vesting.total, lunch.claimsFundedAt, lunch.vestingDuration, now) : 0n
+  const chefLocked = vesting ? unvestedOf(vesting.total, lunch.servedAt, lunch.vestingDuration, now) : 0n
   const releasable = vesting ? vesting.total - chefLocked - vesting.sent : undefined
   const cap = (tokens: bigint) => `${formatPrice(Number(formatUnits(tokens, 18)) * lunch.price!)} ${lunch.money.symbol}`
-  const locked = vesting ? chefLocked + unvestedOf(lunch.claimsTokens, lunch.claimsFundedAt, lunch.claimsVestingDuration, now) : null
+  const locked = vesting ? chefLocked + unvestedOf(lunch.claimsTokens, lunch.servedAt, lunch.claimsVestingDuration, now) : null
   return (
     <>
       <dl className="grid grid-cols-2 gap-4">

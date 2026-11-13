@@ -11,7 +11,6 @@ export const claimsAbi = parseAbi([
   'function tokenCountOf(uint256 projectId) view returns (uint256)',
   'function claimedBy(uint256 projectId, address account) view returns (uint256)',
   'function vestingDurationOf(uint256 projectId) view returns (uint32)',
-  'function fundedAt(uint256 projectId) view returns (uint48)',
   'function creatorTokenCountOf(uint256 projectId) view returns (uint256)',
   'function creatorClaimedOf(uint256 projectId) view returns (uint256)',
   'function release(uint256 projectId) returns (uint256)',
