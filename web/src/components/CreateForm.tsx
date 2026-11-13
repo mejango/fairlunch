@@ -30,7 +30,7 @@ const CHAINS = [...PRODUCTION_CHAINS, ...TESTNET_CHAINS]
 const VESTING_WEEKS = [26, 52, 104, 208]
 const WEEK = 604_800
 /** The choices for how long tokens unlock over, the same for the chef's and the airdrop's. */
-const UNLOCK_OPTIONS = [0, ...VESTING_WEEKS].map(weeks => <option key={weeks} value={weeks}>{weeks >= 52 ? `${weeks / 52} ${weeks === 52 ? 'year' : 'years'}` : weeks ? '6 months' : 'Right away'}</option>)
+const UNLOCK_OPTIONS = [0, ...VESTING_WEEKS].map(weeks => <option key={weeks} value={weeks}>{weeks >= 52 ? `Over ${weeks / 52} ${weeks === 52 ? 'year' : 'years'}` : weeks ? 'Over 6 months' : 'Right away'}</option>)
 
 const whole = (text: string, min: number, max: number): number | null => {
   const value = Number(text)
@@ -49,7 +49,7 @@ export function CreateForm() {
   // Counts edits so the preview re-reads the form. A controlled select has to take its choice on `input` too, or this
   // re-render puts its old value back before `change` arrives.
   const [typed, setTyped] = useState(0)
-  const [hypothetical, setHypothetical] = useState('')
+  const [hypothetical, setHypothetical] = useState('10')
   const [busy, setBusy] = useState(false)
   const [hostId, setHostId] = useState<number>(CHAINS[0]?.id ?? 0)
   const [raiseIn, setRaiseIn] = useState<'ETH' | 'USDC' | 'other'>('ETH')
@@ -58,6 +58,8 @@ export function CreateForm() {
 
   // Pick an unfinished create back up, and keep it as it moves.
   const [restored, setRestored] = useState(false)
+  // The preview reads the form, which isn't there until it has rendered once.
+  useEffect(() => setTyped(1), [])
   useEffect(() => {
     const attempt = loadAttempt()
     // An attempt saved before lunches could raise other tokens can't be finished as it was.
@@ -261,7 +263,7 @@ export function CreateForm() {
         <label className="field">🧀 You keep, % of the raise<input name="keep" className="input" inputMode="numeric" defaultValue="10" required /></label>
         <label className="field">🧈 But no more than, {raiseIn === 'other' ? 'tokens' : raiseIn}<input name="cap" className="input" inputMode="decimal" defaultValue="10" required /></label>
         <label className="field">🥬 Your tokens, % of supply<input name="share" className="input" inputMode="numeric" defaultValue="10" required /></label>
-        <label className="field">🥒 Unlocking over
+        <label className="field">🥒 Your tokens unlock
           <select name="vesting" className="input select-caret" defaultValue="52">
             {UNLOCK_OPTIONS}
           </select>
@@ -270,7 +272,7 @@ export function CreateForm() {
           <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
         </label>
         <label className="field">🫒 Airdrop, % of supply<input name="airdrop" className="input" inputMode="numeric" defaultValue="0" /></label>
-        <label className="field">🫑 Unlocking over
+        <label className="field">🫑 Airdrops unlock
           <select name="airdropVesting" className="input select-caret" defaultValue="0">
             {UNLOCK_OPTIONS}
           </select>
