@@ -50,9 +50,9 @@ describe('tokenAddressOf', () => {
       sender: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', salt: '0x0000000000000000000000000000000000000000000000000000000000000000', hostChainId: 8453, token: ETH_MONEY.address, deadline: 1795038375,
       creator: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', keepPercent: 200_000_000n, keepCap: ETH / 2n, tokenPercent: 100_000_000n, vestingDuration: 31_449_600, claimsPercent: 0n, claimsRoot: '0x0000000000000000000000000000000000000000000000000000000000000000', claimsVestingDuration: 0,
     }, {
-      lunch: '0x5daafb44b864aaeb779f96365474ca6338311782', controller: '0x3Fcec3572e84b624477BcfF4E2CF1f7dEAb648F1',
+      lunch: '0xf77002d245ce3c1b1f037258f9cae5265da4800a', controller: '0x3Fcec3572e84b624477BcfF4E2CF1f7dEAb648F1',
       tokens: '0x1f80d8f057eE36b4C2656D107E4e4558B71bA7D9', implementation: '0x6DB9Cf17222D8DE2012Fe13B9FA5bB7981fa0b17',
-    })).toBe('0x470fcaB5329C9F37BCe7b0e0f021d18E4B53Dbc2')
+    })).toBe('0xC4F7d1a6Db92bC2566dB36144B8938b465a83ABa')
   })
 })
 
