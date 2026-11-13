@@ -16,7 +16,8 @@ import {JBSuckerDeploymentConfig} from "@bananapus/omnichain-deployers-v6/src/st
 /// @custom:member creator The address that receives the kept money, the JBP6 minted by fees, and the vested tokens.
 /// @custom:member keepPercent The share of the raise the creator keeps, out of `JBConstants.SPLITS_TOTAL_PERCENT`.
 /// @custom:member keepCap The most the creator can keep, in the money's smallest unit, whatever the raise ends up
-/// being. @custom:member tokenPercent The creator's share of the total token supply at launch, out of
+/// being.
+/// @custom:member tokenPercent The creator's share of the total token supply at launch, out of
 /// `JBConstants.SPLITS_TOTAL_PERCENT`.
 /// @custom:member vestingDuration The number of seconds over which the creator's tokens vest linearly, starting when
 /// the lunch is served.

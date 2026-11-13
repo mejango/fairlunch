@@ -6,8 +6,8 @@ import {IJBBuybackHookRegistry} from "@bananapus/buyback-hook-v6/src/interfaces/
 import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
-import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
+import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBSplitHook} from "@bananapus/core-v6/src/interfaces/IJBSplitHook.sol";
 import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
@@ -17,8 +17,8 @@ import {JBPayerTrackerLib} from "@bananapus/core-v6/src/libraries/JBPayerTracker
 import {JBAccountingContext} from "@bananapus/core-v6/src/structs/JBAccountingContext.sol";
 import {JBCurrencyAmount} from "@bananapus/core-v6/src/structs/JBCurrencyAmount.sol";
 import {JBFundAccessLimitGroup} from "@bananapus/core-v6/src/structs/JBFundAccessLimitGroup.sol";
-import {JBRulesetConfig} from "@bananapus/core-v6/src/structs/JBRulesetConfig.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
+import {JBRulesetConfig} from "@bananapus/core-v6/src/structs/JBRulesetConfig.sol";
 import {JBRulesetMetadata} from "@bananapus/core-v6/src/structs/JBRulesetMetadata.sol";
 import {JBSplit} from "@bananapus/core-v6/src/structs/JBSplit.sol";
 import {JBSplitGroup} from "@bananapus/core-v6/src/structs/JBSplitGroup.sol";
@@ -47,8 +47,11 @@ import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionMa
 import {FairLunchClaims} from "./FairLunchClaims.sol";
 import {FairLunchDataHook} from "./FairLunchDataHook.sol";
 import {FairLunchPool} from "./FairLunchPool.sol";
-import {IFairLunch} from "./interfaces/IFairLunch.sol";
 import {IBuybackOracle} from "./interfaces/IBuybackOracle.sol";
+import {IFairLunch} from "./interfaces/IFairLunch.sol";
+import {IFairLunchClaims} from "./interfaces/IFairLunchClaims.sol";
+import {IFairLunchDataHook} from "./interfaces/IFairLunchDataHook.sol";
+import {IFairLunchPool} from "./interfaces/IFairLunchPool.sol";
 import {IRevnetOperator} from "./interfaces/IRevnetOperator.sol";
 import {ISuckerRoute} from "./interfaces/ISuckerRoute.sol";
 import {FairLunchConfig} from "./structs/FairLunchConfig.sol";
@@ -83,24 +86,47 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
 
+    /// @notice Thrown when a one-shot setter is called a second time.
     error FairLunch_AlreadyConfigured();
+
+    /// @notice Thrown when a lunch has already been served.
     error FairLunch_AlreadyServed(uint256 projectId);
+
+    /// @notice Thrown when a lunch's host sucker has no token mapped to send revenue home with.
     error FairLunch_HostMapsNoTokens();
+
+    /// @notice Thrown when a lunch's configuration, or a one-shot setter's argument, isn't allowed.
     error FairLunch_InvalidConfig();
+
+    /// @notice Thrown when a lunch has no sucker to its host chain.
     error FairLunch_NoHostSucker(uint256 projectId, uint256 hostChainId);
+
+    /// @notice Thrown when this chain's Uniswap V4 addresses haven't been set yet.
     error FairLunch_NotConfigured();
+
+    /// @notice Thrown when a lunch is hosted on another chain.
     error FairLunch_NotHost(uint256 projectId, uint256 hostChainId);
+
+    /// @notice Thrown when a project isn't a lunch hosted on another chain.
     error FairLunch_NotRemote(uint256 projectId);
+
+    /// @notice Thrown when a lunch hasn't been served yet.
     error FairLunch_NotServed(uint256 projectId);
+
+    /// @notice Thrown when a lunch's fundraise ended with nothing to serve.
     error FairLunch_NothingRaised(uint256 projectId);
+
+    /// @notice Thrown when it's too early: a lunch's fundraise is still open, or its first burn has to wait.
     error FairLunch_TooEarly(uint256 projectId, uint256 readyAt);
+
+    /// @notice Thrown when the caller isn't allowed to make the call.
     error FairLunch_Unauthorized(address caller);
 
     //*********************************************************************//
     // ------------------------- public constants ------------------------ //
     //*********************************************************************//
 
-    /// @notice The most of the token supply the creator and the airdrop can get together, out of
+    /// @notice The most of the token supply the creator and the claims can get together, out of
     /// `JBConstants.SPLITS_TOTAL_PERCENT`. Payers and the pool share the rest, so the supply is at most 100 times
     /// theirs.
     uint256 public constant override MAX_GRANTED_PERCENT = uint256(JBConstants.SPLITS_TOTAL_PERCENT) * 99 / 100;
@@ -146,11 +172,14 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @notice The registry of the buyback hook that routes a served lunch's payments and cash outs through its pool.
     IJBBuybackHookRegistry public immutable override BUYBACK_REGISTRY;
 
+    /// @notice The holder of the tokens each lunch gives to its creator and to a list of addresses.
+    IFairLunchClaims public immutable override CLAIMS;
+
     /// @notice The controller every lunch is launched with.
     IJBController public immutable override CONTROLLER;
 
     /// @notice The data hook of every lunch, which holds the rules for its payments and cash outs.
-    FairLunchDataHook public immutable override DATA_HOOK;
+    IFairLunchDataHook public immutable override DATA_HOOK;
 
     /// @notice The directory of terminals and controllers.
     IJBDirectory public immutable override DIRECTORY;
@@ -158,11 +187,8 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @notice The deployer every lunch is launched through, which wires up its suckers.
     IJBOmnichainDeployer public immutable override OMNICHAIN_DEPLOYER;
 
-    /// @notice The holder of the tokens each lunch gives to a list of addresses.
-    FairLunchClaims public immutable override CLAIMS;
-
     /// @notice The holder of every lunch's liquidity, which trades in its pool.
-    FairLunchPool public immutable override POOL;
+    IFairLunchPool public immutable override POOL;
 
     /// @notice The terminal that takes payments in other tokens and swaps them into a lunch's money.
     IJBTerminal public immutable override ROUTER_TERMINAL_REGISTRY;
@@ -190,9 +216,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     // --------------------- public stored properties -------------------- //
     //*********************************************************************//
 
-    /// @notice The Uniswap V4 hook every lunch's pool uses, which records the price history buybacks are bounded by.
+    /// @notice The Uniswap V4 hook every lunch's pool uses, which records the price history a burn's buy is bounded by.
     /// @dev Set once by `_DEPLOYER` through `setChainSpecificConstants`. Zero until then.
-    IGeomeanOracle public override ORACLE_HOOK;
+    IGeomeanOracle public override oracleHook;
 
     /// @notice The ID of the project that gets half of the money side of every lunch's pool fees on this chain. JBP6
     /// gets the other half.
@@ -368,9 +394,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     function createFor(FairLunchConfig calldata config) external payable override returns (uint256 projectId) {
         bool isHost = config.hostChainId == block.chainid;
 
-        // Only the host sells tokens, so only the host needs time left to sell them: two seconds at least, since
-        // `serve` can't queue its ruleset in the second after the launch's two. A copy on another chain can be
-        // made after the deadline: its terms, deadline included, must match the host's to pair with it.
         // The money this chain's project takes: the lunch's own on the host, and on a copy whatever its first sucker
         // maps home.
         address token = config.token;
@@ -379,6 +402,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             if (mappings.length != 0) token = mappings[0].localToken;
         }
 
+        // Only the host sells tokens, so only the host needs time left to sell them: two seconds at least, since
+        // `serve` can't queue its ruleset in the second after the launch's two. A copy on another chain can be
+        // made after the deadline: its terms, deadline included, must match the host's to pair with it.
         // A creator can't keep the whole raise: `serve` needs something to open the pool with, and without it the raise
         // would be stuck.
         // A lunch that raises ETH takes ETH everywhere, and one that raises an ERC-20 takes ERC-20s everywhere. None
@@ -396,7 +422,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         ) revert FairLunch_InvalidConfig();
 
         // A lunch needs this chain's Uniswap addresses.
-        if (address(ORACLE_HOOK) == address(0)) revert FairLunch_NotConfigured();
+        if (address(oracleHook) == address(0)) revert FairLunch_NotConfigured();
 
         // Scope the salt to the caller so nobody else can take a lunch's addresses on another chain, and to the
         // lunch's terms so only copies with the very same terms are bridged to each other. A copy with another host,
@@ -513,7 +539,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         if (
             isHost
                 && IBuybackOracle(address(BUYBACK_REGISTRY.hookOf(projectId))).oracleHook()
-                    != IHooks(address(ORACLE_HOOK))
+                    != IHooks(address(oracleHook))
         ) revert FairLunch_InvalidConfig();
 
         // Deploy the token up front so payers hold a real ERC-20 from their first payment.
@@ -550,7 +576,18 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
     /// @notice Accept only a lunch's project NFT.
     /// @dev Part of `IERC721Receiver`.
-    function onERC721Received(address, address, uint256, bytes calldata) external view override returns (bytes4) {
+    /// @return selector The selector that accepts the NFT.
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    )
+        external
+        view
+        override
+        returns (bytes4 selector)
+    {
         if (msg.sender != address(CONTROLLER.PROJECTS())) revert FairLunch_Unauthorized(msg.sender);
         return IERC721Receiver.onERC721Received.selector;
     }
@@ -601,7 +638,10 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         // The sucker's fee bought JBP6 for this contract. It belongs to the caller who paid it. If the fee couldn't be
         // paid, the sucker kept it for this contract to take back.
         _sendFeeTokensTo(_msgSender());
-        try IJBSuckerExtended(address(sucker)).claimRetainedToRemoteFee(payable(address(this))) {} catch {}
+        try IJBSuckerExtended(address(sucker)).claimRetainedToRemoteFee(payable(address(this))) {}
+            catch {
+            // Nothing was kept, or this sucker can't keep any.
+        }
 
         // The sucker refunds whatever the bridge didn't need. Pass it on to the caller who paid.
         uint256 refund = address(this).balance - ethBefore;
@@ -639,9 +679,10 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         // first so they don't count as sold.
         // slither-disable-next-line unused-return
         _burnTokensOf(projectId);
-        uint256 raised = _min(
-            _balanceOf({projectId: projectId, token: token}), mulDiv(TOKENS.totalSupplyOf(projectId), unit, perToken)
-        );
+        uint256 raised = _min({
+            a: _balanceOf({projectId: projectId, token: token}),
+            b: mulDiv({x: TOKENS.totalSupplyOf(projectId), y: unit, denominator: perToken})
+        });
         if (raised == 0) revert FairLunch_NothingRaised(projectId);
 
         // Anything this contract holds beyond this was sent to it by mistake and isn't the lunch's.
@@ -653,23 +694,27 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             token: token,
             raised: raised,
             creator: record.creator,
-            keep: _min(mulDiv(raised, record.keepPercent, JBConstants.SPLITS_TOTAL_PERCENT), record.keepCap)
+            keep: _min({
+                a: mulDiv({x: raised, y: record.keepPercent, denominator: JBConstants.SPLITS_TOTAL_PERCENT}),
+                b: record.keepCap
+            })
         });
         // slither-disable-next-line unused-return
         TERMINAL.sendPayoutsOf({
             projectId: projectId, token: token, amount: raised, currency: uint32(uint160(token)), minTokensPaidOut: 0
         });
+
         // The pool takes at most what `_MAX_POOL_TOKENS` matches, an amount Uniswap V4 can always account for. Any more
         // stays in the balance for `burn`.
-        uint256 poolAmount = _min(_holdingOf(token) - before, mulDiv(_MAX_POOL_TOKENS, unit, perToken));
+        uint256 poolAmount =
+            _min({a: _holdingOf(token) - before, b: mulDiv({x: _MAX_POOL_TOKENS, y: unit, denominator: perToken})});
 
         // The payout's fee minted JBP6 to this contract as the project's owner. It belongs to the creator.
         _sendFeeTokensTo(record.creator);
 
         // Mint the other side of the market: as many tokens as the pool's money would have bought during the
         // fundraise, so the pool opens at the price payers paid.
-        uint256 poolTokens = mulDiv(poolAmount, perToken, unit);
-
+        uint256 poolTokens = mulDiv({x: poolAmount, y: perToken, denominator: unit});
         _mintTokensOf({projectId: projectId, tokenCount: poolTokens, beneficiary: address(POOL)});
 
         // Put the money and the tokens in the pool, forever. What the pool's price didn't take comes back.
@@ -696,12 +741,13 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
         // Mint the creator's and the claims' shares of the total supply, now that the rest of it is settled.
         uint256 claimsPercent = CLAIMS.percentOf(projectId);
-        uint256 granted = mulDiv(
-            TOKENS.totalSupplyOf(projectId),
-            record.tokenPercent + claimsPercent,
-            JBConstants.SPLITS_TOTAL_PERCENT - record.tokenPercent - claimsPercent
-        );
-        uint256 claimsTokens = granted == 0 ? 0 : mulDiv(granted, claimsPercent, record.tokenPercent + claimsPercent);
+        uint256 granted = mulDiv({
+            x: TOKENS.totalSupplyOf(projectId),
+            y: record.tokenPercent + claimsPercent,
+            denominator: JBConstants.SPLITS_TOTAL_PERCENT - record.tokenPercent - claimsPercent
+        });
+        uint256 claimsTokens =
+            granted == 0 ? 0 : mulDiv({x: granted, y: claimsPercent, denominator: record.tokenPercent + claimsPercent});
         uint256 creatorTokens = granted - claimsTokens;
 
         // Both wait in `CLAIMS`: the claims' for whoever sends each listed address its part, the creator's vesting
@@ -744,37 +790,52 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         });
     }
 
+    /// @notice One-shot setter for this chain's Uniswap V4 addresses.
+    /// @dev Callable only by `_DEPLOYER` and only once. After this call the values are effectively immutable. Keeping
+    /// them out of the constructor keeps this contract's address the same on every chain.
+    /// @param newPositionManager The Uniswap V4 position manager. The pool manager is read from it.
+    /// @param newOracleHook The Uniswap V4 hook every lunch's pool uses.
+    function setChainSpecificConstants(
+        IPositionManager newPositionManager,
+        IGeomeanOracle newOracleHook
+    )
+        external
+        override
+    {
+        // Only the deployer, and only once.
+        if (msg.sender != _DEPLOYER) revert FairLunch_Unauthorized(msg.sender);
+        if (address(oracleHook) != address(0)) revert FairLunch_AlreadyConfigured();
+
+        // Both addresses are needed.
+        if (address(newPositionManager) == address(0) || address(newOracleHook) == address(0)) {
+            revert FairLunch_InvalidConfig();
+        }
+
+        POOL.setChainSpecificConstants({newPositionManager: newPositionManager, newOracleHook: newOracleHook});
+        oracleHook = newOracleHook;
+    }
+
     /// @notice One-shot setter for the project that shares pool fees with JBP6 on this chain.
     /// @dev Callable only by JBP6's operator, and only once: after this call the value can't be changed or cleared.
     /// It applies to every lunch on this chain, including ones already made, from the next `collect` on.
     /// @param projectId The ID of the project to pay half of the money side of pool fees into.
     function setSplitProjectId(uint256 projectId) external override {
+        // Only JBP6's operator: JBP6 is a revnet, and its owner knows who operates it.
         IJBProjects projects = CONTROLLER.PROJECTS();
         if (!IRevnetOperator(projects.ownerOf(_FEE_PROJECT_ID))
-                .isOperatorOf({revnetId: _FEE_PROJECT_ID, addr: msg.sender})) {
-            revert FairLunch_Unauthorized(msg.sender);
+                .isOperatorOf({revnetId: _FEE_PROJECT_ID, addr: _msgSender()})) {
+            revert FairLunch_Unauthorized(_msgSender());
         }
+
+        // Only once.
         if (splitProjectId != 0) revert FairLunch_AlreadyConfigured();
+
+        // Only a project that exists and isn't JBP6 itself.
         if (projectId <= _FEE_PROJECT_ID || projectId > projects.count()) revert FairLunch_InvalidConfig();
 
         splitProjectId = projectId;
-        emit SetSplitProjectId({projectId: projectId, caller: msg.sender});
-    }
 
-    /// @notice One-shot setter for this chain's Uniswap V4 addresses.
-    /// @dev Callable only by `_DEPLOYER` and only once. After this call the values are effectively immutable. Keeping
-    /// them out of the constructor keeps this contract's address the same on every chain.
-    /// @param positionManager The Uniswap V4 position manager. The pool manager is read from it.
-    /// @param oracleHook The Uniswap V4 hook every lunch's pool uses.
-    function setChainSpecificConstants(IPositionManager positionManager, IGeomeanOracle oracleHook) external override {
-        if (msg.sender != _DEPLOYER) revert FairLunch_Unauthorized(msg.sender);
-        if (address(ORACLE_HOOK) != address(0)) revert FairLunch_AlreadyConfigured();
-        if (address(positionManager) == address(0) || address(oracleHook) == address(0)) {
-            revert FairLunch_InvalidConfig();
-        }
-
-        POOL.setChainSpecificConstants({positionManager: positionManager, oracleHook: oracleHook});
-        ORACLE_HOOK = oracleHook;
+        emit SetSplitProjectId({projectId: projectId, caller: _msgSender()});
     }
 
     //*********************************************************************//
@@ -792,6 +853,13 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     // -------------------------- public views --------------------------- //
     //*********************************************************************//
 
+    /// @notice The Uniswap V4 pool of a lunch.
+    /// @param projectId The ID of the lunch's project.
+    /// @return key The pool's key.
+    function poolKeyOf(uint256 projectId) public view override returns (PoolKey memory key) {
+        (key,) = _poolOf({projectId: projectId, token: _recordOf[projectId].token});
+    }
+
     /// @notice When a lunch was served.
     /// @dev A lunch's rulesets are its clock. On the host, the ruleset that sells tokens gives way at the deadline to
     /// one that takes no payments, and `serve` replaces that with the one the lunch keeps forever, which started when
@@ -802,13 +870,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         if (_recordOf[projectId].hostChainId != block.chainid) return 0;
         (JBRuleset memory ruleset, JBRulesetMetadata memory metadata) = CONTROLLER.currentRulesetOf(projectId);
         return ruleset.weight != 0 || metadata.pausePay ? 0 : ruleset.start;
-    }
-
-    /// @notice The Uniswap V4 pool of a lunch.
-    /// @param projectId The ID of the lunch's project.
-    /// @return key The pool's key.
-    function poolKeyOf(uint256 projectId) public view override returns (PoolKey memory key) {
-        (key,) = _poolOf({projectId: projectId, token: _recordOf[projectId].token});
     }
 
     //*********************************************************************//
@@ -858,6 +919,48 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         });
     }
 
+    /// @notice Pay an amount of a lunch's pool fees into a project, if it takes the money in this contract's terminal.
+    /// @param projectId The ID of the project to pay.
+    /// @param token The lunch's money.
+    /// @param amount The amount to pay.
+    /// @param beneficiary The address that gets the tokens the payment mints.
+    /// @return kept The amount the project didn't take: all of it or none of it.
+    function _payFeeTo(
+        uint256 projectId,
+        address token,
+        uint256 amount,
+        address beneficiary
+    )
+        internal
+        returns (uint256 kept)
+    {
+        // The lookup is in a try because it asks the paid project's terminals whether they take the token, and that
+        // is code the project chooses.
+        try DIRECTORY.primaryTerminalOf({projectId: projectId, token: token}) returns (IJBTerminal terminal) {
+            // Only pay through this contract's terminal.
+            if (terminal != IJBTerminal(address(TERMINAL))) return amount;
+        } catch {
+            // The lookup reverted, so the lunch keeps the amount.
+            return amount;
+        }
+
+        // The payment runs the paid project's hooks, so it's in a try too.
+        // slither-disable-next-line unused-return
+        try TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: amount})}({
+            projectId: projectId,
+            token: token,
+            amount: amount,
+            beneficiary: beneficiary,
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: ""
+        }) {}
+        catch {
+            // The project didn't take it, so the lunch keeps the amount.
+            kept = amount;
+        }
+    }
+
     /// @notice Queue the ruleset a lunch keeps forever, set up to pay its whole raise out once.
     /// @dev The payout limit can only ever be used once because the ruleset never cycles. The creator's keep is a
     /// split, and the rest of the payout goes to this contract as the project's owner.
@@ -878,7 +981,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         });
 
         JBSplitGroup[] memory splitGroups;
-        uint256 splitPercent = mulDiv(keep, JBConstants.SPLITS_TOTAL_PERCENT, raised);
+        uint256 splitPercent = mulDiv({x: keep, y: JBConstants.SPLITS_TOTAL_PERCENT, denominator: raised});
         if (splitPercent != 0) {
             JBSplit[] memory splits = new JBSplit[](1);
             splits[0] = JBSplit({
@@ -908,45 +1011,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         OMNICHAIN_DEPLOYER.queueRulesetsOf({
             projectId: projectId, rulesetConfigurations: rulesetConfigurations, memo: ""
         });
-    }
-
-    /// @notice Pay an amount of a lunch's pool fees into a project, if it takes the money in this contract's terminal.
-    /// @param projectId The ID of the project to pay.
-    /// @param token The lunch's money.
-    /// @param amount The amount to pay.
-    /// @param beneficiary The address that gets the tokens the payment mints.
-    /// @return kept The amount the project didn't take: all of it or none of it.
-    function _payFeeTo(
-        uint256 projectId,
-        address token,
-        uint256 amount,
-        address beneficiary
-    )
-        internal
-        returns (uint256 kept)
-    {
-        // Both calls run code the paid project chooses: its terminals answer the lookup, and its hooks run in the
-        // payment. If either reverts, the lunch keeps the amount.
-        try DIRECTORY.primaryTerminalOf({projectId: projectId, token: token}) returns (IJBTerminal terminal) {
-            if (terminal != IJBTerminal(address(TERMINAL))) return amount;
-        } catch {
-            return amount;
-        }
-
-        // If the project won't take it, the lunch's balance does.
-        // slither-disable-next-line unused-return
-        try TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: amount})}({
-            projectId: projectId,
-            token: token,
-            amount: amount,
-            beneficiary: beneficiary,
-            minReturnedTokens: 0,
-            memo: "",
-            metadata: ""
-        }) {}
-        catch {
-            kept = amount;
-        }
     }
 
     /// @notice Send all the JBP6 this contract holds to an address.
@@ -984,6 +1048,21 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     // ----------------------- internal views ---------------------------- //
     //*********************************************************************//
 
+    /// @notice The money in a lunch's balance.
+    /// @param projectId The ID of the lunch's project.
+    /// @param token The lunch's money.
+    /// @return balance The balance.
+    function _balanceOf(uint256 projectId, address token) internal view returns (uint256 balance) {
+        return TERMINAL.STORE().balanceOf({terminal: address(TERMINAL), projectId: projectId, token: token});
+    }
+
+    /// @notice How much of a lunch's money this contract holds.
+    /// @param token The money.
+    /// @return holding The amount held.
+    function _holdingOf(address token) internal view returns (uint256 holding) {
+        return token == JBConstants.NATIVE_TOKEN ? address(this).balance : IERC20(token).balanceOf(address(this));
+    }
+
     /// @notice The sucker that bridges a lunch to its host chain.
     /// @dev Reverts if there isn't one.
     /// @param projectId The ID of the lunch's project on this chain.
@@ -997,21 +1076,11 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         revert FairLunch_NoHostSucker({projectId: projectId, hostChainId: hostChainId});
     }
 
-    /// @notice The money in a lunch's balance.
-    /// @param projectId The ID of the lunch's project.
-    /// @param token The lunch's money.
-    function _balanceOf(uint256 projectId, address token) internal view returns (uint256) {
-        return TERMINAL.STORE().balanceOf({terminal: address(TERMINAL), projectId: projectId, token: token});
-    }
-
-    /// @notice How much of a lunch's money this contract holds.
-    /// @param token The money.
-    function _holdingOf(address token) internal view returns (uint256) {
-        return token == JBConstants.NATIVE_TOKEN ? address(this).balance : IERC20(token).balanceOf(address(this));
-    }
-
     /// @notice The smaller of two numbers.
-    function _min(uint256 a, uint256 b) internal pure returns (uint256) {
+    /// @param a The first number.
+    /// @param b The second number.
+    /// @return min The smaller one.
+    function _min(uint256 a, uint256 b) internal pure returns (uint256 min) {
         return a < b ? a : b;
     }
 
@@ -1030,7 +1099,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             currency1: Currency.wrap(moneyIs0 ? projectToken : money),
             fee: POOL_FEE,
             tickSpacing: TICK_SPACING,
-            hooks: IHooks(address(ORACLE_HOOK))
+            hooks: IHooks(address(oracleHook))
         });
     }
 

@@ -68,16 +68,16 @@ contract FairLunchCrossChain is Test {
         deadline = uint48(block.timestamp + 7 days);
         lunch = _deploy();
         lunch.setChainSpecificConstants({
-            positionManager: IPositionManager(0x7C5f5A4bBd8fD63184577525326123B519429bDc),
-            oracleHook: IGeomeanOracle(0xB436Cedbee8F191A3860719b4B0f474434F315c8)
+            newPositionManager: IPositionManager(0x7C5f5A4bBd8fD63184577525326123B519429bDc),
+            newOracleHook: IGeomeanOracle(0xB436Cedbee8F191A3860719b4B0f474434F315c8)
         });
 
         vm.selectFork(optimismFork);
         vm.warp(deadline - 7 days);
         assertEq(address(_deploy()), address(lunch), "same address on both chains");
         lunch.setChainSpecificConstants({
-            positionManager: IPositionManager(0x3C3Ea4B57a46241e54610e5f022E5c45859A1017),
-            oracleHook: IGeomeanOracle(0x850eC1a2aDcB2126d823632e60441De2926fD5C8)
+            newPositionManager: IPositionManager(0x3C3Ea4B57a46241e54610e5f022E5c45859A1017),
+            newOracleHook: IGeomeanOracle(0x850eC1a2aDcB2126d823632e60441De2926fD5C8)
         });
 
         vm.deal(alice, 1000 ether);

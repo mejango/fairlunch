@@ -13,11 +13,11 @@ import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomean
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
-import {FairLunchClaims} from "../FairLunchClaims.sol";
-import {FairLunchDataHook} from "../FairLunchDataHook.sol";
-import {FairLunchPool} from "../FairLunchPool.sol";
 import {FairLunchConfig} from "../structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "../structs/FairLunchRecord.sol";
+import {IFairLunchClaims} from "./IFairLunchClaims.sol";
+import {IFairLunchDataHook} from "./IFairLunchDataHook.sol";
+import {IFairLunchPool} from "./IFairLunchPool.sol";
 
 /// @notice A token launcher. A lunch raises ETH or an ERC-20 at a fixed price until a deadline, is then served into a
 /// locked Uniswap V4 pool by anyone, and from then on turns every payment it receives into a buyback and burn.
@@ -57,11 +57,6 @@ interface IFairLunch {
     /// @param caller The address that called the function.
     event SendHome(uint256 indexed projectId, address sucker, uint256 tokenCount, address caller);
 
-    /// @notice Emitted when the project that shares pool fees with JBP6 is set.
-    /// @param projectId The ID of the project.
-    /// @param caller The address that called the function.
-    event SetSplitProjectId(uint256 projectId, address caller);
-
     /// @notice Emitted when a lunch is served.
     /// @param projectId The ID of the lunch's project.
     /// @param raised The amount of money the fundraise ended with.
@@ -80,22 +75,27 @@ interface IFairLunch {
         address caller
     );
 
+    /// @notice Emitted when the project that shares pool fees with JBP6 is set.
+    /// @param projectId The ID of the project.
+    /// @param caller The address that called the function.
+    event SetSplitProjectId(uint256 indexed projectId, address caller);
+
     /// @notice The registry of the buyback hook that routes a served lunch's payments and cash outs through its pool.
     function BUYBACK_REGISTRY() external view returns (IJBBuybackHookRegistry);
+
+    /// @notice The holder of the tokens each lunch gives to a list of addresses.
+    function CLAIMS() external view returns (IFairLunchClaims);
 
     /// @notice The controller every lunch is launched with.
     function CONTROLLER() external view returns (IJBController);
 
-    /// @notice The holder of the tokens each lunch gives to a list of addresses.
-    function CLAIMS() external view returns (FairLunchClaims);
-
     /// @notice The data hook of every lunch, which holds the rules for its payments and cash outs.
-    function DATA_HOOK() external view returns (FairLunchDataHook);
+    function DATA_HOOK() external view returns (IFairLunchDataHook);
 
     /// @notice The directory of terminals and controllers.
     function DIRECTORY() external view returns (IJBDirectory);
 
-    /// @notice The most of the token supply the creator and the airdrop can get together, out of
+    /// @notice The most of the token supply the creator and the claims can get together, out of
     /// `JBConstants.SPLITS_TOTAL_PERCENT`.
     function MAX_GRANTED_PERCENT() external view returns (uint256);
 
@@ -103,17 +103,13 @@ interface IFairLunch {
     function OMNICHAIN_DEPLOYER() external view returns (IJBOmnichainDeployer);
 
     /// @notice The Uniswap V4 hook every lunch's pool uses, which records the price history buybacks are bounded by.
-    function ORACLE_HOOK() external view returns (IGeomeanOracle);
-
-    /// @notice The ID of the project that gets half of the money side of every lunch's pool fees on this chain. Zero
-    /// until JBP6's operator sets it.
-    function splitProjectId() external view returns (uint256);
-
-    /// @notice The fee of every lunch's pool, in hundredths of a basis point.
-    function POOL_FEE() external view returns (uint24);
+    function oracleHook() external view returns (IGeomeanOracle);
 
     /// @notice The holder of every lunch's liquidity, which trades in its pool.
-    function POOL() external view returns (FairLunchPool);
+    function POOL() external view returns (IFairLunchPool);
+
+    /// @notice The fee of every lunch's pool, in hundredths of a basis point (1%).
+    function POOL_FEE() external view returns (uint24);
 
     /// @notice The terminal that takes payments in other tokens and swaps them into a lunch's money.
     function ROUTER_TERMINAL_REGISTRY() external view returns (IJBTerminal);
@@ -137,8 +133,8 @@ interface IFairLunch {
     /// @notice The farthest a burn's buy can push the price past its time-weighted average, in ticks.
     function TWAP_MAX_DEVIATION() external view returns (int24);
 
-    /// @notice The number of seconds of price history a buyback is bounded by, and the wait after serving before the
-    /// first buyback.
+    /// @notice The number of seconds of price history a burn's buy is bounded by, and the wait after serving before
+    /// the first one.
     function TWAP_WINDOW() external view returns (uint32);
 
     /// @notice The Uniswap V4 pool of a lunch.
@@ -146,15 +142,19 @@ interface IFairLunch {
     /// @return key The pool's key.
     function poolKeyOf(uint256 projectId) external view returns (PoolKey memory key);
 
+    /// @notice What Fair Lunch remembers about a lunch.
+    /// @param projectId The ID of the lunch's project.
+    /// @return record The lunch's record.
+    function recordOf(uint256 projectId) external view returns (FairLunchRecord memory record);
+
     /// @notice When a lunch was served.
     /// @param projectId The ID of the lunch's project.
     /// @return servedAt The timestamp the lunch was served at, or zero if it hasn't been, or is served elsewhere.
     function servedAtOf(uint256 projectId) external view returns (uint256 servedAt);
 
-    /// @notice What Fair Lunch remembers about a lunch.
-    /// @param projectId The ID of the lunch's project.
-    /// @return record The lunch's record.
-    function recordOf(uint256 projectId) external view returns (FairLunchRecord memory record);
+    /// @notice The ID of the project that gets half of the money side of every lunch's pool fees on this chain. Zero
+    /// until JBP6's operator sets it.
+    function splitProjectId() external view returns (uint256);
 
     /// @notice Use a served lunch's whole balance to buy its token from the pool and burn it.
     /// @param projectId The ID of the lunch's project.
@@ -163,7 +163,8 @@ interface IFairLunch {
     function burn(uint256 projectId) external returns (uint256 spent, uint256 burned);
 
     /// @notice Collect a served lunch's liquidity fees, burning the token side and paying the money side into JBP6 with
-    /// the creator as beneficiary.
+    /// the creator as beneficiary. Once `splitProjectId` is set, half of the money side is paid into that project the
+    /// same way.
     /// @param projectId The ID of the lunch's project.
     /// @return tokensBurned The number of tokens collected and burned.
     /// @return paid The amount of the lunch's money collected.
@@ -178,16 +179,16 @@ interface IFairLunch {
     /// @param projectId The ID of the lunch's project on this chain.
     function sendHome(uint256 projectId) external payable;
 
-    /// @notice One-shot setter for the project that shares pool fees with JBP6 on this chain. Only JBP6's operator.
-    /// @param projectId The ID of the project to pay half of the money side of pool fees into.
-    function setSplitProjectId(uint256 projectId) external;
-
-    /// @notice One-shot setter for this chain's Uniswap V4 addresses.
-    /// @param positionManager The Uniswap V4 position manager.
-    /// @param oracleHook The Uniswap V4 hook every lunch's pool uses.
-    function setChainSpecificConstants(IPositionManager positionManager, IGeomeanOracle oracleHook) external;
-
     /// @notice Serve a lunch once its deadline has passed.
     /// @param projectId The ID of the lunch's project.
     function serve(uint256 projectId) external;
+
+    /// @notice One-shot setter for this chain's Uniswap V4 addresses.
+    /// @param newPositionManager The Uniswap V4 position manager.
+    /// @param newOracleHook The Uniswap V4 hook every lunch's pool uses.
+    function setChainSpecificConstants(IPositionManager newPositionManager, IGeomeanOracle newOracleHook) external;
+
+    /// @notice One-shot setter for the project that shares pool fees with JBP6 on this chain. Only JBP6's operator.
+    /// @param projectId The ID of the project to pay half of the money side of pool fees into.
+    function setSplitProjectId(uint256 projectId) external;
 }

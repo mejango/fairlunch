@@ -23,20 +23,20 @@ contract Deploy is Script, Sphinx {
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
 
-    /// @notice The connected chain isn't one Fair Lunch supports.
+    /// @notice Thrown when the connected chain isn't one Fair Lunch supports.
     error Deploy_UnsupportedChain(uint256 chainId);
 
     //*********************************************************************//
     // ----------------------- internal constants ------------------------ //
     //*********************************************************************//
 
-    /// @notice The router terminal registry, at the same address on every chain.
-    IJBTerminal internal constant _ROUTER_TERMINAL_REGISTRY = IJBTerminal(0xe0427F250fdb0379c8E98e884Ee4570521208CbC);
-
     /// @notice The canonical Permit2, at the same address on every chain.
     IAllowanceTransfer internal constant _PERMIT2 = IAllowanceTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 
-    /// @notice The salt both contracts are deployed with.
+    /// @notice The router terminal registry, at the same address on every chain.
+    IJBTerminal internal constant _ROUTER_TERMINAL_REGISTRY = IJBTerminal(0xe0427F250fdb0379c8E98e884Ee4570521208CbC);
+
+    /// @notice The salt Fair Lunch is deployed with.
     bytes32 internal constant _SALT = "FairLunch";
 
     //*********************************************************************//
@@ -59,8 +59,9 @@ contract Deploy is Script, Sphinx {
     // ---------------------- internal transactions ---------------------- //
     //*********************************************************************//
 
-    /// @notice Deploys both contracts and sets the connected chain's Uniswap V4 addresses.
-    /// @param configurator The address allowed to set the chain-specific constants. It must be the caller.
+    /// @notice Deploys Fair Lunch, which deploys its data hook, pool and claims, and sets the connected chain's Uniswap
+    /// V4 addresses. @param configurator The address allowed to set the chain-specific constants. It must be the
+    /// caller.
     /// @return lunch The deployed Fair Lunch.
     function _deploy(address configurator) internal returns (FairLunch lunch) {
         string memory chain = _chainName();
@@ -82,8 +83,10 @@ contract Deploy is Script, Sphinx {
         });
 
         lunch.setChainSpecificConstants({
-            positionManager: _positionManager(),
-            oracleHook: IGeomeanOracle(_deployed({package: "univ4-router-v6", chain: chain, name: "JBUniswapV4Hook"}))
+            newPositionManager: _positionManager(),
+            newOracleHook: IGeomeanOracle(
+                _deployed({package: "univ4-router-v6", chain: chain, name: "JBUniswapV4Hook"})
+            )
         });
     }
 
@@ -92,7 +95,8 @@ contract Deploy is Script, Sphinx {
     //*********************************************************************//
 
     /// @notice The name the Juicebox packages file the connected chain's deployments under.
-    function _chainName() internal view returns (string memory) {
+    /// @return name The chain's name.
+    function _chainName() internal view returns (string memory name) {
         if (block.chainid == 1) return "ethereum";
         if (block.chainid == 10) return "optimism";
         if (block.chainid == 8453) return "base";
@@ -107,7 +111,16 @@ contract Deploy is Script, Sphinx {
     /// @param package The package's name under `@bananapus`.
     /// @param chain The chain's name.
     /// @param name The contract's name.
-    function _deployed(string memory package, string memory chain, string memory name) internal view returns (address) {
+    /// @return deployed The contract's address.
+    function _deployed(
+        string memory package,
+        string memory chain,
+        string memory name
+    )
+        internal
+        view
+        returns (address deployed)
+    {
         return vm.parseJsonAddress({
             json: vm.readFile(
                 string.concat("node_modules/@bananapus/", package, "/deployments/", chain, "/", name, ".json")
@@ -117,7 +130,8 @@ contract Deploy is Script, Sphinx {
     }
 
     /// @notice The Uniswap V4 position manager on the connected chain.
-    function _positionManager() internal view returns (IPositionManager) {
+    /// @return positionManager The position manager.
+    function _positionManager() internal view returns (IPositionManager positionManager) {
         if (block.chainid == 1) return IPositionManager(0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e);
         if (block.chainid == 10) return IPositionManager(0x3C3Ea4B57a46241e54610e5f022E5c45859A1017);
         if (block.chainid == 8453) return IPositionManager(0x7C5f5A4bBd8fD63184577525326123B519429bDc);

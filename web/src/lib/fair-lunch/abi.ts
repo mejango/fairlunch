@@ -66,7 +66,7 @@ export const fairLunchAbi = [
       {
         "name": "",
         "type": "address",
-        "internalType": "contract FairLunchClaims"
+        "internalType": "contract IFairLunchClaims"
       }
     ],
     "stateMutability": "view"
@@ -92,7 +92,7 @@ export const fairLunchAbi = [
       {
         "name": "",
         "type": "address",
-        "internalType": "contract FairLunchDataHook"
+        "internalType": "contract IFairLunchDataHook"
       }
     ],
     "stateMutability": "view"
@@ -138,26 +138,13 @@ export const fairLunchAbi = [
   },
   {
     "type": "function",
-    "name": "ORACLE_HOOK",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract IGeomeanOracle"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "POOL",
     "inputs": [],
     "outputs": [
       {
         "name": "",
         "type": "address",
-        "internalType": "contract FairLunchPool"
+        "internalType": "contract IFairLunchPool"
       }
     ],
     "stateMutability": "view"
@@ -520,9 +507,22 @@ export const fairLunchAbi = [
     ],
     "outputs": [
       {
-        "name": "",
+        "name": "selector",
         "type": "bytes4",
         "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "oracleHook",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract IGeomeanOracle"
       }
     ],
     "stateMutability": "view"
@@ -697,12 +697,12 @@ export const fairLunchAbi = [
     "name": "setChainSpecificConstants",
     "inputs": [
       {
-        "name": "positionManager",
+        "name": "newPositionManager",
         "type": "address",
         "internalType": "contract IPositionManager"
       },
       {
-        "name": "oracleHook",
+        "name": "newOracleHook",
         "type": "address",
         "internalType": "contract IGeomeanOracle"
       }
@@ -935,7 +935,7 @@ export const fairLunchAbi = [
       {
         "name": "projectId",
         "type": "uint256",
-        "indexed": false,
+        "indexed": true,
         "internalType": "uint256"
       },
       {

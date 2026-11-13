@@ -9,7 +9,7 @@ export const claimsAbi = parseAbi([
   'function percentOf(uint256 projectId) view returns (uint32)',
   'function rootOf(uint256 projectId) view returns (bytes32)',
   'function tokenCountOf(uint256 projectId) view returns (uint256)',
-  'function claimedBy(uint256 projectId, address account) view returns (uint256)',
+  'function claimedOf(uint256 projectId, address account) view returns (uint256)',
   'function vestingDurationOf(uint256 projectId) view returns (uint32)',
   'function creatorTokenCountOf(uint256 projectId) view returns (uint256)',
   'function creatorClaimedOf(uint256 projectId) view returns (uint256)',

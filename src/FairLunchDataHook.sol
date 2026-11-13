@@ -9,28 +9,36 @@ import {JBBeforePayRecordedContext} from "@bananapus/core-v6/src/structs/JBBefor
 import {JBCashOutHookSpecification} from "@bananapus/core-v6/src/structs/JBCashOutHookSpecification.sol";
 import {JBPayHookSpecification} from "@bananapus/core-v6/src/structs/JBPayHookSpecification.sol";
 import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
-import {mulDiv} from "@prb/math/src/Common.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {mulDiv} from "@prb/math/src/Common.sol";
 
 import {IFairLunch} from "./interfaces/IFairLunch.sol";
+import {IFairLunchDataHook} from "./interfaces/IFairLunchDataHook.sol";
 
 /// @notice The rules for paying and cashing out a lunch.
 /// @dev Every lunch's rulesets name this contract as their data hook, wrapped by `JBOmnichainDeployer`. While a lunch
 /// is cooking its ruleset sells at the fixed price, and its payers can cash out for what they paid. Once it's served, a
 /// payment or cash out that names the least it will take goes to the Juicebox buyback hook, which trades it in the
-/// lunch's pool. The hook's own price
-/// check is too loose to rely on here, since a served lunch has no issuance price under it. So a payment without a
-/// minimum lands in the balance for `FairLunch.burn`, and a cash out without one reverts. Deployed by `FairLunch`,
-/// which it reads each lunch's record from.
-contract FairLunchDataHook is IJBRulesetDataHook {
+/// lunch's pool. The hook's own price check is too loose to rely on here, since a served lunch has no issuance price
+/// under it. So a payment without a minimum lands in the balance for `FairLunch.burn`, and a cash out without one
+/// reverts.
+/// @dev Deployed by `FairLunch`, which it reads each lunch's record from.
+contract FairLunchDataHook is IFairLunchDataHook {
     //*********************************************************************//
     // --------------------------- custom errors ------------------------- //
     //*********************************************************************//
 
+    /// @notice Thrown when a cash out reaches a lunch that has no pool to sell into.
     error FairLunchDataHook_Closed(uint256 projectId);
+
+    /// @notice Thrown when another project's payout pays a lunch that's still selling tokens.
     error FairLunchDataHook_NoPayouts(uint256 projectId);
+
+    /// @notice Thrown when a cash out names no minimum, or the buyback hook wouldn't sell it.
     error FairLunchDataHook_NoSale(uint256 projectId);
+
+    /// @notice Thrown when a refund would burn tokens and return nothing.
     error FairLunchDataHook_NothingToRefund(uint256 projectId);
 
     //*********************************************************************//
@@ -38,10 +46,10 @@ contract FairLunchDataHook is IJBRulesetDataHook {
     //*********************************************************************//
 
     /// @notice The registry of the buyback hook that routes a served lunch's payments and cash outs through its pool.
-    IJBBuybackHookRegistry public immutable BUYBACK_REGISTRY;
+    IJBBuybackHookRegistry public immutable override BUYBACK_REGISTRY;
 
     /// @notice The contract that owns every lunch.
-    IFairLunch public immutable FAIR_LUNCH;
+    IFairLunch public immutable override FAIR_LUNCH;
 
     //*********************************************************************//
     // -------------------------- constructor ---------------------------- //
@@ -100,7 +108,7 @@ contract FairLunchDataHook is IJBRulesetDataHook {
 
             // Money that reached the balance any other way isn't a payer's to take. The terminal pays a cash out its
             // share of the whole balance, so price the cash out with the largest count whose share is no more than the
-            // refund.
+            // refund. OpenZeppelin's `mulDiv` does this one because it can round up.
             if (_shareOf({context: context, count: cashOutCount}) > refund) {
                 cashOutCount = Math.mulDiv({
                     x: refund + 1,
@@ -125,7 +133,7 @@ contract FairLunchDataHook is IJBRulesetDataHook {
         (cashOutTaxRate, cashOutCount, totalSupply, effectiveSurplusValue, hookSpecifications) =
             BUYBACK_REGISTRY.beforeCashOutRecordedWith(context);
 
-        // The sale has to name the least ETH it will take, `(uint256 minimumSwapAmountOut, bool skip)`, and the hook
+        // The sale has to name the least money it will take, `(uint256 minimumSwapAmountOut, bool skip)`, and the hook
         // has to be selling it: left to the terminal, the tokens would burn for nothing.
         if (
             hookSpecifications.length == 0 || hookSpecifications[0].noop
@@ -137,7 +145,7 @@ contract FairLunchDataHook is IJBRulesetDataHook {
     /// @dev Part of `IJBRulesetDataHook`. A served lunch mints nothing for a payment: the buyback hook buys from the
     /// pool for the beneficiary, and a payment it can't buy with stays in the balance for `burn`.
     /// @param context The payment's context.
-    /// @return weight The number of tokens to mint per ETH paid, as a fixed point number with 18 decimals.
+    /// @return weight The number of tokens to mint per unit of money paid, as a fixed point number with 18 decimals.
     /// @return hookSpecifications The buyback hook, when it buys from the pool.
     function beforePayRecordedWith(JBBeforePayRecordedContext calldata context)
         external
@@ -169,6 +177,10 @@ contract FairLunchDataHook is IJBRulesetDataHook {
     /// remints what a cash out sells.
     /// @dev Part of `IJBRulesetDataHook`. Fair Lunch mints as the project's owner, and suckers mint through the
     /// omnichain deployer.
+    /// @param projectId The ID of the lunch's project.
+    /// @param ruleset The lunch's current ruleset.
+    /// @param addr The address to check.
+    /// @return flag A flag indicating whether the address can mint the lunch's tokens.
     function hasMintPermissionFor(
         uint256 projectId,
         JBRuleset calldata ruleset,
@@ -177,7 +189,7 @@ contract FairLunchDataHook is IJBRulesetDataHook {
         external
         view
         override
-        returns (bool)
+        returns (bool flag)
     {
         return BUYBACK_REGISTRY.hasMintPermissionFor({projectId: projectId, ruleset: ruleset, addr: addr});
     }
@@ -197,24 +209,6 @@ contract FairLunchDataHook is IJBRulesetDataHook {
     //*********************************************************************//
     // ----------------------- internal views ---------------------------- //
     //*********************************************************************//
-
-    /// @notice What the terminal reclaims for an untaxed cash out priced with a count of tokens.
-    /// @dev Mirrors `JBCashOuts.cashOutFrom` at a tax rate of zero.
-    /// @param context The cash out's context.
-    /// @param count The number of tokens to price the cash out with.
-    /// @return share The amount reclaimed.
-    function _shareOf(
-        JBBeforeCashOutRecordedContext calldata context,
-        uint256 count
-    )
-        internal
-        pure
-        returns (uint256 share)
-    {
-        if (count == 0) return 0;
-        if (count >= context.totalSupply) return context.surplus.value;
-        return mulDiv({x: context.surplus.value, y: count, denominator: context.totalSupply});
-    }
 
     /// @notice The minimum a payment or cash out asks of the buyback hook, read from its metadata.
     /// @param metadata The payment's or cash out's metadata.
@@ -239,5 +233,23 @@ contract FairLunchDataHook is IJBRulesetDataHook {
                 minimum := mload(add(data, mul(add(word, 1), 32)))
             }
         }
+    }
+
+    /// @notice What the terminal reclaims for an untaxed cash out priced with a count of tokens.
+    /// @dev Mirrors `JBCashOuts.cashOutFrom` at a tax rate of zero.
+    /// @param context The cash out's context.
+    /// @param count The number of tokens to price the cash out with.
+    /// @return share The amount reclaimed.
+    function _shareOf(
+        JBBeforeCashOutRecordedContext calldata context,
+        uint256 count
+    )
+        internal
+        pure
+        returns (uint256 share)
+    {
+        if (count == 0) return 0;
+        if (count >= context.totalSupply) return context.surplus.value;
+        return mulDiv({x: context.surplus.value, y: count, denominator: context.totalSupply});
     }
 }

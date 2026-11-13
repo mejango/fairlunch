@@ -601,3 +601,14 @@ jango: "do we need OpenZepplins vesting wallet here? is it over complicated?" th
 - Codex pass 25 (`gpt-daybreak-blue-latest`): no Critical or High, DO NOT MERGE for two Mediums and a Low. Medium 1, the set project could block `collect` for good through a reverting terminal lookup or a gas-burning hook: fixed, the lookup and the payment each run with bounded gas inside a try (`_FEE_LOOKUP_GAS`, `_FEE_PAY_GAS`), tested by `test_collect_survivesASetProjectWhoseLookupReverts`. A gas-burning hook is not tested. Medium 2, the odd unit of a collection always goes to JBP6, which matters only for a money token with no decimals: left, written into RISKS.md, my call. Low, the setter checks `msg.sender` and not the forwarded sender: left on purpose, a one-time admin action shouldn't lean on a forwarder, my call.
 - jango: "dont hardcode gas, use try catch, a tried and true pattern in v6 for composability". The gas limits are gone; the terminal lookup and the payment are each in a plain try. A reverting project loses its half. One that burns gas without reverting makes `collect` cost more. Codex pass 26 (on the gas-limited version) said no findings and MERGE from the security side; it has not seen this version.
 - jango: the contracts should read as written, organized and styled by the same hand as V6. A read-only style audit against STYLE_GUIDE.md and the pinned V6 sources is running.
+
+## V6 style pass (2026-11-13)
+
+- [x] Interfaces for the pool, the claims and the data hook; `IFairLunch` returns them instead of the contracts.
+- [x] Set-once storage in camelCase (`oracleHook`, `poolManager`, `positionManager`), setter arguments `new…`.
+- [x] NatSpec on every error, named arguments on math calls, alphabetical members, comments in every catch.
+- [x] `setSplitProjectId` uses `_msgSender()`; `SetSplitProjectId` indexes the project.
+- [x] Claims: `claimedBy` is now `claimedOf`, `LUNCH` is `FAIR_LUNCH`, `Fund` and `SetTerms` carry the caller.
+- [x] Full suite: 131 passed, 0 failed. FairLunch runtime 23,703 bytes (873 spare).
+- Skipped, my call: splitting `FairLunch_InvalidConfig` and revert events in `_payFeeTo` (bytecode), a forwarder
+  constructor argument (address parity).

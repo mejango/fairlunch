@@ -30,14 +30,14 @@ contract DeployTest is Test {
 
     function test_deploy_sameAddressConfiguredPerChain() public {
         FairLunch onBase = _rehearseOn("https://mainnet.base.org", 56_216_000);
-        assertEq(address(onBase.POOL().POSITION_MANAGER()), 0x7C5f5A4bBd8fD63184577525326123B519429bDc);
-        assertEq(address(onBase.POOL().POOL_MANAGER()), 0x498581fF718922c3f8e6A244956aF099B2652b2b);
-        assertEq(address(onBase.ORACLE_HOOK()), 0xB436Cedbee8F191A3860719b4B0f474434F315c8);
+        assertEq(address(onBase.POOL().positionManager()), 0x7C5f5A4bBd8fD63184577525326123B519429bDc);
+        assertEq(address(onBase.POOL().poolManager()), 0x498581fF718922c3f8e6A244956aF099B2652b2b);
+        assertEq(address(onBase.oracleHook()), 0xB436Cedbee8F191A3860719b4B0f474434F315c8);
         assertEq(address(onBase.TERMINAL()), 0x130f5Dd2bD8805443Cf41755253D778a75a67f53);
 
         FairLunch onOptimism = _rehearseOn("https://mainnet.optimism.io", 159_417_000);
         assertEq(address(onOptimism), address(onBase), "same address on both chains");
-        assertEq(address(onOptimism.POOL().POSITION_MANAGER()), 0x3C3Ea4B57a46241e54610e5f022E5c45859A1017);
-        assertEq(address(onOptimism.ORACLE_HOOK()), 0x850eC1a2aDcB2126d823632e60441De2926fD5C8);
+        assertEq(address(onOptimism.POOL().positionManager()), 0x3C3Ea4B57a46241e54610e5f022E5c45859A1017);
+        assertEq(address(onOptimism.oracleHook()), 0x850eC1a2aDcB2126d823632e60441De2926fD5C8);
     }
 }

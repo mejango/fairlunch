@@ -91,7 +91,7 @@ if (step === 'create' || step === 'create-host') {
   const list = LIST(account.address), id = BigInt(state.hostId)
   await send(host, { address: claims, abi: claimsAbi, functionName: 'claim', args: [id, list[1][0], BigInt(list[1][1]), claimProofOf(list, 1)] })
   console.log({ pool: formatEther(await host.client.readContract({ address: claims, abi: claimsAbi, functionName: 'tokenCountOf', args: [id] })),
-    claimed: await host.client.readContract({ address: claims, abi: claimsAbi, functionName: 'claimedBy', args: [id, list[1][0]] }) })
+    claimed: await host.client.readContract({ address: claims, abi: claimsAbi, functionName: 'claimedOf', args: [id, list[1][0]] }) })
 } else if (step === 'release') {
   // Sends the chef the tokens that have vested.
   const claims = await host.client.readContract({ address: LUNCH, abi: fairLunchAbi, functionName: 'CLAIMS' })

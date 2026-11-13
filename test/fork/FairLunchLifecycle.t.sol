@@ -37,6 +37,8 @@ import {FairLunch} from "../../src/FairLunch.sol";
 import {FairLunchClaims} from "../../src/FairLunchClaims.sol";
 import {FairLunchDataHook} from "../../src/FairLunchDataHook.sol";
 import {IFairLunch} from "../../src/interfaces/IFairLunch.sol";
+import {IFairLunchPool} from "../../src/interfaces/IFairLunchPool.sol";
+import {IFairLunchClaims} from "../../src/interfaces/IFairLunchClaims.sol";
 import {PoolProbe} from "../PoolProbe.sol";
 import {FairLunchConfig} from "../../src/structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "../../src/structs/FairLunchRecord.sol";
@@ -131,7 +133,7 @@ contract FairLunchLifecycle is Test {
             permit2: PERMIT2,
             deployer: address(this)
         });
-        lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
+        lunch.setChainSpecificConstants({newPositionManager: POSITION_MANAGER, newOracleHook: ORACLE});
         deadline = uint48(block.timestamp + 7 days);
         vm.deal(alice, 10_000 ether);
         vm.deal(bob, 10_000 ether);
@@ -404,7 +406,7 @@ contract FairLunchLifecycle is Test {
 
     /// @notice The tokens `CLAIMS` holds for a lunch's list, which shares it with the creator's.
     function _heldForList(uint256 id) internal view returns (uint256) {
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         return _token(id).balanceOf(address(claims)) - (claims.creatorTokenCountOf(id) - claims.creatorClaimedOf(id));
     }
 
@@ -427,7 +429,7 @@ contract FairLunchLifecycle is Test {
     function test_claims_getTheirShareOfSupply() public {
         vm.deal(address(0xFEED), 10 ether);
         uint256 id = _servedWithClaims(TENTH, 6 * TENTH);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         uint256 supply = TOKENS.totalSupplyOf(id);
 
         assertApproxEqRel(claims.tokenCountOf(id), supply * 6 / 10, 1e9, "60% for the list");
@@ -447,7 +449,7 @@ contract FairLunchLifecycle is Test {
     function test_claims_onlyOnceAndOnlyAsListed() public {
         vm.deal(address(0xFEED), 10 ether);
         uint256 id = _servedWithClaims(0, 8 * TENTH);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         assertEq(claims.creatorTokenCountOf(id), 0, "no chef tokens");
 
         // More than listed, or someone unlisted.
@@ -476,7 +478,7 @@ contract FairLunchLifecycle is Test {
         _pay(id, address(0xFEED), 10 ether);
         vm.warp(deadline);
         lunch.serve(id);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         uint256 whole = claims.tokenCountOf(id) * 3 / 4;
 
         // Nothing has vested in the block it's served in.
@@ -505,7 +507,7 @@ contract FairLunchLifecycle is Test {
         _pay(id, address(0xFEED), 10 ether);
         vm.warp(deadline);
         lunch.serve(id);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         uint256 all = claims.tokenCountOf(id);
 
         vm.warp(uint256(deadline) + 13 weeks);
@@ -526,7 +528,7 @@ contract FairLunchLifecycle is Test {
         config.claimsPercent = 5 * TENTH;
         config.claimsRoot = _root(alice, 0.75e18, bob, 0.25e18);
         uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(config);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         assertEq(claims.percentOf(id), 5 * TENTH);
 
         vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NotServed.selector, id));
@@ -534,7 +536,7 @@ contract FairLunchLifecycle is Test {
     }
 
     function test_claims_onlyFairLunchSetsAndFunds() public {
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_Unauthorized.selector, address(this)));
         claims.setTermsOf(1, TENTH, bytes32(uint256(1)), 0);
         vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_Unauthorized.selector, address(this)));
@@ -585,7 +587,7 @@ contract FairLunchLifecycle is Test {
         vm.warp(deadline + 1);
         lunch.serve(id);
 
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         uint256 supply = TOKENS.totalSupplyOf(id);
         assertApproxEqRel(claims.tokenCountOf(id), supply * claimsPercent / 1e9, 1e12, "the list's percent");
         claims.claim(id, alice, aliceShares, _proof(bob, 1e18 - aliceShares));
@@ -678,9 +680,9 @@ contract FairLunchLifecycle is Test {
     }
 
     function test_unlockCallback_onlyPoolManager() public {
-        FairLunchPool pool = lunch.POOL();
+        IFairLunchPool pool = lunch.POOL();
         vm.expectRevert(abi.encodeWithSelector(FairLunchPool.FairLunchPool_Unauthorized.selector, address(this)));
-        pool.unlockCallback("");
+        FairLunchPool(payable(address(pool))).unlockCallback("");
     }
 
     //*********************************************************************//
@@ -759,7 +761,7 @@ contract FairLunchLifecycle is Test {
 
     function test_serve_creatorTokensVest() public {
         uint256 id = _served(0, 0, TENTH);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         IERC20 token = _token(id);
 
         // A tenth of the total supply, held for the creator from the serve on.
@@ -796,7 +798,7 @@ contract FairLunchLifecycle is Test {
         vm.warp(deadline);
         lunch.serve(id);
 
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         assertEq(claims.release(id), claims.creatorTokenCountOf(id));
         assertApproxEqAbs(_token(id).balanceOf(creator) * 10, TOKENS.totalSupplyOf(id), 1e6, "10% of supply");
     }
@@ -805,7 +807,7 @@ contract FairLunchLifecycle is Test {
     function test_release_andClaimsKeepToTheirOwn() public {
         vm.deal(address(0xFEED), 10 ether);
         uint256 id = _servedWithClaims(TENTH, 6 * TENTH);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         uint256 creatorTokens = claims.creatorTokenCountOf(id);
 
         claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
@@ -1669,11 +1671,11 @@ contract FairLunchLifecycle is Test {
 
     function test_setChainSpecificConstants_onlyDeployerOnce() public {
         assertEq(
-            address(lunch.POOL().POOL_MANAGER()), address(POOL_MANAGER), "pool manager read from the position manager"
+            address(lunch.POOL().poolManager()), address(POOL_MANAGER), "pool manager read from the position manager"
         );
 
         vm.expectRevert(FairLunch.FairLunch_AlreadyConfigured.selector);
-        lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
+        lunch.setChainSpecificConstants({newPositionManager: POSITION_MANAGER, newOracleHook: ORACLE});
 
         FairLunch fresh = new FairLunch({
             omnichainDeployer: OMNI,
@@ -1685,7 +1687,7 @@ contract FairLunchLifecycle is Test {
             deployer: bob
         });
         vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));
-        fresh.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
+        fresh.setChainSpecificConstants({newPositionManager: POSITION_MANAGER, newOracleHook: ORACLE});
 
         // No lunches until this chain is configured.
         FairLunchConfig memory config = _config(creator, 0, 0, 0);

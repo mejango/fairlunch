@@ -78,7 +78,7 @@ abstract contract FairLunchErc20 is Test {
             permit2: PERMIT2,
             deployer: address(this)
         });
-        lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
+        lunch.setChainSpecificConstants({newPositionManager: POSITION_MANAGER, newOracleHook: ORACLE});
         deadline = uint48(block.timestamp + 7 days);
 
         money = _money();
