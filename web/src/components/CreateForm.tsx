@@ -97,6 +97,12 @@ export function CreateForm() {
     return !!formRef.current && Number(String(new FormData(formRef.current).get(name) ?? '').trim()) === 0
   }
 
+  // The days typed so far, for the preview's sentence.
+  const days = (() => {
+    void typed
+    return formRef.current ? whole(String(new FormData(formRef.current).get('days') ?? '').trim(), 1, 365) : null
+  })()
+
   // What the token would start at if the fundraise raised a made-up amount, under the terms typed so far.
   const moneySymbol = raiseIn === 'other' ? 'tokens' : raiseIn
   const moneyDecimals = raiseIn === 'USDC' ? 6 : 18
@@ -289,7 +295,7 @@ export function CreateForm() {
       <p className="-mt-2 text-sm text-muted">One address,amount per line.</p>
       <p className="sentence rounded-xl border border-line/60 p-3" aria-live="polite">🍽️ If it raises
         <input aria-label="A raise to preview" className="input w-24" inputMode="decimal" placeholder="10" value={hypothetical} onChange={event => setHypothetical(event.target.value)} />
-        <span>{moneySymbol}{preview === null ? '…' : ','}</span>
+        <span>{moneySymbol}{days === null ? '' : ` in ${days} ${days === 1 ? 'day' : 'days'}`}{preview === null ? '…' : ','}</span>
         {preview === null ? null : `the market cap starts at ${formatEth(preview.circulating, moneyDecimals)} ${moneySymbol}${preview.diluted === preview.circulating ? '' : `, or ${formatEth(preview.diluted, moneyDecimals)} ${moneySymbol} fully diluted`}.`}
       </p>
       <p className="text-sm text-muted">🔒 Nothing can be changed after.</p>

@@ -19,6 +19,10 @@ npm run check      # audit, lint, types, tests, build
 
 Environment names are in `.env.example`.
 
+## Deploy
+
+Railway builds `Dockerfile` (see `railway.json`). `NEXT_PUBLIC_*` values are read at build time, so set them on the service before deploying. Upload with `railway up --ci` from this folder.
+
 ## After a contract change
 
 ```bash
@@ -37,4 +41,4 @@ For a lunch with a copy on another chain, fork that chain too, run `Rehearse.dep
 
 - A lunch on several chains is one `createFor` per chain, sent one after another, not one bundle.
 - The chart has no volume bars. Swap volume needs an index: public RPCs cap log scans far below a day of blocks, and Bendystraw only records swaps for registered buyback pools.
-- No production domain is chosen, so every page is marked `noindex` in `next.config.js`.
+- The site at fairlun.ch runs on testnets only, so every page is marked `noindex` in `next.config.js`.

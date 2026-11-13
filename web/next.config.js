@@ -50,7 +50,7 @@ module.exports = phase => {
     async headers() {
       return [
         { source: '/:path*', headers: securityHeaders },
-        // ponytail: no production domain is chosen yet, so nothing is listed. Drop this when one is.
+        // ponytail: the hosted site is testnet only, so nothing is listed. Drop this when it serves mainnets.
         { source: '/:path*', headers: [{ key: 'X-Robots-Tag', value: 'noindex' }] },
       ]
     },

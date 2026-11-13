@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.git
+.next
+.next-*
+coverage
+node_modules
+playwright-report
+test-results
+*.log
+*.pem
+*.key
+Dockerfile*
+README.md
+test
