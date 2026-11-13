@@ -6,8 +6,11 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-/// @notice Holds the part of each lunch's token supply that goes to a list of addresses, and hands it out.
-/// @dev A lunch's creator fixes the list at creation as a merkle root. Each entry is an address and its share of the
+/// @notice Holds the parts of each lunch's token supply that go to its creator and to a list of addresses, and hands
+/// them out.
+/// @dev `FairLunch` mints both here when the lunch is served. The creator's tokens vest linearly over the duration
+/// fixed at creation, and anyone can send the creator what has vested with `release`.
+/// A lunch's creator fixes the list at creation as a merkle root. Each entry is an address and its share of the
 /// lunch's claims out of `SHARES_TOTAL`. `FairLunch` mints the claims here when the lunch is served. From then on
 /// anyone can send any entry its tokens, forever. If the creator set a vesting duration, each entry's tokens vest
 /// linearly over it from the moment the lunch is served, and a claim sends what has vested and hasn't been sent yet.
@@ -29,7 +32,15 @@ contract FairLunchClaims {
     //*********************************************************************//
 
     event Claim(uint256 indexed projectId, address indexed account, uint256 shares, uint256 tokenCount, address caller);
-    event Fund(uint256 indexed projectId, IERC20 token, uint256 tokenCount);
+    event Fund(
+        uint256 indexed projectId,
+        IERC20 token,
+        uint256 tokenCount,
+        address creator,
+        uint256 creatorTokenCount,
+        uint32 creatorVestingDuration
+    );
+    event Release(uint256 indexed projectId, address indexed creator, uint256 tokenCount, address caller);
     event SetTerms(uint256 indexed projectId, uint32 percent, bytes32 root, uint32 vestingDuration);
 
     //*********************************************************************//
@@ -54,6 +65,22 @@ contract FairLunchClaims {
     /// @custom:param projectId The ID of the lunch's project.
     /// @custom:param account The address.
     mapping(uint256 projectId => mapping(address account => uint256)) public claimedBy;
+
+    /// @notice The number of a lunch's tokens its creator has been sent.
+    /// @custom:param projectId The ID of the lunch's project.
+    mapping(uint256 projectId => uint256) public creatorClaimedOf;
+
+    /// @notice The address a lunch's creator tokens go to. Fixed when the lunch is served.
+    /// @custom:param projectId The ID of the lunch's project.
+    mapping(uint256 projectId => address) public creatorOf;
+
+    /// @notice The number of tokens minted for a lunch's creator when it was served.
+    /// @custom:param projectId The ID of the lunch's project.
+    mapping(uint256 projectId => uint256) public creatorTokenCountOf;
+
+    /// @notice The number of seconds over which a lunch's creator tokens vest. Zero if they're all sent at once.
+    /// @custom:param projectId The ID of the lunch's project.
+    mapping(uint256 projectId => uint32) public creatorVestingDurationOf;
 
     /// @notice The number of tokens a lunch's claims have sent out so far.
     /// @custom:param projectId The ID of the lunch's project.
@@ -133,16 +160,12 @@ contract FairLunchClaims {
         // is its creator's to get right.
         uint256 vested = Math.mulDiv(tokenCountOf[projectId], shares, SHARES_TOTAL);
 
-        // What has vested so far, linearly from when the lunch was served: for this address, and for the whole list,
-        // so shares that add up to more than the whole can't take tokens out ahead of the schedule.
-        uint256 available = tokenCountOf[projectId];
+        // What has vested so far: for this address, and for the whole list, so shares that add up to more than the
+        // whole can't take tokens out ahead of the schedule.
         uint256 duration = vestingDurationOf[projectId];
-        uint256 elapsed = block.timestamp - fundedAt[projectId];
-        if (elapsed < duration) {
-            vested = Math.mulDiv(vested, elapsed, duration);
-            available = Math.mulDiv(available, elapsed, duration);
-        }
-        available -= totalClaimedOf[projectId];
+        vested = _vestedOf({projectId: projectId, tokenCount: vested, duration: duration});
+        uint256 available = _vestedOf({projectId: projectId, tokenCount: tokenCountOf[projectId], duration: duration})
+            - totalClaimedOf[projectId];
 
         uint256 claimed = claimedBy[projectId][account];
         tokenCount = vested > claimed ? Math.min(vested - claimed, available) : 0;
@@ -155,15 +178,61 @@ contract FairLunchClaims {
         emit Claim({projectId: projectId, account: account, shares: shares, tokenCount: tokenCount, caller: msg.sender});
     }
 
-    /// @notice Record the tokens `LUNCH` minted here for a lunch's claims, which opens them.
+    /// @notice Record the tokens `LUNCH` minted here for a lunch's claims and its creator, which opens both.
     /// @param projectId The ID of the lunch's project.
     /// @param token The lunch's token.
-    /// @param tokenCount The number of tokens minted here.
-    function fund(uint256 projectId, IERC20 token, uint256 tokenCount) external onlyLunch {
+    /// @param tokenCount The number of tokens minted here for the claims.
+    /// @param creator The address the creator's tokens go to.
+    /// @param creatorTokenCount The number of tokens minted here for the creator.
+    /// @param creatorVestingDuration The number of seconds over which the creator's tokens vest from now.
+    function fund(
+        uint256 projectId,
+        IERC20 token,
+        uint256 tokenCount,
+        address creator,
+        uint256 creatorTokenCount,
+        uint32 creatorVestingDuration
+    )
+        external
+        onlyLunch
+    {
         tokenOf[projectId] = token;
         tokenCountOf[projectId] = tokenCount;
+        creatorOf[projectId] = creator;
+        creatorTokenCountOf[projectId] = creatorTokenCount;
+        creatorVestingDurationOf[projectId] = creatorVestingDuration;
         fundedAt[projectId] = uint48(block.timestamp);
-        emit Fund({projectId: projectId, token: token, tokenCount: tokenCount});
+        emit Fund({
+            projectId: projectId,
+            token: token,
+            tokenCount: tokenCount,
+            creator: creator,
+            creatorTokenCount: creatorTokenCount,
+            creatorVestingDuration: creatorVestingDuration
+        });
+    }
+
+    /// @notice Send a served lunch's creator the part of their tokens that has vested.
+    /// @dev Anyone can call this, as often as there's something vested to send. The tokens go to the creator.
+    /// @param projectId The ID of the lunch's project.
+    /// @return tokenCount The number of tokens sent.
+    function release(uint256 projectId) external returns (uint256 tokenCount) {
+        IERC20 token = tokenOf[projectId];
+        if (address(token) == address(0)) revert FairLunchClaims_NotServed(projectId);
+
+        address creator = creatorOf[projectId];
+        uint256 claimed = creatorClaimedOf[projectId];
+        tokenCount = _vestedOf({
+            projectId: projectId,
+            tokenCount: creatorTokenCountOf[projectId],
+            duration: creatorVestingDurationOf[projectId]
+        }) - claimed;
+        if (tokenCount == 0) revert FairLunchClaims_NothingToClaim({projectId: projectId, account: creator});
+
+        creatorClaimedOf[projectId] = claimed + tokenCount;
+        token.safeTransfer({to: creator, value: tokenCount});
+
+        emit Release({projectId: projectId, creator: creator, tokenCount: tokenCount, caller: msg.sender});
     }
 
     /// @notice Fix a lunch's claims at its creation.
@@ -176,5 +245,19 @@ contract FairLunchClaims {
         rootOf[projectId] = root;
         vestingDurationOf[projectId] = vestingDuration;
         emit SetTerms({projectId: projectId, percent: percent, root: root, vestingDuration: vestingDuration});
+    }
+
+    //*********************************************************************//
+    // ------------------------ internal views --------------------------- //
+    //*********************************************************************//
+
+    /// @notice The part of a number of a lunch's tokens that has vested, linearly from when the lunch was served.
+    /// @param projectId The ID of the lunch's project.
+    /// @param tokenCount The number of tokens vesting.
+    /// @param duration The number of seconds they vest over.
+    /// @return The number of them that has vested.
+    function _vestedOf(uint256 projectId, uint256 tokenCount, uint256 duration) internal view returns (uint256) {
+        uint256 elapsed = block.timestamp - fundedAt[projectId];
+        return elapsed < duration ? Math.mulDiv(tokenCount, elapsed, duration) : tokenCount;
     }
 }

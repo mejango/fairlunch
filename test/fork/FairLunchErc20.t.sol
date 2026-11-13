@@ -28,7 +28,6 @@ import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionMa
 import {Test} from "forge-std/Test.sol";
 
 import {FairLunch} from "../../src/FairLunch.sol";
-import {FairLunchVestingDeployer} from "../../src/FairLunchVestingDeployer.sol";
 import {FairLunchConfig} from "../../src/structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "../../src/structs/FairLunchRecord.sol";
 import {PoolProbe} from "../PoolProbe.sol";
@@ -77,7 +76,6 @@ abstract contract FairLunchErc20 is Test {
             routerTerminalRegistry: ROUTER_REGISTRY,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
-            vestingDeployer: new FairLunchVestingDeployer(),
             deployer: address(this)
         });
         lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
@@ -240,9 +238,7 @@ abstract contract FairLunchErc20 is Test {
         // Funders, as many again for each unit pooled, and the creator's tenth of the total.
         uint256 marketed = 10_000_000_000e18 + pooled * 1_000_000e18 / unit;
         assertApproxEqRel(TOKENS.totalSupplyOf(id), marketed * 10 / 9, 0.0001e18, "supply");
-        assertApproxEqRel(
-            _token(id).balanceOf(lunch.recordOf(id).vestingWallet), marketed / 9, 0.0001e18, "creator's tokens"
-        );
+        assertApproxEqRel(lunch.CLAIMS().creatorTokenCountOf(id), marketed / 9, 0.0001e18, "creator's tokens");
         _assertHoldsNothing(id);
     }
 

@@ -34,11 +34,6 @@ export const fairLunchAbi = [
         "internalType": "contract IAllowanceTransfer"
       },
       {
-        "name": "vestingDeployer",
-        "type": "address",
-        "internalType": "contract FairLunchVestingDeployer"
-      },
-      {
         "name": "deployer",
         "type": "address",
         "internalType": "address"
@@ -280,19 +275,6 @@ export const fairLunchAbi = [
         "name": "",
         "type": "uint32",
         "internalType": "uint32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "VESTING_DEPLOYER",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "contract FairLunchVestingDeployer"
       }
     ],
     "stateMutability": "view"
@@ -656,11 +638,6 @@ export const fairLunchAbi = [
             "internalType": "uint32"
           },
           {
-            "name": "vestingWallet",
-            "type": "address",
-            "internalType": "address"
-          },
-          {
             "name": "positionId",
             "type": "uint256",
             "internalType": "uint256"
@@ -909,12 +886,6 @@ export const fairLunchAbi = [
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
-      },
-      {
-        "name": "vestingWallet",
-        "type": "address",
-        "indexed": false,
-        "internalType": "address"
       },
       {
         "name": "positionId",

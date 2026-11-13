@@ -36,11 +36,10 @@ export type Lunch = {
   keepCap: bigint
   tokenPercent: bigint
   vestingDuration: number
-  vestingWallet: Address
   /** The airdrop list's share of supply, and the tokens minted for it at serve. */
   claimsPercent: bigint
   claimsTokens: bigint
-  /** Seconds the airdrop unlocks over, from `claimsFundedAt`, when `serve` funded it. */
+  /** Seconds the airdrop unlocks over, from `claimsFundedAt`: when `serve` funded it and the chef's tokens. */
   claimsVestingDuration: number
   claimsFundedAt: number
   token: Address
@@ -138,7 +137,7 @@ export async function readLunch(chainId: number, projectId: number, signal?: Abo
   return {
     chainId, projectId, hostChainId: Number(record.hostChainId), ...clock,
     creator: record.creator, keepPercent: BigInt(record.keepPercent), keepCap: record.keepCap, tokenPercent: BigInt(record.tokenPercent),
-    vestingDuration: record.vestingDuration, vestingWallet: record.vestingWallet, claimsPercent: BigInt(claimsPercent), claimsTokens, claimsVestingDuration, claimsFundedAt, token, name, symbol, uri, money, moneyIs0, balance, supply, poolKey,
+    vestingDuration: record.vestingDuration, claimsPercent: BigInt(claimsPercent), claimsTokens, claimsVestingDuration, claimsFundedAt, token, name, symbol, uri, money, moneyIs0, balance, supply, poolKey,
     price: slot0 ? priceAt(slot0[1], { money, moneyIs0 }) : null,
     // The position spans every price, so its currency0 is its liquidity over the square root of the price, and its
     // currency1 is its liquidity times it.
@@ -153,17 +152,13 @@ export async function readPoolFees(lunch: Pick<Lunch, 'chainId' | 'projectId'>, 
   return { tokens: result[0], money: result[1] }
 }
 
-const vestingAbi = parseAbi(['function releasable(address token) view returns (uint256)', 'function release(address token)'])
-
-/** The chef's tokens: `releasable` have vested and not been released yet, `locked` haven't vested. */
-export async function readVesting(lunch: Pick<Lunch, 'chainId' | 'vestingWallet' | 'token'>, signal?: AbortSignal): Promise<{ releasable: bigint; locked: bigint }> {
-  if (BigInt(lunch.vestingWallet) === 0n) return { releasable: 0n, locked: 0n }
+/** The chef's tokens: how many were minted at serve, and how many have been sent to the chef so far. */
+export async function readVesting(lunch: Pick<Lunch, 'chainId' | 'projectId'>, signal?: AbortSignal): Promise<{ total: bigint; sent: bigint }> {
+  const { claims } = await wiringOn(lunch.chainId)
   const client = jbCenterPublicClient(lunch.chainId, signal)
-  const [releasable, held] = await Promise.all([
-    client.readContract({ address: lunch.vestingWallet, abi: vestingAbi, functionName: 'releasable', args: [lunch.token] }),
-    client.readContract({ address: lunch.token, abi: erc20Abi, functionName: 'balanceOf', args: [lunch.vestingWallet] }),
-  ])
-  return { releasable, locked: held - releasable }
+  const [total, sent] = await Promise.all((['creatorTokenCountOf', 'creatorClaimedOf'] as const).map(functionName =>
+    client.readContract({ address: claims, abi: claimsAbi, functionName, args: [BigInt(lunch.projectId)] })))
+  return { total, sent }
 }
 
 /** The lunch's tokens an account holds, claimed or not. */
@@ -173,8 +168,10 @@ export async function readHeld(lunch: Pick<Lunch, 'chainId' | 'projectId'>, acco
 }
 
 /** Sending the chef the tokens that have vested. Anyone can send it. */
-export const releaseCall = (lunch: Pick<Lunch, 'chainId' | 'vestingWallet' | 'token'>) =>
-  ({ chainId: lunch.chainId, address: lunch.vestingWallet, abi: vestingAbi, functionName: 'release', args: [lunch.token] }) as const
+export async function releaseCall(lunch: Pick<Lunch, 'chainId' | 'projectId'>) {
+  const { claims } = await wiringOn(lunch.chainId)
+  return { chainId: lunch.chainId, address: claims, abi: claimsAbi, functionName: 'release' as const, args: [BigInt(lunch.projectId)] as const }
+}
 
 /** What an address can claim of a lunch's airdrop, with the call that sends it. Null if it isn't on the list. */
 /** Chains like Arbitrum mine several blocks in one second: `serve` is in one of the first few with its time. */

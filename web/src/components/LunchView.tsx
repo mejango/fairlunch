@@ -11,7 +11,7 @@ import { assetUrl, formatEth, formatPrice, formatTokens } from '@/lib/format'
 import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib/fair-lunch/phase'
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { claimCallOf, readServed, readClaimed, readClaimList, readCopies, readHeld, readHostOf, readLunch, readPoolFees, readVesting, releaseCall, type Lunch } from '@/lib/fair-lunch/reads'
-import { SHARES_TOTAL } from '@/lib/fair-lunch/claims'
+import { claimsAbi, SHARES_TOTAL } from '@/lib/fair-lunch/claims'
 import { moneyFor, PERCENT_TOTAL, projectedCapOf, raisedOf, splitOf, tokensFor, unvestedOf } from '@/lib/fair-lunch/split'
 import { allowanceShortOf, allowTx, claimTx, otherMoneyOf, payTx, refundTx, routedPayTx, quoteSwap, quoteSwapFor, sendHomeTx, tradeTx, upkeepTx } from '@/lib/fair-lunch/writes'
 import Link from 'next/link'
@@ -373,9 +373,10 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
     staleTime: Infinity,
   })
   const uniswap = UNISWAP_CHAIN[lunch.chainId]
-  const releasable = vesting?.releasable
+  const chefLocked = vesting ? unvestedOf(vesting.total, lunch.claimsFundedAt, lunch.vestingDuration, now) : 0n
+  const releasable = vesting ? vesting.total - chefLocked - vesting.sent : undefined
   const cap = (tokens: bigint) => `${formatPrice(Number(formatUnits(tokens, 18)) * lunch.price!)} ${lunch.money.symbol}`
-  const locked = vesting ? vesting.locked + unvestedOf(lunch.claimsTokens, lunch.claimsFundedAt, lunch.claimsVestingDuration, now) : null
+  const locked = vesting ? chefLocked + unvestedOf(lunch.claimsTokens, lunch.claimsFundedAt, lunch.claimsVestingDuration, now) : null
   return (
     <>
       <dl className="grid grid-cols-2 gap-4">
@@ -405,7 +406,7 @@ function ServedStats({ lunch, burns, now, phase }: { lunch: Lunch; burns: readon
           {lunch.tokenPercent === 0n ? null : (
             <TxAction chainId={lunch.chainId} className={SMALL} label="Release" title="Release vested tokens" doneTitle="Released" disabled={!releasable}
               prepare={async () => ({
-                request: { ...releaseCall(lunch), abi: releaseCall(lunch).abi as Abi, label: `Sends the chef the ${lunch.symbol} that has vested` },
+                request: { ...(await releaseCall(lunch)), abi: claimsAbi as Abi, label: `Sends the chef the ${lunch.symbol} that has vested` },
                 rows: [{ label: 'Sends', value: `${formatTokens(releasable ?? 0n)} ${lunch.symbol} to the chef`, strong: true }, { label: 'Costs you', value: 'Network fee only' }],
               })} />
           )}

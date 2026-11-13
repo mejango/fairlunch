@@ -11,7 +11,6 @@ pragma solidity ^0.8.0;
 /// @custom:member tokenPercent The creator's share of the total token supply at launch, out of
 /// `JBConstants.SPLITS_TOTAL_PERCENT`.
 /// @custom:member vestingDuration The number of seconds over which the creator's tokens vest.
-/// @custom:member vestingWallet The wallet holding the creator's vesting tokens. Zero if there are none.
 /// @custom:member positionId The ID of the lunch's Uniswap V4 liquidity position, which `FairLunchPool` holds forever.
 struct FairLunchRecord {
     uint64 hostChainId;
@@ -21,6 +20,5 @@ struct FairLunchRecord {
     uint104 keepCap;
     uint32 tokenPercent;
     uint32 vestingDuration;
-    address vestingWallet;
     uint256 positionId;
 }

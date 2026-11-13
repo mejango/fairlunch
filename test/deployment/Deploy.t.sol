@@ -34,7 +34,6 @@ contract DeployTest is Test {
         assertEq(address(onBase.POOL().POOL_MANAGER()), 0x498581fF718922c3f8e6A244956aF099B2652b2b);
         assertEq(address(onBase.ORACLE_HOOK()), 0xB436Cedbee8F191A3860719b4B0f474434F315c8);
         assertEq(address(onBase.TERMINAL()), 0x130f5Dd2bD8805443Cf41755253D778a75a67f53);
-        assertGt(address(onBase.VESTING_DEPLOYER()).code.length, 0);
 
         FairLunch onOptimism = _rehearseOn("https://mainnet.optimism.io", 159_417_000);
         assertEq(address(onOptimism), address(onBase), "same address on both chains");

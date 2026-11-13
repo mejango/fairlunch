@@ -572,3 +572,13 @@ jango: "can we do vesting for airdrops too? we should then add fully diluted mar
 - [x] Market cap is circulating only, with a "?" note on what it counts. jango, 2026-11-12: the pool's locked tokens count, and airdrop tokens that have vested but aren't claimed count.
 - [x] Fully diluted market cap beside it, on the served page, the funding projection, the pay hint and the create preview.
 - Codex pass 22 (gpt-daybreak-blue-latest): DO NOT MERGE. High: shares adding up to more than the whole let a list take tokens ahead of its schedule. Fixed with a cap on the whole list's vested amount and a test. Medium: circulating cap counts vested, unclaimed airdrop tokens. Left as is, that's jango's decision above. Lows: saved create attempts from before the new term (storage key bumped), RISKS.md contradictions (fixed), browser clock against chain time in the claim preview (left, a wrong preview fails at simulation).
+
+### Chef vesting folded into FairLunchClaims, 2026-11-12
+
+jango: "do we need OpenZepplins vesting wallet here? is it over complicated?" then "do it".
+
+- [x] `serve` mints the chef's tokens into `FairLunchClaims` with the airdrop's, and `fund` records the creator, count and duration. `release(projectId)` sends the chef what has vested less what was sent; anyone can call it. One `_vestedOf` serves both.
+- [x] `FairLunchVestingDeployer`, `VESTING_DEPLOYER`, the constructor argument, `record.vestingWallet` and the `Serve` event's wallet are gone.
+- [x] Site reads `creatorTokenCountOf` and `creatorClaimedOf`; Release calls `FairLunchClaims.release`.
+- Behaviour change: the chef's unlocking position can't be handed to another address any more.
+- Codex pass 23 (before this change): MERGE for the list-wide cap.

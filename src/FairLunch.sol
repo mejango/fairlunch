@@ -46,7 +46,6 @@ import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionMa
 import {FairLunchClaims} from "./FairLunchClaims.sol";
 import {FairLunchDataHook} from "./FairLunchDataHook.sol";
 import {FairLunchPool} from "./FairLunchPool.sol";
-import {FairLunchVestingDeployer} from "./FairLunchVestingDeployer.sol";
 import {IFairLunch} from "./interfaces/IFairLunch.sol";
 import {IBuybackOracle} from "./interfaces/IBuybackOracle.sol";
 import {ISuckerRoute} from "./interfaces/ISuckerRoute.sol";
@@ -175,9 +174,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @notice The token ledger.
     IJBTokens public immutable override TOKENS;
 
-    /// @notice The deployer of the wallets that vest creators' tokens.
-    FairLunchVestingDeployer public immutable override VESTING_DEPLOYER;
-
     //*********************************************************************//
     // -------------- internal immutable stored properties -------------- //
     //*********************************************************************//
@@ -225,7 +221,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @param routerTerminalRegistry The terminal that takes payments in other tokens.
     /// @param suckerRegistry The registry of every lunch's suckers.
     /// @param permit2 The Permit2 contract the position manager pulls tokens through.
-    /// @param vestingDeployer The deployer of the wallets that vest creators' tokens.
     /// @param deployer The address allowed to set the chain-specific constants, once.
     constructor(
         IJBOmnichainDeployer omnichainDeployer,
@@ -234,7 +229,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         IJBTerminal routerTerminalRegistry,
         IJBSuckerRegistry suckerRegistry,
         IAllowanceTransfer permit2,
-        FairLunchVestingDeployer vestingDeployer,
         address deployer
     )
         ERC2771Context(ERC2771Context(address(omnichainDeployer)).trustedForwarder())
@@ -250,7 +244,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         SUCKER_REGISTRY = suckerRegistry;
         POOL = new FairLunchPool(permit2);
         CLAIMS = new FairLunchClaims();
-        VESTING_DEPLOYER = vestingDeployer;
         _DEPLOYER = deployer;
     }
 
@@ -712,22 +705,18 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         uint256 claimsTokens = granted == 0 ? 0 : mulDiv(granted, claimsPercent, record.tokenPercent + claimsPercent);
         uint256 creatorTokens = granted - claimsTokens;
 
-        // The claims' tokens wait in `CLAIMS` for whoever sends each listed address its part.
-        if (claimsTokens != 0) {
-            _mintTokensOf({projectId: projectId, tokenCount: claimsTokens, beneficiary: address(CLAIMS)});
+        // Both wait in `CLAIMS`: the claims' for whoever sends each listed address its part, the creator's vesting
+        // linearly from now.
+        if (granted != 0) {
+            _mintTokensOf({projectId: projectId, tokenCount: granted, beneficiary: address(CLAIMS)});
             CLAIMS.fund({
-                projectId: projectId, token: IERC20(address(TOKENS.tokenOf(projectId))), tokenCount: claimsTokens
+                projectId: projectId,
+                token: IERC20(address(TOKENS.tokenOf(projectId))),
+                tokenCount: claimsTokens,
+                creator: record.creator,
+                creatorTokenCount: creatorTokens,
+                creatorVestingDuration: record.vestingDuration
             });
-        }
-
-        // The creator's tokens go into a wallet that vests them linearly from now.
-        if (creatorTokens != 0) {
-            record.vestingWallet = VESTING_DEPLOYER.deployFor({
-                beneficiary: record.creator,
-                startTimestamp: uint64(block.timestamp),
-                durationSeconds: record.vestingDuration
-            });
-            _mintTokensOf({projectId: projectId, tokenCount: creatorTokens, beneficiary: record.vestingWallet});
         }
 
         // Open the bridges now that there is no raise left to bridge away.
@@ -751,7 +740,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             poolAmount: poolAmount,
             poolTokens: poolTokens,
             creatorTokens: creatorTokens,
-            vestingWallet: record.vestingWallet,
             positionId: record.positionId,
             caller: _msgSender()
         });

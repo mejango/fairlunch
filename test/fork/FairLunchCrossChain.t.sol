@@ -23,7 +23,6 @@ import {Test} from "forge-std/Test.sol";
 
 import {FairLunch} from "../../src/FairLunch.sol";
 import {FairLunchDataHook} from "../../src/FairLunchDataHook.sol";
-import {FairLunchVestingDeployer} from "../../src/FairLunchVestingDeployer.sol";
 import {FairLunchConfig} from "../../src/structs/FairLunchConfig.sol";
 
 /// @notice A lunch hosted on Base that collects revenue on Optimism, against the live CCIP suckers on both chains.
@@ -86,7 +85,6 @@ contract FairLunchCrossChain is Test {
     }
 
     function _deploy() internal returns (FairLunch) {
-        FairLunchVestingDeployer vestingDeployer = new FairLunchVestingDeployer{salt: "lunch"}();
         return new FairLunch{salt: "lunch"}({
             omnichainDeployer: OMNI,
             buybackRegistry: BUYBACK,
@@ -94,7 +92,6 @@ contract FairLunchCrossChain is Test {
             routerTerminalRegistry: ROUTER_REGISTRY,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
-            vestingDeployer: vestingDeployer,
             deployer: address(this)
         });
     }

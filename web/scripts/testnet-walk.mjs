@@ -65,7 +65,7 @@ if (step === 'create' || step === 'create-host') {
     const { deployerConfigurations } = parseSuckerDeployerConfig(on.chain.id, chainIds, [MappableAsset.NATIVE], { version: 6, bridge: 'ccip' })
     const config = {
       name: 'Burrito', symbol: 'BRTO', projectUri: '', hostChainId: BigInt(host.chain.id), token: '0x000000000000000000000000000000000000EEEe', deadline: terms.deadline, creator: account.address,
-      keepPercent: 200_000_000, keepCap: parseEther('0.005'), tokenPercent: 100_000_000, vestingDuration: 26 * 604800, claimsPercent: Number(process.env.WALK_AIRDROP ?? 0) * 10_000_000, claimsRoot: process.env.WALK_AIRDROP ? claimsRootOf(LIST(account.address)) : zeroHash, claimsVestingDuration: Number(process.env.WALK_AIRDROP_WEEKS ?? 0) * 604800, salt: terms.salt,
+      keepPercent: 200_000_000, keepCap: parseEther('0.005'), tokenPercent: 100_000_000, vestingDuration: Number(process.env.WALK_CHEF_WEEKS ?? 26) * 604800, claimsPercent: Number(process.env.WALK_AIRDROP ?? 0) * 10_000_000, claimsRoot: process.env.WALK_AIRDROP ? claimsRootOf(LIST(account.address)) : zeroHash, claimsVestingDuration: Number(process.env.WALK_AIRDROP_WEEKS ?? 0) * 604800, salt: terms.salt,
       suckerDeploymentConfiguration: { salt: zeroHash, deployerConfigurations: deployerConfigurations.map(({ deployer }) => ({
         deployer, peer: zeroHash, mappings: isHost ? [] : [{ localToken: NATIVE_TOKEN, minGas: 200_000, remoteToken: pad(NATIVE_TOKEN, { size: 32 }) }],
       })) },
@@ -92,6 +92,13 @@ if (step === 'create' || step === 'create-host') {
   await send(host, { address: claims, abi: claimsAbi, functionName: 'claim', args: [id, list[1][0], BigInt(list[1][1]), claimProofOf(list, 1)] })
   console.log({ pool: formatEther(await host.client.readContract({ address: claims, abi: claimsAbi, functionName: 'tokenCountOf', args: [id] })),
     claimed: await host.client.readContract({ address: claims, abi: claimsAbi, functionName: 'claimedBy', args: [id, list[1][0]] }) })
+} else if (step === 'release') {
+  // Sends the chef the tokens that have vested.
+  const claims = await host.client.readContract({ address: LUNCH, abi: fairLunchAbi, functionName: 'CLAIMS' })
+  const id = BigInt(state.hostId)
+  await send(host, { address: claims, abi: claimsAbi, functionName: 'release', args: [id] })
+  console.log({ chefTokens: formatEther(await host.client.readContract({ address: claims, abi: claimsAbi, functionName: 'creatorTokenCountOf', args: [id] })),
+    sent: formatEther(await host.client.readContract({ address: claims, abi: claimsAbi, functionName: 'creatorClaimedOf', args: [id] })) })
 } else if (step === 'send-home') {
   const call = { address: LUNCH, abi: fairLunchAbi, functionName: 'sendHome', args: [BigInt(state.copyId)] }
   const sending = await balanceOf(copy, state.copyId)

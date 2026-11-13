@@ -15,7 +15,6 @@ import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {IJBOmnichainDeployer} from "@bananapus/omnichain-deployers-v6/src/interfaces/IJBOmnichainDeployer.sol";
 import {IJBSuckerRegistry} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerRegistry.sol";
 import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
-import {VestingWallet} from "@openzeppelin/contracts/finance/VestingWallet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -37,7 +36,6 @@ import {FairLunchPool} from "../../src/FairLunchPool.sol";
 import {FairLunch} from "../../src/FairLunch.sol";
 import {FairLunchClaims} from "../../src/FairLunchClaims.sol";
 import {FairLunchDataHook} from "../../src/FairLunchDataHook.sol";
-import {FairLunchVestingDeployer} from "../../src/FairLunchVestingDeployer.sol";
 import {IFairLunch} from "../../src/interfaces/IFairLunch.sol";
 import {PoolProbe} from "../PoolProbe.sol";
 import {FairLunchConfig} from "../../src/structs/FairLunchConfig.sol";
@@ -117,7 +115,6 @@ contract FairLunchLifecycle is Test {
     uint32 internal constant TENTH = JBConstants.SPLITS_TOTAL_PERCENT / 10;
 
     FairLunch internal lunch;
-    FairLunchVestingDeployer internal vestingDeployer;
     address internal creator = address(0xC0FFEE0001);
     address internal alice = address(0xA11CE0001);
     address internal bob = address(0xB0B0001);
@@ -125,7 +122,6 @@ contract FairLunchLifecycle is Test {
 
     function setUp() public {
         vm.createSelectFork("https://mainnet.base.org", 56_216_000);
-        vestingDeployer = new FairLunchVestingDeployer();
         lunch = new FairLunch({
             omnichainDeployer: OMNI,
             buybackRegistry: BUYBACK,
@@ -133,7 +129,6 @@ contract FairLunchLifecycle is Test {
             routerTerminalRegistry: ROUTER_REGISTRY,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
-            vestingDeployer: vestingDeployer,
             deployer: address(this)
         });
         lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
@@ -407,6 +402,12 @@ contract FairLunchLifecycle is Test {
         return a < b ? keccak256(abi.encode(a, b)) : keccak256(abi.encode(b, a));
     }
 
+    /// @notice The tokens `CLAIMS` holds for a lunch's list, which shares it with the creator's.
+    function _heldForList(uint256 id) internal view returns (uint256) {
+        FairLunchClaims claims = lunch.CLAIMS();
+        return _token(id).balanceOf(address(claims)) - (claims.creatorTokenCountOf(id) - claims.creatorClaimedOf(id));
+    }
+
     function _proof(address other, uint256 otherShares) internal pure returns (bytes32[] memory proof) {
         proof = new bytes32[](1);
         proof[0] = _leaf(other, otherShares);
@@ -430,8 +431,8 @@ contract FairLunchLifecycle is Test {
         uint256 supply = TOKENS.totalSupplyOf(id);
 
         assertApproxEqRel(claims.tokenCountOf(id), supply * 6 / 10, 1e9, "60% for the list");
-        assertEq(_token(id).balanceOf(address(claims)), claims.tokenCountOf(id), "held for the list");
-        assertApproxEqRel(_token(id).balanceOf(lunch.recordOf(id).vestingWallet), supply / 10, 1e9, "10% vesting");
+        assertEq(_heldForList(id), claims.tokenCountOf(id), "held for the list");
+        assertApproxEqRel(claims.creatorTokenCountOf(id), supply / 10, 1e9, "10% vesting");
 
         // Anyone sends alice hers.
         vm.prank(bob);
@@ -440,14 +441,14 @@ contract FairLunchLifecycle is Test {
         assertEq(_token(id).balanceOf(alice), sent);
 
         claims.claim(id, bob, 0.25e18, _proof(alice, 0.75e18));
-        assertLe(_token(id).balanceOf(address(claims)), 1, "all handed out");
+        assertLe(_heldForList(id), 1, "all handed out");
     }
 
     function test_claims_onlyOnceAndOnlyAsListed() public {
         vm.deal(address(0xFEED), 10 ether);
         uint256 id = _servedWithClaims(0, 8 * TENTH);
         FairLunchClaims claims = lunch.CLAIMS();
-        assertEq(lunch.recordOf(id).vestingWallet, address(0), "no chef tokens");
+        assertEq(claims.creatorTokenCountOf(id), 0, "no chef tokens");
 
         // More than listed, or someone unlisted.
         vm.expectRevert(
@@ -537,7 +538,7 @@ contract FairLunchLifecycle is Test {
         vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_Unauthorized.selector, address(this)));
         claims.setTermsOf(1, TENTH, bytes32(uint256(1)), 0);
         vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_Unauthorized.selector, address(this)));
-        claims.fund(1, IERC20(address(1)), 1);
+        claims.fund(1, IERC20(address(1)), 1, address(1), 1, 0);
     }
 
     function test_createFor_revertsOnBadClaims() public {
@@ -589,7 +590,7 @@ contract FairLunchLifecycle is Test {
         assertApproxEqRel(claims.tokenCountOf(id), supply * claimsPercent / 1e9, 1e12, "the list's percent");
         claims.claim(id, alice, aliceShares, _proof(bob, 1e18 - aliceShares));
         claims.claim(id, bob, 1e18 - aliceShares, _proof(alice, aliceShares));
-        assertLe(_token(id).balanceOf(address(claims)), 1, "all handed out");
+        assertLe(_heldForList(id), 1, "all handed out");
     }
 
     function test_pay_revertsAfterDeadline() public {
@@ -758,30 +759,70 @@ contract FairLunchLifecycle is Test {
 
     function test_serve_creatorTokensVest() public {
         uint256 id = _served(0, 0, TENTH);
-        FairLunchRecord memory record = lunch.recordOf(id);
-        VestingWallet wallet = VestingWallet(payable(record.vestingWallet));
+        FairLunchClaims claims = lunch.CLAIMS();
         IERC20 token = _token(id);
 
-        // A tenth of the total supply.
-        assertApproxEqAbs(token.balanceOf(address(wallet)) * 10, token.totalSupply(), 1e6, "10% of supply");
-        assertEq(wallet.owner(), creator);
-        assertEq(wallet.start(), _servedAt());
-        assertEq(wallet.duration(), 52 weeks);
+        // A tenth of the total supply, held for the creator from the serve on.
+        uint256 total = claims.creatorTokenCountOf(id);
+        assertApproxEqAbs(total * 10, token.totalSupply(), 1e6, "10% of supply");
+        assertEq(token.balanceOf(address(claims)), total, "held");
+        assertEq(claims.creatorOf(id), creator);
+        assertEq(claims.fundedAt(id), _servedAt());
+        assertEq(claims.creatorVestingDurationOf(id), 52 weeks);
 
-        uint256 total = token.balanceOf(address(wallet));
+        // Nothing has vested in the block it's served in.
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NothingToClaim.selector, id, creator));
+        claims.release(id);
+
+        // Anyone sends the creator what has vested.
         vm.warp(_servedAt() + 13 weeks);
-        wallet.release(address(token));
-        assertApproxEqAbs(token.balanceOf(creator), total / 4, 1, "a quarter after a quarter");
+        vm.prank(bob);
+        assertEq(claims.release(id), total / 4, "a quarter after a quarter");
+        assertEq(token.balanceOf(creator), total / 4, "to the creator");
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NothingToClaim.selector, id, creator));
+        claims.release(id);
 
         vm.warp(_servedAt() + 65 weeks);
-        wallet.release(address(token));
+        claims.release(id);
         assertEq(token.balanceOf(creator), total, "all of it at the end");
+        assertEq(token.balanceOf(address(claims)), 0, "none left");
+    }
+
+    /// @notice A creator who set no vesting gets every token as soon as the lunch is served.
+    function test_serve_creatorTokensRightAway() public {
+        FairLunchConfig memory config = _config(creator, 0, 0, TENTH);
+        config.vestingDuration = 0;
+        uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(config);
+        _pay(id, alice, 1 ether);
+        vm.warp(deadline);
+        lunch.serve(id);
+
+        FairLunchClaims claims = lunch.CLAIMS();
+        assertEq(claims.release(id), claims.creatorTokenCountOf(id));
+        assertApproxEqAbs(_token(id).balanceOf(creator) * 10, TOKENS.totalSupplyOf(id), 1e6, "10% of supply");
+    }
+
+    /// @notice The creator's tokens and the list's are held together and never pay for each other.
+    function test_release_andClaimsKeepToTheirOwn() public {
+        vm.deal(address(0xFEED), 10 ether);
+        uint256 id = _servedWithClaims(TENTH, 6 * TENTH);
+        FairLunchClaims claims = lunch.CLAIMS();
+        uint256 creatorTokens = claims.creatorTokenCountOf(id);
+
+        claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
+        claims.claim(id, bob, 0.25e18, _proof(alice, 0.75e18));
+        assertApproxEqAbs(_token(id).balanceOf(address(claims)), creatorTokens, 1, "the creator's are untouched");
+
+        vm.warp(_servedAt() + 52 weeks);
+        assertEq(claims.release(id), creatorTokens);
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NothingToClaim.selector, id, creator));
+        claims.release(id);
     }
 
     function test_serve_noCreatorShares() public {
         uint256 id = _served(0, 0, 0);
         assertEq(creator.balance, 0);
-        assertEq(lunch.recordOf(id).vestingWallet, address(0));
+        assertEq(lunch.CLAIMS().creatorTokenCountOf(id), 0);
         // The whole raise less the fee is in the pool.
         assertEq(_sqrtPrice(id), RAISE_SQRT_PRICE_X96);
         _assertHoldsNothing(id);
@@ -1494,7 +1535,7 @@ contract FairLunchLifecycle is Test {
         vm.warp(deadline + 1);
         lunch.serve(id);
 
-        uint256 vested = _token(id).balanceOf(lunch.recordOf(id).vestingWallet);
+        uint256 vested = lunch.CLAIMS().creatorTokenCountOf(id);
         assertApproxEqAbs(vested * 2, TOKENS.totalSupplyOf(id), 2, "half the supply");
     }
 
@@ -1519,7 +1560,6 @@ contract FairLunchLifecycle is Test {
             routerTerminalRegistry: ROUTER_REGISTRY,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
-            vestingDeployer: vestingDeployer,
             deployer: bob
         });
         vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));

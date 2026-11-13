@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LunchView } from '@/components/LunchView'
 import type { Copy, Lunch } from '@/lib/fair-lunch/reads'
 
-const reads = vi.hoisted(() => ({ readLunch: vi.fn(), readCopies: vi.fn(), readHostOf: vi.fn(), readPoolFees: vi.fn(), readVesting: vi.fn().mockResolvedValue({ releasable: 0n, locked: 0n }), readServed: vi.fn().mockResolvedValue(null), readClaimList: vi.fn().mockResolvedValue(null), readClaimed: vi.fn().mockResolvedValue([]), claimCallOf: vi.fn(), releaseCall: vi.fn() }))
+const reads = vi.hoisted(() => ({ readLunch: vi.fn(), readCopies: vi.fn(), readHostOf: vi.fn(), readPoolFees: vi.fn(), readVesting: vi.fn().mockResolvedValue({ total: 0n, sent: 0n }), readServed: vi.fn().mockResolvedValue(null), readClaimList: vi.fn().mockResolvedValue(null), readClaimed: vi.fn().mockResolvedValue([]), claimCallOf: vi.fn(), releaseCall: vi.fn() }))
 vi.mock('@/lib/fair-lunch/reads', () => reads)
 vi.mock('@/hooks/useWallet', () => ({ useWallet: () => ({ address: undefined, isConnected: false }) }))
 // The page's buttons and chart are their own units: a label is all the page decides about them.
@@ -17,7 +17,7 @@ const ETH = 10n ** 18n
 const NOW = 1_800_000_000
 const lunch = (over: Partial<Lunch>): Lunch => ({
   chainId: 8453, projectId: 7, hostChainId: 8453, startedAt: NOW - 3600, deadline: NOW + 3600, servedAt: 0, creator: '0x0000000000000000000000000000000000000001',
-  keepPercent: 200_000_000n, keepCap: ETH, tokenPercent: 100_000_000n, vestingDuration: 52 * 604800, vestingWallet: '0x0000000000000000000000000000000000000002', claimsPercent: 0n, claimsTokens: 0n, claimsVestingDuration: 0, claimsFundedAt: 0,
+  keepPercent: 200_000_000n, keepCap: ETH, tokenPercent: 100_000_000n, vestingDuration: 52 * 604800, claimsPercent: 0n, claimsTokens: 0n, claimsVestingDuration: 0, claimsFundedAt: 0,
   token: '0x0000000000000000000000000000000000000003', name: 'Sandwich', symbol: 'SAND', uri: '', balance: 3n * ETH, supply: 3_000_000n * ETH,
   poolKey: { currency0: '0x0000000000000000000000000000000000000000', currency1: '0x0000000000000000000000000000000000000003', fee: 10000, tickSpacing: 200, hooks: '0x0000000000000000000000000000000000000004' },
   money: { address: '0x000000000000000000000000000000000000EEEe', symbol: 'ETH', decimals: 18 }, moneyIs0: true,
