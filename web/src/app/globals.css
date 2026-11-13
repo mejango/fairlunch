@@ -34,7 +34,7 @@
 @layer components {
   /* --- Forms: native controls, one look --- */
   .input {
-    @apply min-h-[44px] w-full rounded-lg border border-line bg-card px-3 text-ink;
+    @apply min-h-[44px] w-full rounded-lg border border-line bg-card px-3 text-ink disabled:cursor-not-allowed disabled:opacity-50;
   }
 
   .field {

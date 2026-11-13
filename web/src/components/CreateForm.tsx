@@ -91,6 +91,12 @@ export function CreateForm() {
   if (!CHAINS.length) return <p className="card p-6">🧑‍🍳 Fair Lunch isn&apos;t live yet.</p>
   const others = CHAINS.filter(chain => chain.id !== hostId && environmentForChainIds([chain.id]) === environmentForChainIds([hostId]))
 
+  // Whether a percent typed so far is zero or blank, which leaves the fields that only qualify it idle.
+  const none = (name: string) => {
+    void typed
+    return !!formRef.current && Number(String(new FormData(formRef.current).get(name) ?? '').trim()) === 0
+  }
+
   // What the token would start at if the fundraise raised a made-up amount, under the terms typed so far.
   const moneySymbol = raiseIn === 'other' ? 'tokens' : raiseIn
   const moneyDecimals = raiseIn === 'USDC' ? 6 : 18
@@ -262,13 +268,13 @@ export function CreateForm() {
       <p className="sentence">🧀 You keep
         <input name="keep" aria-label="Percent of the raise you keep" className="input w-16" inputMode="numeric" defaultValue="10" required />
         % of the raise, but no more than
-        <input name="cap" aria-label="The most you keep" className="input w-24" inputMode="decimal" defaultValue="10" required />
+        <input name="cap" aria-label="The most you keep" disabled={none('keep')} className="input w-24" inputMode="decimal" defaultValue="10" required />
         {raiseIn === 'other' ? 'tokens' : raiseIn}.
       </p>
       <p className="sentence">🥬 You get
         <input name="share" aria-label="Percent of the tokens you get" className="input w-16" inputMode="numeric" defaultValue="10" required />
         % of the tokens, unlocking
-        <select name="vesting" aria-label="When your tokens unlock" className="input select-caret w-40 lowercase" defaultValue="52">{UNLOCK_OPTIONS}</select>
+        <select name="vesting" aria-label="When your tokens unlock" disabled={none('share')} className="input select-caret w-40 lowercase" defaultValue="52">{UNLOCK_OPTIONS}</select>
       </p>
       <label className="field">🥑 Pay your share to
         <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
@@ -276,10 +282,10 @@ export function CreateForm() {
       <p className="sentence">🫒 Airdrop
         <input name="airdrop" aria-label="Percent of the tokens airdropped" className="input w-16" inputMode="numeric" defaultValue="0" />
         % of the tokens, unlocking
-        <select name="airdropVesting" aria-label="When airdrops unlock" className="input select-caret w-40 lowercase" defaultValue="0">{UNLOCK_OPTIONS}</select>
+        <select name="airdropVesting" aria-label="When airdrops unlock" disabled={none('airdrop')} className="input select-caret w-40 lowercase" defaultValue="0">{UNLOCK_OPTIONS}</select>
       </p>
-      <label className="field">🥜 Airdrop list<input name="list" type="file" accept=".csv,.txt,text/csv,text/plain"
-        className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
+      <label className="field">🥜 Airdrop list<input name="list" type="file" accept=".csv,.txt,text/csv,text/plain" disabled={none('airdrop')}
+        className="disabled:cursor-not-allowed disabled:opacity-50 block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
       <p className="-mt-2 text-sm text-muted">One address,amount per line.</p>
       <p className="sentence rounded-xl border border-line/60 p-3" aria-live="polite">🍽️ If it raises
         <input aria-label="A raise to preview" className="input w-24" inputMode="decimal" placeholder="10" value={hypothetical} onChange={event => setHypothetical(event.target.value)} />
