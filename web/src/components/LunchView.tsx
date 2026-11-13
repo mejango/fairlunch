@@ -81,6 +81,8 @@ const inputText = (wei: bigint, decimals = 18) => String(Number(Number(formatUni
 /** While cooking: money in, tokens out at the fixed price. Another token is swapped into the money on the way in. */
 function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
   const [text, setText] = useState('')
+  // How much of the lunch's money to take back. Empty means all of it.
+  const [back, setBack] = useState('')
   const other = otherMoneyOf(lunch)
   const [routed, setRouted] = useState(false)
   const paying = routed && other ? other : lunch.money
@@ -126,11 +128,23 @@ function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
       {held ? (
         <div className={ACTION_ROW}>
           <Stat label="You hold" value={`${formatTokens(held)} ${lunch.symbol}`} />
-          <TxAction chainId={lunch.chainId} className={SMALL} label="Refund" title={`Refund from ${lunch.name}`} doneTitle="Refunded"
-            prepare={async account => ({ request: await refundTx(lunch, held, (moneyFor(held, lunch.money.decimals) * 97n) / 100n, account), rows: [
-              { label: 'You give back', value: `${formatTokens(held)} ${lunch.symbol}`, strong: true },
-              { label: 'You get', value: moneyText(lunch, moneyFor(held, lunch.money.decimals)) },
-            ] })} />
+          <span className="flex items-center gap-2">
+            <input className="input w-28 text-sm" inputMode="decimal" size={1} aria-label={`${lunch.money.symbol} to refund`}
+              placeholder={inputText(moneyFor(held, lunch.money.decimals), lunch.money.decimals)} value={back} onChange={event => setBack(event.target.value)} />
+            <span className="text-sm font-semibold">{lunch.money.symbol}</span>
+            <TxAction chainId={lunch.chainId} className={SMALL} label="Refund" title={`Refund from ${lunch.name}`} doneTitle="Refunded" onDone={() => setBack('')}
+              prepare={async account => {
+                // Nothing typed refunds everything held. More than that is capped at it.
+                const asked = tokensFor(amountOf(back, lunch.money.decimals), lunch.money.decimals)
+                const count = back.trim() === '' || asked > held ? held : asked
+                if (count === 0n) throw new Error('Enter an amount.')
+                const refund = moneyFor(count, lunch.money.decimals)
+                return { request: await refundTx(lunch, count, (refund * 97n) / 100n, account), rows: [
+                  { label: 'You give back', value: `${formatTokens(count)} ${lunch.symbol}`, strong: true },
+                  { label: 'You get', value: moneyText(lunch, refund) },
+                ] }
+              }} />
+          </span>
         </div>
       ) : null}
     </section>
