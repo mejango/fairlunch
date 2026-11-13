@@ -237,7 +237,7 @@ export function CreateForm() {
           <fieldset className="min-w-0 flex-1 basis-56 text-sm">
             <legend className="font-semibold">🥗 Also accept and bridge from</legend>
             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-2">
-              {others.map(chain => <label key={chain.id} className="flex min-h-[44px] items-center gap-2"><input type="checkbox" name={`also-${chain.id}`} /> {chainName(chain.id)}</label>)}
+              {others.map(chain => <label key={chain.id} className="flex min-h-[44px] items-center gap-2"><input type="checkbox" name={`also-${chain.id}`} /> {chainName(chain.id).replace('Arbitrum Sepolia', 'Arb Sepolia').replace('Optimism Sepolia', 'Op Sepolia')}</label>)}
             </div>
           </fieldset>
         ) : null}
