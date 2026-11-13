@@ -1,5 +1,5 @@
 // A lunch's whole life on two testnets, one step per run, with the builders the site uses:
-//   FAIR_LUNCH_KEY_FILE=<file holding a testnet key> node scripts/testnet-walk.mjs <state.json> <create|create-host|pay-copy|airdrop|send-home|serve|status|claim|burn|collect|pay-host|buy|sell|probe>
+//   FAIR_LUNCH_KEY_FILE=<file holding a testnet key> node scripts/testnet-walk.mjs <state.json> <create|create-host|refund|pay-copy|airdrop|send-home|serve|status|claim|burn|collect|pay-host|buy|sell|probe>
 // `probe` drives test/PoolProbe.sol (PROBE_ADDRESS), the adversary: `probe sandwich <burn|collect|buy|sell> <eth|token> <push> [victim amount]`,
 // `probe seed <start tick> <lower> <upper> <eth> <tokens>`, `probe unseed <position>`, `probe swap <eth|token> <amount>`, `probe withdraw`.
 // FAIR_LUNCH_ADDRESS names the deployment to walk.
@@ -106,6 +106,12 @@ if (step === 'create' || step === 'create-host') {
   const { result } = await host.client.simulateContract({ ...call, account })
   await send(host, call)
   console.log({ simulated: big(result), balance: formatEther(await balanceOf(host, state.hostId)) })
+} else if (step === 'refund') {
+  // Until the deadline, tokens go back for what they were paid for. After it this reverts.
+  const { terminal } = await wiring(host)
+  const before = await balanceOf(host, state.hostId)
+  await send(host, { address: terminal, abi: jbMultiTerminalAbi, functionName: 'cashOutTokensOf', args: [account.address, BigInt(state.hostId), parseEther(process.argv[4] ?? '1000'), NATIVE_TOKEN, 0n, account.address, '0x'] })
+  console.log({ leftTheLunch: formatEther(before - await balanceOf(host, state.hostId)), balance: formatEther(await balanceOf(host, state.hostId)) })
 } else if (step === 'pay-host') {
   await pay(host, state.hostId, process.argv[4] ?? '0.01', 0n)
   console.log({ balance: formatEther(await balanceOf(host, state.hostId)) })

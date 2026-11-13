@@ -544,4 +544,4 @@ jango: "can we move the clock into the rulesets too?" then "do it".
 - [x] Codex pass 19: HOLD for a Medium (a same-terminal payout buys tokens fee-free and the next refund pays its fee). Fixed in `80be76c`: a selling lunch refuses payouts.
 - [x] Codex pass 20: no findings, MERGE, 121 tests passed in its run. Verdict only: the PR stays unmerged until jango approves.
 - [x] Local fork rebuilt on the new contract. Refund of 1M tokens returned exactly 1 ETH, copy payment refused by the pause, pages render.
-- [ ] Testnet redeploy and walk.
+- [x] Testnet: deployed at `0x60a59ae55a70daba2088a9e14afcc2c0d587b637` on Arbitrum Sepolia and Sepolia. Lunch 21 (copy 21, 60% airdrop): copy payment refused by the pause during the raise, 1,000 tokens refunded for 0.001 ETH, a refund after the deadline reverted (reason not captured), served at 1794528594 with `servedAtOf` matching, copy payment taken after the deadline, airdrop claimed. Not yet run on this deployment: send home, burn, collect.
