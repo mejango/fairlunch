@@ -46,6 +46,8 @@ export function CreateForm() {
   const [error, setError] = useState<string | null>(null)
   const formRef = useRef<HTMLFormElement>(null)
   // Bumped on every edit so the preview reads the form again.
+  // Counts edits so the preview re-reads the form. A controlled select has to take its choice on `input` too, or this
+  // re-render puts its old value back before `change` arrives.
   const [typed, setTyped] = useState(0)
   const [hypothetical, setHypothetical] = useState('')
   const [busy, setBusy] = useState(false)
@@ -226,7 +228,7 @@ export function CreateForm() {
       <label className="field">🍅 Logo<input name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/gif"
         className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
       <label className="field w-52 max-w-full">🧅 Chain
-        <select name="host" className="input select-caret" value={hostId} onChange={event => setHostId(Number(event.target.value))}>
+        <select name="host" className="input select-caret" value={hostId} onInput={event => setHostId(Number(event.currentTarget.value))} onChange={event => setHostId(Number(event.target.value))}>
           {CHAINS.map(chain => <option key={chain.id} value={chain.id}>{chainName(chain.id)}</option>)}
         </select>
       </label>
@@ -240,7 +242,7 @@ export function CreateForm() {
       ) : null}
       <div className="flex gap-4">
         <label className="field w-32 shrink-0">🍋 Raise in
-          <select className="input select-caret" value={raiseIn} onChange={event => setRaiseIn(event.target.value as typeof raiseIn)}>
+          <select className="input select-caret" value={raiseIn} onInput={event => setRaiseIn(event.currentTarget.value as typeof raiseIn)} onChange={event => setRaiseIn(event.target.value as typeof raiseIn)}>
             <option value="ETH">ETH</option>
             <option value="USDC">USDC</option>
             <option value="other">Other</option>
