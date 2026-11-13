@@ -246,13 +246,13 @@ export function CreateForm() {
             <option value="other">Other</option>
           </select>
         </label>
-        {raiseIn === 'other' ? (
-          <label className="field min-w-0 flex-1">🧂 Token address
-            <input name="money" className="input font-mono text-sm" placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
-          </label>
-        ) : null}
+        <label className="field w-32 shrink-0">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
       </div>
-      <label className="field w-32">🍳 Days to raise<input name="days" className="input" inputMode="numeric" defaultValue="7" required /></label>
+      {raiseIn === 'other' ? (
+        <label className="field">🧂 Token address
+          <input name="money" className="input font-mono text-sm" placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
+        </label>
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="field">🧀 You keep, % of the raise<input name="keep" className="input" inputMode="numeric" defaultValue="10" required /></label>
         <label className="field">🧈 But no more than, {raiseIn === 'other' ? 'tokens' : raiseIn}<input name="cap" className="input" inputMode="decimal" defaultValue="10" required /></label>
@@ -296,7 +296,7 @@ export function CreateForm() {
 
 /** A create in progress, kept in this browser: a lunch's chains only pair if every one gets these exact terms, so a
  * reload between chains must not make new ones. */
-const ATTEMPT_KEY = 'fair-lunch:create:v1'
+const ATTEMPT_KEY = 'fair-lunch:create:v2'
 type Attempt = { terms: LunchTerms; made: Record<number, Hex | null>; hostPath: string | null }
 function saveAttempt(attempt: Attempt | null) {
   try {
