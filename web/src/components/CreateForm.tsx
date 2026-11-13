@@ -29,6 +29,8 @@ const CHAINS = [...PRODUCTION_CHAINS, ...TESTNET_CHAINS]
 
 const VESTING_WEEKS = [26, 52, 104, 208]
 const WEEK = 604_800
+/** The choices for how long tokens unlock over, the same for the chef's and the airdrop's. */
+const UNLOCK_OPTIONS = [0, ...VESTING_WEEKS].map(weeks => <option key={weeks} value={weeks}>{weeks >= 52 ? `${weeks / 52} ${weeks === 52 ? 'year' : 'years'}` : weeks ? '6 months' : 'Right away'}</option>)
 
 const whole = (text: string, min: number, max: number): number | null => {
   const value = Number(text)
@@ -181,7 +183,7 @@ export function CreateForm() {
                       { label: 'Token', value: `${terms.name} (${terms.symbol})` },
                       { label: 'Raise ends', value: new Date(terms.deadline * 1000).toLocaleString() },
                       { label: 'You keep', value: `${terms.keepPercent}% of the raise, up to ${formatUnits(terms.keepCapWei, terms.money.decimals)} ${terms.money.symbol}, before the 2.5% fee` },
-                      { label: 'Your tokens', value: `${terms.tokenPercent}% over ${terms.vestingSeconds / WEEK} weeks` },
+                      { label: 'Your tokens', value: `${terms.tokenPercent}%, ${terms.vestingSeconds ? `over ${terms.vestingSeconds / WEEK} weeks` : 'at serve'}` },
                       ...(terms.claimsPercent ? [{ label: 'Airdrop', value: `${terms.claimsPercent}% of supply to ${terms.claimsCount} addresses, ${terms.claimsVestingSeconds ? `over ${terms.claimsVestingSeconds / WEEK} weeks` : 'at serve'}` }] : []),
                       { label: 'Paid to', value: isAddressEqual(terms.creator, account) ? 'This wallet' : terms.creator },
                       { label: 'Can change later', value: 'Nothing', strong: true },
@@ -257,22 +259,19 @@ export function CreateForm() {
         <label className="field">🥬 Your tokens, % of supply<input name="share" className="input" inputMode="numeric" defaultValue="10" required /></label>
         <label className="field">🥒 Unlocking over
           <select name="vesting" className="input select-caret" defaultValue="52">
-            {VESTING_WEEKS.map(weeks => <option key={weeks} value={weeks}>{weeks >= 52 ? `${weeks / 52} ${weeks === 52 ? 'year' : 'years'}` : '6 months'}</option>)}
+            {UNLOCK_OPTIONS}
+          </select>
+        </label>
+        <label className="field">🫒 Airdrop, % of supply<input name="airdrop" className="input" inputMode="numeric" defaultValue="0" /></label>
+        <label className="field">🫑 Unlocking over
+          <select name="airdropVesting" className="input select-caret" defaultValue="0">
+            {UNLOCK_OPTIONS}
           </select>
         </label>
       </div>
-      <div className="flex flex-wrap gap-4">
-        <label className="field w-32 shrink-0">🫒 Airdrop, %<input name="airdrop" className="input" inputMode="numeric" defaultValue="0" /></label>
-        <label className="field min-w-0 flex-1">🥜 To this list<input name="list" type="file" accept=".csv,.txt,text/csv,text/plain"
-          className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
-      </div>
+      <label className="field">🥜 Airdrop list<input name="list" type="file" accept=".csv,.txt,text/csv,text/plain"
+        className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
       <p className="-mt-2 text-sm text-muted">One address,amount per line.</p>
-      <label className="field w-fit">🫑 Airdrop unlocks
-          <select name="airdropVesting" className="input select-caret" defaultValue="0">
-            <option value="0">When lunch is served</option>
-            {VESTING_WEEKS.map(weeks => <option key={weeks} value={weeks}>Over {weeks >= 52 ? `${weeks / 52} ${weeks === 52 ? 'year' : 'years'}` : '6 months'}</option>)}
-          </select>
-      </label>
       <label className="field">🥑 Pay your share to
         <input key={address} name="payout" className="input font-mono text-sm" defaultValue={address ?? ''} placeholder="0x…" autoComplete="off" spellCheck={false} maxLength={42} required />
       </label>

@@ -246,7 +246,7 @@ function TokenPie({ lunch, title, funders, poolTokens, creatorTokens, claimsToke
         <dl className="space-y-2">
           <Stat label={<><Swatch color={FUNDERS} />🥬 Funders</>} value={formatTokens(funders)} />
           <Stat label={<><Swatch color={POOL} />🔒 The pool</>} value={formatTokens(poolTokens)} />
-          <Stat label={<><Swatch color={CREATOR} />👩‍🍳 The chef, vested</>} value={formatTokens(creatorTokens)} />
+          <Stat label={<><Swatch color={CREATOR} />👩‍🍳 The chef{lunch.vestingDuration ? ', vested' : ''}</>} value={formatTokens(creatorTokens)} />
           {claimsTokens ? <Stat label={<><Swatch color={AIRDROP} />🫒 Airdrop</>} value={formatTokens(claimsTokens)} /> : null}
         </dl>
       </div>
@@ -553,8 +553,8 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
           )}
           <p className="mt-3 text-sm text-muted">
             {lunch.servedAt
-              ? `The chef kept ${percent(lunch.keepPercent)} of the raise, up to ${formatUnits(lunch.keepCap, lunch.money.decimals)} ${lunch.money.symbol}, and got ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.${airdropped} The rest was locked in the pool.`
-              : `Funders get 1M ${lunch.symbol} per ${lunch.money.symbol}, fixed. The pool gets the same for its ${lunch.money.symbol}. The chef gets ${percent(lunch.tokenPercent)} of the tokens, unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks.${airdropped}`}
+              ? `The chef kept ${percent(lunch.keepPercent)} of the raise, up to ${formatUnits(lunch.keepCap, lunch.money.decimals)} ${lunch.money.symbol}, and got ${percent(lunch.tokenPercent)} of the tokens, ${lunch.vestingDuration ? `unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks` : 'unlocked at serve'}.${airdropped} The rest was locked in the pool.`
+              : `Funders get 1M ${lunch.symbol} per ${lunch.money.symbol}, fixed. The pool gets the same for its ${lunch.money.symbol}. The chef gets ${percent(lunch.tokenPercent)} of the tokens, ${lunch.vestingDuration ? `unlocking over ${Math.round(lunch.vestingDuration / 604800)} weeks` : 'unlocked at serve'}.${airdropped}`}
           </p>
           {/* Other chains take payments once the fundraise is over. */}
           {phase === 'cooking' ? null : <Copies lunch={lunch} />}
