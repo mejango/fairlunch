@@ -60,8 +60,8 @@ contract Deploy is Script, Sphinx {
     //*********************************************************************//
 
     /// @notice Deploys Fair Lunch, which deploys its data hook, pool and claims, and sets the connected chain's Uniswap
-    /// V4 addresses. @param configurator The address allowed to set the chain-specific constants. It must be the
-    /// caller.
+    /// V4 addresses.
+    /// @param configurator The address allowed to set the chain-specific constants. It must be the caller.
     /// @return lunch The deployed Fair Lunch.
     function _deploy(address configurator) internal returns (FairLunch lunch) {
         string memory chain = _chainName();

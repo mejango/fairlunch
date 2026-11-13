@@ -37,6 +37,8 @@ import {FairLunch} from "../../src/FairLunch.sol";
 import {FairLunchClaims} from "../../src/FairLunchClaims.sol";
 import {FairLunchDataHook} from "../../src/FairLunchDataHook.sol";
 import {IFairLunch} from "../../src/interfaces/IFairLunch.sol";
+import {IJBRulesetDataHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetDataHook.sol";
+import {IFairLunchDataHook} from "../../src/interfaces/IFairLunchDataHook.sol";
 import {IFairLunchPool} from "../../src/interfaces/IFairLunchPool.sol";
 import {IFairLunchClaims} from "../../src/interfaces/IFairLunchClaims.sol";
 import {PoolProbe} from "../PoolProbe.sol";
@@ -1127,6 +1129,12 @@ contract FairLunchLifecycle is Test {
     }
 
     /// @notice Only JBP6's operator sets the project that shares pool fees, only once, and only to a real project.
+    function test_dataHook_supportsItsInterfaces() public view {
+        assertTrue(lunch.DATA_HOOK().supportsInterface(type(IFairLunchDataHook).interfaceId), "its own");
+        assertTrue(lunch.DATA_HOOK().supportsInterface(type(IJBRulesetDataHook).interfaceId), "the data hook's");
+        assertFalse(lunch.DATA_HOOK().supportsInterface(0xffffffff), "nothing else");
+    }
+
     function test_setSplitProjectId_onlyJbp6OperatorOnce() public {
         uint256 partner = _create(0, 0, 0);
 

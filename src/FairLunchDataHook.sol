@@ -203,7 +203,8 @@ contract FairLunchDataHook is IFairLunchDataHook {
     /// @param interfaceId The ID of the interface to check for adherence to.
     /// @return A flag indicating if the provided interface ID is supported.
     function supportsInterface(bytes4 interfaceId) public pure override returns (bool) {
-        return interfaceId == type(IJBRulesetDataHook).interfaceId || interfaceId == type(IERC165).interfaceId;
+        return interfaceId == type(IFairLunchDataHook).interfaceId
+            || interfaceId == type(IJBRulesetDataHook).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 
     //*********************************************************************//
