@@ -57,6 +57,11 @@ interface IFairLunch {
     /// @param caller The address that called the function.
     event SendHome(uint256 indexed projectId, address sucker, uint256 tokenCount, address caller);
 
+    /// @notice Emitted when the project that shares pool fees with JBP6 is set.
+    /// @param projectId The ID of the project.
+    /// @param caller The address that called the function.
+    event SetSplitProjectId(uint256 projectId, address caller);
+
     /// @notice Emitted when a lunch is served.
     /// @param projectId The ID of the lunch's project.
     /// @param raised The amount of money the fundraise ended with.
@@ -99,6 +104,10 @@ interface IFairLunch {
 
     /// @notice The Uniswap V4 hook every lunch's pool uses, which records the price history buybacks are bounded by.
     function ORACLE_HOOK() external view returns (IGeomeanOracle);
+
+    /// @notice The ID of the project that gets half of the money side of every lunch's pool fees on this chain. Zero
+    /// until JBP6's operator sets it.
+    function splitProjectId() external view returns (uint256);
 
     /// @notice The fee of every lunch's pool, in hundredths of a basis point.
     function POOL_FEE() external view returns (uint24);
@@ -168,6 +177,10 @@ interface IFairLunch {
     /// @notice Send this chain's revenue to the lunch's host chain.
     /// @param projectId The ID of the lunch's project on this chain.
     function sendHome(uint256 projectId) external payable;
+
+    /// @notice One-shot setter for the project that shares pool fees with JBP6 on this chain. Only JBP6's operator.
+    /// @param projectId The ID of the project to pay half of the money side of pool fees into.
+    function setSplitProjectId(uint256 projectId) external;
 
     /// @notice One-shot setter for this chain's Uniswap V4 addresses.
     /// @param positionManager The Uniswap V4 position manager.

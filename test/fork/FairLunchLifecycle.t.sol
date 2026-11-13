@@ -1096,6 +1096,106 @@ contract FairLunchLifecycle is Test {
         lunch.collect(1);
     }
 
+    /// @notice Trade both ways through a served lunch's pool so its position earns fees on both sides.
+    function _earnPoolFees(uint256 id) internal {
+        PoolKey memory key = lunch.poolKeyOf(id);
+        vm.warp(_servedAt() + 30 minutes);
+        _pay(id, bob, 0.05 ether);
+        lunch.burn(id);
+        PoolProbe trader = new PoolProbe(POSITION_MANAGER, PERMIT2);
+        IERC20 token = _token(id);
+        vm.prank(alice);
+        token.transfer(address(trader), 100_000e18);
+        trader.swap(key, false, 100_000e18);
+    }
+
+    /// @notice Make a lunch that sells tokens for a number of days from now, to stand in for a partner project.
+    function _partner(uint48 daysOpen) internal returns (uint256) {
+        FairLunchConfig memory config = _config(creator, 0, 0, 0);
+        config.deadline = uint48(block.timestamp) + daysOpen * 1 days;
+        config.salt = "partner";
+        return lunch.createFor{value: PROJECTS.creationFee()}(config);
+    }
+
+    /// @notice Make an address JBP6's operator, as its revnet owner contract would report it.
+    function _asJbp6Operator(address operator) internal {
+        vm.mockCall(
+            PROJECTS.ownerOf(1), abi.encodeWithSignature("isOperatorOf(uint256,address)", 1, operator), abi.encode(true)
+        );
+    }
+
+    /// @notice Only JBP6's operator sets the project that shares pool fees, only once, and only to a real project.
+    function test_setSplitProjectId_onlyJbp6OperatorOnce() public {
+        uint256 partner = _create(0, 0, 0);
+
+        vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));
+        lunch.setSplitProjectId(partner);
+
+        address operator = address(0x09E7A702);
+        _asJbp6Operator(operator);
+        vm.startPrank(operator);
+        uint256 beyond = PROJECTS.count() + 1;
+        for (uint256 i; i < 3; i++) {
+            vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+            lunch.setSplitProjectId(i == 2 ? beyond : i);
+        }
+
+        lunch.setSplitProjectId(partner);
+        assertEq(lunch.splitProjectId(), partner);
+
+        vm.expectRevert(FairLunch.FairLunch_AlreadyConfigured.selector);
+        lunch.setSplitProjectId(partner + 1);
+        vm.stopPrank();
+    }
+
+    /// @notice Once a project is set, it gets half of the money side of pool fees and JBP6 gets the other half. The
+    /// creator gets the tokens both payments mint.
+    function test_collect_splitsTheMoneyWithTheSetProject() public {
+        uint256 id = _served(0, 0, 0);
+
+        // The partner is a lunch that's still selling tokens, so it takes ETH in the same terminal.
+        uint256 partner = _partner(60);
+        address operator = address(0x09E7A702);
+        _asJbp6Operator(operator);
+        vm.prank(operator);
+        lunch.setSplitProjectId(partner);
+
+        _earnPoolFees(id);
+        uint256 jbp6Before = TOKENS.totalBalanceOf(creator, 1);
+        uint256 lunchBalance = _balance(id);
+        (, uint256 ethPaid) = lunch.collect(id);
+
+        assertApproxEqAbs(ethPaid, 0.0005 ether, 1e9, "ETH fees");
+        assertEq(_balance(partner), ethPaid / 2, "half went to the partner");
+        assertEq(TOKENS.totalBalanceOf(creator, partner), (ethPaid / 2) * 1_000_000, "creator got the partner's tokens");
+        assertGt(TOKENS.totalBalanceOf(creator, 1), jbp6Before, "creator earned JBP6 on the rest");
+        assertEq(_balance(id), lunchBalance, "nothing kept");
+        _assertHoldsNothing(id);
+    }
+
+    /// @notice If the set project won't take its half, the lunch's balance does, and JBP6 still gets its half.
+    function test_collect_keepsTheHalfTheSetProjectRefuses() public {
+        uint256 id = _served(0, 0, 0);
+
+        // A lunch nobody funded stops taking payments at its deadline.
+        uint256 partner = _partner(1);
+        address operator = address(0x09E7A702);
+        _asJbp6Operator(operator);
+        vm.prank(operator);
+        lunch.setSplitProjectId(partner);
+
+        _earnPoolFees(id);
+        vm.warp(block.timestamp + 30 days);
+        uint256 jbp6Before = TOKENS.totalBalanceOf(creator, 1);
+        uint256 lunchBalance = _balance(id);
+        (, uint256 ethPaid) = lunch.collect(id);
+
+        assertEq(_balance(partner), 0, "partner took nothing");
+        assertEq(_balance(id), lunchBalance + ethPaid / 2, "the lunch kept the partner's half");
+        assertGt(TOKENS.totalBalanceOf(creator, 1), jbp6Before, "creator earned JBP6 on the rest");
+        _assertHoldsNothing(id);
+    }
+
     //*********************************************************************//
     // --------------------------- adversaries --------------------------- //
     //*********************************************************************//

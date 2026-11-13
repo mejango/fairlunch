@@ -6,6 +6,7 @@ import {IJBBuybackHookRegistry} from "@bananapus/buyback-hook-v6/src/interfaces/
 import {IJBController} from "@bananapus/core-v6/src/interfaces/IJBController.sol";
 import {IJBDirectory} from "@bananapus/core-v6/src/interfaces/IJBDirectory.sol";
 import {IJBMultiTerminal} from "@bananapus/core-v6/src/interfaces/IJBMultiTerminal.sol";
+import {IJBProjects} from "@bananapus/core-v6/src/interfaces/IJBProjects.sol";
 import {IJBPayerTracker} from "@bananapus/core-v6/src/interfaces/IJBPayerTracker.sol";
 import {IJBRulesetApprovalHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetApprovalHook.sol";
 import {IJBSplitHook} from "@bananapus/core-v6/src/interfaces/IJBSplitHook.sol";
@@ -48,6 +49,7 @@ import {FairLunchDataHook} from "./FairLunchDataHook.sol";
 import {FairLunchPool} from "./FairLunchPool.sol";
 import {IFairLunch} from "./interfaces/IFairLunch.sol";
 import {IBuybackOracle} from "./interfaces/IBuybackOracle.sol";
+import {IRevnetOperator} from "./interfaces/IRevnetOperator.sol";
 import {ISuckerRoute} from "./interfaces/ISuckerRoute.sol";
 import {FairLunchConfig} from "./structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "./structs/FairLunchRecord.sol";
@@ -192,6 +194,11 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @dev Set once by `_DEPLOYER` through `setChainSpecificConstants`. Zero until then.
     IGeomeanOracle public override ORACLE_HOOK;
 
+    /// @notice The ID of the project that gets half of the money side of every lunch's pool fees on this chain. JBP6
+    /// gets the other half.
+    /// @dev Set once by JBP6's operator through `setSplitProjectId`. Zero until then, and JBP6 gets it all.
+    uint256 public override splitProjectId;
+
     //*********************************************************************//
     // -------------------- internal stored properties ------------------- //
     //*********************************************************************//
@@ -311,9 +318,10 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     }
 
     /// @notice Collect a served lunch's liquidity fees, burning the token side and paying the money side into JBP6 with
-    /// the creator as beneficiary.
-    /// @dev Anyone can call this. The position's liquidity is never touched. If JBP6 doesn't take the lunch's money in
-    /// this contract's terminal, the money side goes into the lunch's balance instead, where `burn` uses it.
+    /// the creator as beneficiary. Once `splitProjectId` is set, half of the money side is paid into that project
+    /// the same way.
+    /// @dev Anyone can call this. The position's liquidity is never touched. Whatever a project doesn't take in this
+    /// contract's terminal goes into the lunch's balance instead, where `burn` uses it.
     /// @param projectId The ID of the lunch's project.
     /// @return tokensBurned The number of tokens collected and burned.
     /// @return paid The amount of the lunch's money collected.
@@ -334,28 +342,19 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
         paid = _holdingOf(token) - before;
         if (paid != 0) {
-            // Whether the money stays in the lunch's balance.
-            bool kept = true;
-            if (
-                DIRECTORY.primaryTerminalOf({projectId: _FEE_PROJECT_ID, token: token})
-                    == IJBTerminal(address(TERMINAL))
-            ) {
-                // Pay the money side into JBP6, which mints JBP6 to the creator.
-                // If JBP6 won't take it, the lunch's balance does.
-                // slither-disable-next-line unused-return
-                try TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: paid})}({
-                    projectId: _FEE_PROJECT_ID,
-                    token: token,
-                    amount: paid,
-                    beneficiary: record.creator,
-                    minReturnedTokens: 0,
-                    memo: "",
-                    metadata: ""
-                }) {
-                    kept = false;
-                } catch {}
+            // Half goes to the project that shares pool fees with JBP6, once one is set.
+            uint256 shared = splitProjectId == 0 ? 0 : paid / 2;
+
+            // What neither project takes goes into the lunch's balance.
+            uint256 kept = _payFeeTo({
+                projectId: _FEE_PROJECT_ID, token: token, amount: paid - shared, beneficiary: record.creator
+            });
+            if (shared != 0) {
+                kept += _payFeeTo({
+                    projectId: splitProjectId, token: token, amount: shared, beneficiary: record.creator
+                });
             }
-            if (kept) _addToBalanceOf({projectId: projectId, token: token, amount: paid});
+            if (kept != 0) _addToBalanceOf({projectId: projectId, token: token, amount: kept});
         }
 
         emit Collect({projectId: projectId, tokensBurned: tokensBurned, paid: paid, caller: _msgSender()});
@@ -745,6 +744,23 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         });
     }
 
+    /// @notice One-shot setter for the project that shares pool fees with JBP6 on this chain.
+    /// @dev Callable only by JBP6's operator, and only once: after this call the value can't be changed or cleared.
+    /// It applies to every lunch on this chain, including ones already made, from the next `collect` on.
+    /// @param projectId The ID of the project to pay half of the money side of pool fees into.
+    function setSplitProjectId(uint256 projectId) external override {
+        IJBProjects projects = CONTROLLER.PROJECTS();
+        if (!IRevnetOperator(projects.ownerOf(_FEE_PROJECT_ID))
+                .isOperatorOf({revnetId: _FEE_PROJECT_ID, addr: msg.sender})) {
+            revert FairLunch_Unauthorized(msg.sender);
+        }
+        if (splitProjectId != 0) revert FairLunch_AlreadyConfigured();
+        if (projectId <= _FEE_PROJECT_ID || projectId > projects.count()) revert FairLunch_InvalidConfig();
+
+        splitProjectId = projectId;
+        emit SetSplitProjectId({projectId: projectId, caller: msg.sender});
+    }
+
     /// @notice One-shot setter for this chain's Uniswap V4 addresses.
     /// @dev Callable only by `_DEPLOYER` and only once. After this call the values are effectively immutable. Keeping
     /// them out of the constructor keeps this contract's address the same on every chain.
@@ -892,6 +908,41 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         OMNICHAIN_DEPLOYER.queueRulesetsOf({
             projectId: projectId, rulesetConfigurations: rulesetConfigurations, memo: ""
         });
+    }
+
+    /// @notice Pay an amount of a lunch's pool fees into a project, if it takes the money in this contract's terminal.
+    /// @param projectId The ID of the project to pay.
+    /// @param token The lunch's money.
+    /// @param amount The amount to pay.
+    /// @param beneficiary The address that gets the tokens the payment mints.
+    /// @return kept The amount the project didn't take: all of it or none of it.
+    function _payFeeTo(
+        uint256 projectId,
+        address token,
+        uint256 amount,
+        address beneficiary
+    )
+        internal
+        returns (uint256 kept)
+    {
+        if (DIRECTORY.primaryTerminalOf({projectId: projectId, token: token}) != IJBTerminal(address(TERMINAL))) {
+            return amount;
+        }
+
+        // If the project won't take it, the lunch's balance does.
+        // slither-disable-next-line unused-return
+        try TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: amount})}({
+            projectId: projectId,
+            token: token,
+            amount: amount,
+            beneficiary: beneficiary,
+            minReturnedTokens: 0,
+            memo: "",
+            metadata: ""
+        }) {}
+        catch {
+            kept = amount;
+        }
     }
 
     /// @notice Send all the JBP6 this contract holds to an address.

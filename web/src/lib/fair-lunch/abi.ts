@@ -712,6 +712,32 @@ export const fairLunchAbi = [
   },
   {
     "type": "function",
+    "name": "setSplitProjectId",
+    "inputs": [
+      {
+        "name": "projectId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "splitProjectId",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "trustedForwarder",
     "inputs": [],
     "outputs": [
@@ -889,6 +915,25 @@ export const fairLunchAbi = [
       },
       {
         "name": "positionId",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "caller",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SetSplitProjectId",
+    "inputs": [
+      {
+        "name": "projectId",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
