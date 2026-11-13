@@ -492,6 +492,34 @@ contract FairLunchLifecycle is Test {
         assertEq(_token(id).balanceOf(alice), whole, "all of it once it's over");
     }
 
+    /// @notice A list whose shares add up to far more than the whole can't take tokens out ahead of the schedule.
+    function test_claims_vest_asAWholeWhateverTheSharesAddUpTo() public {
+        vm.deal(address(0xFEED), 10 ether);
+        FairLunchConfig memory config = _config(creator, 0, 0, 0);
+        config.claimsPercent = 6 * TENTH;
+        // Alice's entry alone is worth the whole list a second into a year of vesting.
+        config.claimsRoot = _root(alice, 52 weeks * 1e18, bob, 0.25e18);
+        config.claimsVestingDuration = 52 weeks;
+        uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(config);
+        _pay(id, address(0xFEED), 10 ether);
+        vm.warp(deadline);
+        lunch.serve(id);
+        FairLunchClaims claims = lunch.CLAIMS();
+        uint256 all = claims.tokenCountOf(id);
+
+        vm.warp(uint256(deadline) + 13 weeks);
+        assertEq(claims.claim(id, alice, 52 weeks * 1e18, _proof(bob, 0.25e18)), all / 4, "a quarter of the list");
+        assertEq(claims.totalClaimedOf(id), all / 4, "counted");
+
+        // Alice got there first, so bob waits for more to vest.
+        vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NothingToClaim.selector, id, bob));
+        claims.claim(id, bob, 0.25e18, _proof(alice, 52 weeks * 1e18));
+
+        vm.warp(uint256(deadline) + 52 weeks);
+        claims.claim(id, alice, 52 weeks * 1e18, _proof(bob, 0.25e18));
+        assertEq(_token(id).balanceOf(address(claims)), 0, "and no more than there is");
+    }
+
     function test_claims_waitForServe() public {
         FairLunchConfig memory config = _config(creator, 0, 0, 0);
         config.claimsPercent = 5 * TENTH;
@@ -1053,6 +1081,16 @@ contract FairLunchLifecycle is Test {
         assertNotEq(address(TOKENS.tokenOf(lunch.createFor{value: fee}(config))), token, "vesting");
         vm.revertToState(snapshot);
         config.vestingDuration = 52 weeks;
+        config.claimsPercent = TENTH;
+        config.claimsRoot = bytes32(uint256(1));
+        address withClaims = address(TOKENS.tokenOf(lunch.createFor{value: fee}(config)));
+        vm.revertToState(snapshot);
+        config.claimsVestingDuration = 52 weeks;
+        assertNotEq(address(TOKENS.tokenOf(lunch.createFor{value: fee}(config))), withClaims, "claims vesting");
+        vm.revertToState(snapshot);
+        config.claimsPercent = 0;
+        config.claimsRoot = 0;
+        config.claimsVestingDuration = 0;
         config.creator = bob;
         assertNotEq(address(TOKENS.tokenOf(lunch.createFor{value: fee}(config))), token, "creator");
 

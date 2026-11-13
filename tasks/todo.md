@@ -565,3 +565,10 @@ jango: "can we do vesting for airdrops too? we should then add fully diluted mar
 - [ ] Airdrop vesting. Sketch (mine, not agreed): one more term at creation, the airdrop's vesting duration, in the salt like the others. `FairLunchClaims.claim` stays permissionless and sends a listed address what has vested since serve less what it already got, so `claimedBy` becomes an amount. Linear from the serve time, no cliff, no per-address wallets. Zero keeps today's behaviour.
 - [ ] Market cap becomes circulating only: supply less the chef's unvested tokens and the airdrop's unvested or unclaimed tokens, times price. Ask jango whether the pool's locked tokens count as circulating.
 - [ ] Fully diluted market cap: the whole supply times price, which is what "Market cap" shows today. Same split for the projection while funding and for the create form's preview.
+
+### Airdrop vesting and the two market caps, built 2026-11-12
+
+- [x] Airdrop vesting: `claimsVestingDuration` at creation and in the salt, `FairLunchClaims` sends what has vested less what was sent. Chef tokens can also unlock right away (duration 0).
+- [x] Market cap is circulating only, with a "?" note on what it counts. jango, 2026-11-12: the pool's locked tokens count, and airdrop tokens that have vested but aren't claimed count.
+- [x] Fully diluted market cap beside it, on the served page, the funding projection, the pay hint and the create preview.
+- Codex pass 22 (gpt-daybreak-blue-latest): DO NOT MERGE. High: shares adding up to more than the whole let a list take tokens ahead of its schedule. Fixed with a cap on the whole list's vested amount and a test. Medium: circulating cap counts vested, unclaimed airdrop tokens. Left as is, that's jango's decision above. Lows: saved create attempts from before the new term (storage key bumped), RISKS.md contradictions (fixed), browser clock against chain time in the claim preview (left, a wrong preview fails at simulation).

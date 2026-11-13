@@ -55,6 +55,10 @@ contract FairLunchClaims {
     /// @custom:param account The address.
     mapping(uint256 projectId => mapping(address account => uint256)) public claimedBy;
 
+    /// @notice The number of tokens a lunch's claims have sent out so far.
+    /// @custom:param projectId The ID of the lunch's project.
+    mapping(uint256 projectId => uint256) public totalClaimedOf;
+
     /// @notice When a lunch's claims were funded, which is when it was served and when they start vesting.
     /// @custom:param projectId The ID of the lunch's project.
     mapping(uint256 projectId => uint48) public fundedAt;
@@ -129,16 +133,23 @@ contract FairLunchClaims {
         // is its creator's to get right.
         uint256 vested = Math.mulDiv(tokenCountOf[projectId], shares, SHARES_TOTAL);
 
-        // What has vested so far, linearly from when the lunch was served.
+        // What has vested so far, linearly from when the lunch was served: for this address, and for the whole list,
+        // so shares that add up to more than the whole can't take tokens out ahead of the schedule.
+        uint256 available = tokenCountOf[projectId];
         uint256 duration = vestingDurationOf[projectId];
         uint256 elapsed = block.timestamp - fundedAt[projectId];
-        if (elapsed < duration) vested = Math.mulDiv(vested, elapsed, duration);
+        if (elapsed < duration) {
+            vested = Math.mulDiv(vested, elapsed, duration);
+            available = Math.mulDiv(available, elapsed, duration);
+        }
+        available -= totalClaimedOf[projectId];
 
         uint256 claimed = claimedBy[projectId][account];
-        if (vested <= claimed) revert FairLunchClaims_NothingToClaim({projectId: projectId, account: account});
+        tokenCount = vested > claimed ? Math.min(vested - claimed, available) : 0;
+        if (tokenCount == 0) revert FairLunchClaims_NothingToClaim({projectId: projectId, account: account});
 
-        tokenCount = vested - claimed;
-        claimedBy[projectId][account] = vested;
+        claimedBy[projectId][account] = claimed + tokenCount;
+        totalClaimedOf[projectId] += tokenCount;
         token.safeTransfer({to: account, value: tokenCount});
 
         emit Claim({projectId: projectId, account: account, shares: shares, tokenCount: tokenCount, caller: msg.sender});
