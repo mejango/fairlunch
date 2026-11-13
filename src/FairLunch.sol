@@ -126,6 +126,12 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     // ----------------------- internal constants ------------------------ //
     //*********************************************************************//
 
+    /// @notice The most gas the lookup of a project's terminal gets before pool fees are paid into it.
+    uint256 internal constant _FEE_LOOKUP_GAS = 300_000;
+
+    /// @notice The most gas a payment of pool fees into a project gets.
+    uint256 internal constant _FEE_PAY_GAS = 2_000_000;
+
     /// @notice The ID of the project that takes fees, whose token is JBP6.
     uint256 internal constant _FEE_PROJECT_ID = 1;
 
@@ -925,13 +931,19 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         internal
         returns (uint256 kept)
     {
-        if (DIRECTORY.primaryTerminalOf({projectId: projectId, token: token}) != IJBTerminal(address(TERMINAL))) {
+        // Both calls run code the paid project chooses: its terminals answer the lookup, and its hooks run in the
+        // payment. Each gets a bounded share of gas, so neither can use up what's needed to keep the amount instead.
+        try DIRECTORY.primaryTerminalOf{gas: _FEE_LOOKUP_GAS}({projectId: projectId, token: token}) returns (
+            IJBTerminal terminal
+        ) {
+            if (terminal != IJBTerminal(address(TERMINAL))) return amount;
+        } catch {
             return amount;
         }
 
         // If the project won't take it, the lunch's balance does.
         // slither-disable-next-line unused-return
-        try TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: amount})}({
+        try TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: amount}), gas: _FEE_PAY_GAS}({
             projectId: projectId,
             token: token,
             amount: amount,

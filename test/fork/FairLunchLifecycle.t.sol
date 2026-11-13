@@ -1173,6 +1173,29 @@ contract FairLunchLifecycle is Test {
         _assertHoldsNothing(id);
     }
 
+    /// @notice A set project whose terminals break the lookup doesn't block `collect`: the lunch keeps that half.
+    function test_collect_survivesASetProjectWhoseLookupReverts() public {
+        uint256 id = _served(0, 0, 0);
+        uint256 partner = _partner(60);
+        address operator = address(0x09E7A702);
+        _asJbp6Operator(operator);
+        vm.prank(operator);
+        lunch.setSplitProjectId(partner);
+
+        _earnPoolFees(id);
+        vm.mockCallRevert(
+            address(lunch.DIRECTORY()),
+            abi.encodeWithSignature("primaryTerminalOf(uint256,address)", partner, JBConstants.NATIVE_TOKEN),
+            "broken"
+        );
+        uint256 lunchBalance = _balance(id);
+        (, uint256 ethPaid) = lunch.collect(id);
+
+        assertEq(_balance(partner), 0, "partner took nothing");
+        assertEq(_balance(id), lunchBalance + ethPaid / 2, "the lunch kept the partner's half");
+        _assertHoldsNothing(id);
+    }
+
     /// @notice If the set project won't take its half, the lunch's balance does, and JBP6 still gets its half.
     function test_collect_keepsTheHalfTheSetProjectRefuses() public {
         uint256 id = _served(0, 0, 0);
