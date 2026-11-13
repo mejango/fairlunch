@@ -1194,6 +1194,40 @@ contract FairLunchLifecycle is Test {
         assertLe(back, push, "the round trip paid");
     }
 
+    /// @notice Liquidity added just ahead of a burn earns the pool's fee on it, and the burn buys more tokens per ETH
+    /// for it, not fewer.
+    function test_burn_liquidityAheadOnlyHelpsIt() public {
+        uint256 start = vm.snapshotState();
+        uint256 without = _tokensPerEthBurned(false);
+        vm.revertToState(start);
+        uint256 with = _tokensPerEthBurned(true);
+        assertGt(with, without, "the burn bought fewer tokens per ETH");
+    }
+
+    /// @notice The tokens a 0.1 ETH burn buys per ETH it spends, with or without someone's liquidity put right around
+    /// the price just ahead of it and taken out just after.
+    function _tokensPerEthBurned(bool ahead) internal returns (uint256) {
+        uint256 id = _served(0, 0, 0);
+        PoolKey memory key = lunch.poolKeyOf(id);
+        _pay(id, bob, 0.1 ether);
+        _trade(id);
+        vm.warp(_servedAt() + 31 minutes);
+
+        PoolProbe probe = new PoolProbe(POSITION_MANAGER, PERMIT2);
+        uint256 position;
+        if (ahead) {
+            vm.deal(address(probe), 50 ether);
+            IERC20 token = _token(id);
+            vm.prank(alice);
+            token.transfer(address(probe), 5_000_000e18);
+            int24 floor = _tick(id) / 200 * 200 - 200;
+            position = probe.seed(key, 0, floor - 200, floor + 200, 50 ether, 5_000_000e18);
+        }
+        (uint256 spent, uint256 burned) = lunch.burn(id);
+        if (ahead) probe.unseed(key, position);
+        return burned * 1e18 / spent;
+    }
+
     /// @notice Someone who makes the pool early with their own liquidity in the way, lets `serve` trade through it,
     /// and then sells everything, never ends with more ETH than they started with.
     /// @param dear Whether their pool prices the token above the fundraise's price (resting ETH bids) or below it
