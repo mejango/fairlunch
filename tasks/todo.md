@@ -436,7 +436,7 @@ Testnet recheck of the exact limits (`0xb0444b7cb03dc5926a441a6967845cd22f0310cb
 
 - [x] Codex pass 10 on the exact limits (run on Daybreak Blue: gpt-6.1-sol withheld it for the hardware key). The serve Low is closed, rounding and all six boundary cases correct, no new revert, no profitable `serve` or `collect` sequence. **HOLD** on one thing: I had called 2% of a burn's spend the ceiling on what added liquidity takes. That holds from a quiet price (1.985%). Inventory bought cheaply after someone else's large sale takes more: 2.8% after a 600 tick drop, 4.7% after 1,000. RISKS.md and the test's name and comment now say so. Codex: a tighter bound doesn't make a ceiling, and hard prevention needs a different way to execute burns.
 
-**Open for jango:** accept liquidity added ahead of burns as described in RISKS.md, or change how burns execute.
+**Open for jango:** accept liquidity added ahead of burns as described in RISKS.md, or change how burns execute. Accepted by jango after the fork measurement ("accept it").
 
 Site nits from jango (2026-11-12): action card left and numbers right, a two-sided swap box where either side can be typed with an arrow to switch, buttons as wide as their text, the phase card as wide as its text, "Cooking lunch" and "🥪 Lunch is served", a bar for the fundraise's time gone, "Lunch ingredients" on the create form, small Burn and Collect buttons beside what they'd move (with a new pool fees number), and a link to the pool on Uniswap. The pool's quoter only answers for an exact input, so typing the other side asks it a few times (`quoteSwapFor`).
 
@@ -556,3 +556,11 @@ jango's answers: site hosting "Not yet"; keep cap "remove it"; "the create flow 
 - [x] Create form: keep 0 to 99, shares 99 or less, and a preview of the starting market cap for a typed raise.
 - [ ] Full suite, Codex pass, fork and testnet redeploy.
 - [x] Burn JIT investigated on the fork. With a just-in-time position five times the pool's size the provider gained 0.99% of a 0.1 ETH burn, 1.61% of a 2 ETH burn, 1.31% and 1.29% after 600K and 1M token dumps. With no such position the same burn hit its 200-tick bound after 0.099 ETH at 980.1K tokens per ETH; with it the burn spent everything at 983K to 990K per ETH. So the take is the pool's 1% fee (which would have reached the chef through `collect`) plus a small spread, and the burn itself does better. A tighter bound can't remove the fee part. Recommendation for jango: accept; a Dutch auction is the only real fix and isn't worth its size. Kept as `test_burn_liquidityAheadOnlyHelpsIt`.
+
+## Todo from jango: airdrop vesting and fully diluted market cap
+
+jango: "can we do vesting for airdrops too? we should then add fully diluted market cap and fully diluted market cap projection too that take vesting into account whereas the other is circulating only". Not started.
+
+- [ ] Airdrop vesting. Sketch (mine, not agreed): one more term at creation, the airdrop's vesting duration, in the salt like the others. `FairLunchClaims.claim` stays permissionless and sends a listed address what has vested since serve less what it already got, so `claimedBy` becomes an amount. Linear from the serve time, no cliff, no per-address wallets. Zero keeps today's behaviour.
+- [ ] Market cap becomes circulating only: supply less the chef's unvested tokens and the airdrop's unvested or unclaimed tokens, times price. Ask jango whether the pool's locked tokens count as circulating.
+- [ ] Fully diluted market cap: the whole supply times price, which is what "Market cap" shows today. Same split for the projection while funding and for the create form's preview.
