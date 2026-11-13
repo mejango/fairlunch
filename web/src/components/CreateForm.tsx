@@ -276,8 +276,11 @@ export function CreateForm() {
         className="block w-fit max-w-full cursor-pointer rounded-xl border border-dashed border-line p-3 text-sm font-normal text-muted file:mr-3 file:cursor-pointer file:rounded-lg file:border file:border-solid file:border-line file:bg-card file:px-3 file:py-1.5 file:font-semibold file:text-ink hover:border-ink" /></label>
       <p className="-mt-2 text-sm text-muted">One address,amount per line.</p>
       <div className="rounded-xl border border-line/60 p-3">
-        <label className="field">🍽️ Preview: if it raises, {moneySymbol}
-          <input className="input" inputMode="decimal" placeholder="10" value={hypothetical} onChange={event => setHypothetical(event.target.value)} />
+        <label className="field">🍽️ Preview: if it raises
+          <span className="flex items-center gap-2">
+            <input className="input w-32" inputMode="decimal" placeholder="10" value={hypothetical} onChange={event => setHypothetical(event.target.value)} />
+            <span className="font-semibold">{moneySymbol}</span>
+          </span>
         </label>
         <p className="mt-2 text-sm text-muted" aria-live="polite">
           {preview === null ? 'Enter an amount to see the market cap the token would start at.' : `The token would start at a market cap of ${formatEth(preview.circulating, moneyDecimals)} ${moneySymbol}${preview.diluted === preview.circulating ? '' : `, or ${formatEth(preview.diluted, moneyDecimals)} ${moneySymbol} fully diluted`}.`}
