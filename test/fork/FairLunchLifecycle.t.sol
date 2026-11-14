@@ -1036,9 +1036,14 @@ contract FairLunchLifecycle is Test {
 
         // Someone parks JBP6 credits on the contract, then JBP6 pauses credit transfers.
         uint256 credits = 5e18;
-        stdstore.target(address(TOKENS)).sig("creditBalanceOf(address,uint256)").with_key(address(lunch))
-            .with_key(uint256(1)).checked_write(credits);
-        stdstore.target(address(TOKENS)).sig("totalCreditSupplyOf(uint256)").with_key(uint256(1))
+        stdstore.target(address(TOKENS))
+            .sig("creditBalanceOf(address,uint256)")
+            .with_key(address(lunch))
+            .with_key(uint256(1))
+            .checked_write(credits);
+        stdstore.target(address(TOKENS))
+            .sig("totalCreditSupplyOf(uint256)")
+            .with_key(uint256(1))
             .checked_write(TOKENS.totalCreditSupplyOf(1) + credits);
         vm.mockCallRevert(
             address(lunch.DIRECTORY().controllerOf(1)),

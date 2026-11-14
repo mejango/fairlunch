@@ -591,7 +591,8 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         if (!isHost) {
             (uint256 enabled,, uint256 minGas, uint256 remoteToken) = ISuckerRoute(
                     address(_hostSuckerOf({projectId: projectId, hostChainId: config.hostChainId}))
-                ).remoteTokenFor(token);
+                )
+                .remoteTokenFor(token);
             if (enabled == 0 || minGas != _SUCKER_MIN_GAS || remoteToken != uint160(config.token)) {
                 revert FairLunch_InvalidSuckers();
             }
@@ -770,12 +771,12 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         // From here on the buyback hook routes the lunch's payments and cash outs through that pool.
         IJBBuybackHook(address(BUYBACK_REGISTRY.hookOf(projectId)))
             .setPoolFor({
-            projectId: projectId,
-            fee: POOL_FEE,
-            tickSpacing: TICK_SPACING,
-            twapWindow: TWAP_WINDOW,
-            terminalToken: token
-        });
+                projectId: projectId,
+                fee: POOL_FEE,
+                tickSpacing: TICK_SPACING,
+                twapWindow: TWAP_WINDOW,
+                terminalToken: token
+            });
 
         // Whatever the pool's price didn't take: burn the tokens, and leave the money in the balance for the burn.
         // slither-disable-next-line unused-return
@@ -817,8 +818,8 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                 IJBSucker(suckers[i])
                     .mapToken(
                         JBTokenMapping({
-                        localToken: token, minGas: _SUCKER_MIN_GAS, remoteToken: bytes32(uint256(uint160(token)))
-                    })
+                            localToken: token, minGas: _SUCKER_MIN_GAS, remoteToken: bytes32(uint256(uint160(token)))
+                        })
                     );
             }
         }
@@ -866,8 +867,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     function setSplitProjectId(uint256 projectId) external override {
         // Only JBP6's operator: JBP6 is a revnet, and its owner knows who operates it.
         IJBProjects projects = CONTROLLER.PROJECTS();
-        if (!IRevnetOperator(projects.ownerOf(_FEE_PROJECT_ID))
-                .isOperatorOf({revnetId: _FEE_PROJECT_ID, addr: _msgSender()})) {
+        if (!IRevnetOperator(projects.ownerOf(_FEE_PROJECT_ID)).isOperatorOf({
+                revnetId: _FEE_PROJECT_ID, addr: _msgSender()
+            })) {
             revert FairLunch_Unauthorized(_msgSender());
         }
 
