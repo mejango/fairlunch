@@ -24,7 +24,7 @@ isolate = false
 runs = 512
 
 # As in Sticky: lints are triaged by hand, not on every build. The remaining unchecked casts are bounded by the
-# ETH supply, by `MAX_CREATOR_PERCENT`, or by Uniswap's own tick and delta ranges.
+# ETH supply, by `MAX_GRANTED_PERCENT`, or by Uniswap's own tick and delta ranges.
 [lint]
 lint_on_build = false
 

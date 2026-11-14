@@ -215,7 +215,7 @@ export async function readClaimList(lunch: Pick<Lunch, 'chainId' | 'projectId' |
 export async function readClaimed(lunch: Pick<Lunch, 'chainId' | 'projectId'>, accounts: readonly Address[], signal?: AbortSignal): Promise<bigint[]> {
   const { claims } = await wiringOn(lunch.chainId)
   const client = jbCenterPublicClient(lunch.chainId, signal)
-  return Promise.all(accounts.map(account => client.readContract({ address: claims, abi: claimsAbi, functionName: 'claimedBy', args: [BigInt(lunch.projectId), account] })))
+  return Promise.all(accounts.map(account => client.readContract({ address: claims, abi: claimsAbi, functionName: 'claimedOf', args: [BigInt(lunch.projectId), account] })))
 }
 
 /** The call that sends the entry at `index` its airdrop. Anyone can make it. */
