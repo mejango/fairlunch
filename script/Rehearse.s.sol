@@ -8,10 +8,14 @@ import {FairLunch} from "../src/FairLunch.sol";
 import {FairLunchConfig} from "../src/structs/FairLunchConfig.sol";
 import {Deploy} from "./Deploy.s.sol";
 
-/// @notice Puts Fair Lunch and two lunches on a local fork, for looking at the website with real state.
+/// @notice Puts Fair Lunch and three lunches on a local fork, for looking at the website with real state.
 /// @dev `forge script script/Rehearse.s.sol --rpc-url <fork> --broadcast --unlocked --sender <account>`. Never run
 /// against a live chain: the broadcaster becomes the one-shot configurator.
 contract Rehearse is Deploy {
+    //*********************************************************************//
+    // ---------------------- external transactions ---------------------- //
+    //*********************************************************************//
+
     /// @notice Puts Fair Lunch alone on a second fork, at the same address, for a lunch with a copy there.
     function deployOnly() external {
         vm.startBroadcast();
@@ -19,6 +23,7 @@ contract Rehearse is Deploy {
         vm.stopBroadcast();
     }
 
+    /// @notice Puts Fair Lunch and three lunches on a fork: two that raise ETH and are paid, one that raises USDC.
     function rehearse() external {
         vm.startBroadcast();
         FairLunch lunch = _deploy({configurator: msg.sender});
@@ -43,7 +48,15 @@ contract Rehearse is Deploy {
             config.tokenPercent = JBConstants.SPLITS_TOTAL_PERCENT / 10;
             config.vestingDuration = 52 weeks;
             uint256 id = lunch.createFor{value: fee}(config);
-            terminal.pay{value: raises[i]}(id, JBConstants.NATIVE_TOKEN, raises[i], msg.sender, 0, "", "");
+            terminal.pay{value: raises[i]}({
+                projectId: id,
+                token: JBConstants.NATIVE_TOKEN,
+                amount: raises[i],
+                beneficiary: msg.sender,
+                minReturnedTokens: 0,
+                memo: "",
+                metadata: ""
+            });
         }
 
         // And one that raises USDC, left for the caller to pay.

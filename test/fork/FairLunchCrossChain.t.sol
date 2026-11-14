@@ -16,6 +16,7 @@ import {IJBSuckerRegistry} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerR
 import {JBSuckerDeployerConfig} from "@bananapus/suckers-v6/src/structs/JBSuckerDeployerConfig.sol";
 import {JBTokenMapping} from "@bananapus/suckers-v6/src/structs/JBTokenMapping.sol";
 import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
@@ -68,16 +69,16 @@ contract FairLunchCrossChain is Test {
         deadline = uint48(block.timestamp + 7 days);
         lunch = _deploy();
         lunch.setChainSpecificConstants({
-            positionManager: IPositionManager(0x7C5f5A4bBd8fD63184577525326123B519429bDc),
-            oracleHook: IGeomeanOracle(0xB436Cedbee8F191A3860719b4B0f474434F315c8)
+            newPositionManager: IPositionManager(0x7C5f5A4bBd8fD63184577525326123B519429bDc),
+            newOracleHook: IGeomeanOracle(0xB436Cedbee8F191A3860719b4B0f474434F315c8)
         });
 
         vm.selectFork(optimismFork);
         vm.warp(deadline - 7 days);
         assertEq(address(_deploy()), address(lunch), "same address on both chains");
         lunch.setChainSpecificConstants({
-            positionManager: IPositionManager(0x3C3Ea4B57a46241e54610e5f022E5c45859A1017),
-            oracleHook: IGeomeanOracle(0x850eC1a2aDcB2126d823632e60441De2926fD5C8)
+            newPositionManager: IPositionManager(0x3C3Ea4B57a46241e54610e5f022E5c45859A1017),
+            newOracleHook: IGeomeanOracle(0x850eC1a2aDcB2126d823632e60441De2926fD5C8)
         });
 
         vm.deal(alice, 1000 ether);
@@ -92,7 +93,8 @@ contract FairLunchCrossChain is Test {
             routerTerminalRegistry: ROUTER_REGISTRY,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
-            deployer: address(this)
+            deployer: address(this),
+            trustedForwarder: ERC2771Context(address(OMNI)).trustedForwarder()
         });
     }
 
@@ -217,7 +219,7 @@ contract FairLunchCrossChain is Test {
 
         // ETH can't stand in for an ERC-20.
         FairLunchConfig memory native = _usdcConfig(IERC20(JBConstants.NATIVE_TOKEN), BASE_USDC);
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidToken.selector);
         lunch.createFor{value: fee}(native);
 
         // Nor can a mapping that arrives as another token.
@@ -293,7 +295,7 @@ contract FairLunchCrossChain is Test {
         uint256 fee = PROJECTS.creationFee();
 
         FairLunchConfig memory unmapped = _config(false);
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectRevert(FairLunch.FairLunch_InvalidSuckers.selector);
         lunch.createFor{value: fee}(unmapped);
 
         // Mapped, then switched off: the sucker remembers the address but won't send.
@@ -302,13 +304,13 @@ contract FairLunchCrossChain is Test {
         mappings[0] = disabled.suckerDeploymentConfiguration.deployerConfigurations[0].mappings[0];
         mappings[1] = JBTokenMapping({localToken: JBConstants.NATIVE_TOKEN, minGas: 200_000, remoteToken: bytes32(0)});
         disabled.suckerDeploymentConfiguration.deployerConfigurations[0].mappings = mappings;
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectRevert(FairLunch.FairLunch_InvalidSuckers.selector);
         lunch.createFor{value: fee}(disabled);
 
         // More gas than any bridge message can carry.
         FairLunchConfig memory greedy = _config(true);
         greedy.suckerDeploymentConfiguration.deployerConfigurations[0].mappings[0].minGas = type(uint32).max;
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectRevert(FairLunch.FairLunch_InvalidSuckers.selector);
         lunch.createFor{value: fee}(greedy);
 
         // ETH that arrives on the host as wrapped ETH, which the host can't take. Today the bridge refuses the mapping
@@ -342,7 +344,7 @@ contract FairLunchCrossChain is Test {
         vm.selectFork(baseFork);
         vm.warp(uint256(hostConfig.deadline) + 1 days);
         hostConfig.salt = bytes32(uint256(hostConfig.salt) + 1);
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidDeadline.selector);
         lunch.createFor{value: fee}(hostConfig);
     }
 
@@ -352,7 +354,7 @@ contract FairLunchCrossChain is Test {
         FairLunchConfig memory config = _config(false);
         config.suckerDeploymentConfiguration.deployerConfigurations[0].peer = bytes32(uint256(1));
         uint256 fee = PROJECTS.creationFee();
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectRevert(FairLunch.FairLunch_InvalidSuckers.selector);
         lunch.createFor{value: fee}(config);
     }
 

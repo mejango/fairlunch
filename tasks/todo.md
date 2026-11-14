@@ -593,3 +593,31 @@ jango: "do we need OpenZepplins vesting wallet here? is it over complicated?" th
 - Railway project `fair-lunch`, service `web`, built from `web/Dockerfile`, uploaded with `railway up --ci` from `web/`. Live at https://web-production-b0eea997.up.railway.app with `fairlun.ch` attached; DNS is jango's to set (apex record to `4sqptfx4.up.railway.app`, plus the ownership TXT the Railway dashboard shows). Testnets only: `deployments.json` lists Sepolia and Arbitrum Sepolia at `0xc57f128c1a055d1d0e859bea47bf2eac157b1fec`, the build before vesting moved to the serve time, which the site reads the same way.
 - Not done: JB Center doesn't list `https://fairlun.ch` as a first-party origin, so creating a lunch from the hosted site fails at pinning the name, logo and list. Reading, paying and trading work. No WalletConnect project ID is set, so WalletConnect is off.
 - GitHub: created private, `main` pushed. Local branch `backup-before-scrub` holds the history from before a private mention was removed from `tasks/todo.md`; it is not pushed.
+
+2026-11-13. jango: let an admin set, later, a project that splits fees with JBP6, per chain; the admin is JBP6's operator. Answers: split the money side of pool fees 50/50 (no new fee), set once per chain.
+- `FairLunch.setSplitProjectId(projectId)`: only an address JBP6's revnet owner contract reports as its operator (`isOperatorOf(1, caller)`, read live, checked on all four mainnets), only once, only an existing project other than JBP6. `collect` pays half of the money side into it with the creator as beneficiary, through the same helper as JBP6's half (`_payFeeTo`); a half a project doesn't take goes to the lunch's balance.
+- Tests: `test_setSplitProjectId_onlyJbp6OperatorOnce`, `test_collect_splitsTheMoneyWithTheSetProject`, `test_collect_keepsTheHalfTheSetProjectRefuses`. FairLunch runtime 23,571 bytes, 1,005 spare.
+- My call, flagged in RISKS.md: the set project's payment hooks run inside `collect`, so a hostile or broken project could make `collect` fail for good on that chain. Set-once means that can't be undone.
+- Codex pass 25 (`gpt-daybreak-blue-latest`): no Critical or High, DO NOT MERGE for two Mediums and a Low. Medium 1, the set project could block `collect` for good through a reverting terminal lookup or a gas-burning hook: fixed, the lookup and the payment each run with bounded gas inside a try (`_FEE_LOOKUP_GAS`, `_FEE_PAY_GAS`), tested by `test_collect_survivesASetProjectWhoseLookupReverts`. A gas-burning hook is not tested. Medium 2, the odd unit of a collection always goes to JBP6, which matters only for a money token with no decimals: left, written into RISKS.md, my call. Low, the setter checks `msg.sender` and not the forwarded sender: left on purpose, a one-time admin action shouldn't lean on a forwarder, my call.
+- jango: "dont hardcode gas, use try catch, a tried and true pattern in v6 for composability". The gas limits are gone; the terminal lookup and the payment are each in a plain try. A reverting project loses its half. One that burns gas without reverting makes `collect` cost more. Codex pass 26 (on the gas-limited version) said no findings and MERGE from the security side; it has not seen this version.
+- jango: the contracts should read as written, organized and styled by the same hand as V6. A read-only style audit against STYLE_GUIDE.md and the pinned V6 sources is running.
+
+## V6 style pass (2026-11-13)
+
+- [x] Interfaces for the pool, the claims and the data hook; `IFairLunch` returns them instead of the contracts.
+- [x] Set-once storage in camelCase (`oracleHook`, `poolManager`, `positionManager`), setter arguments `new…`.
+- [x] NatSpec on every error, named arguments on math calls, alphabetical members, comments in every catch.
+- [x] `setSplitProjectId` uses `_msgSender()`; `SetSplitProjectId` indexes the project.
+- [x] Claims: `claimedBy` is now `claimedOf`, `LUNCH` is `FAIR_LUNCH`, `Fund` and `SetTerms` carry the caller.
+- [x] Full suite: 131 passed, 0 failed. FairLunch runtime 23,703 bytes (873 spare).
+- [x] The constructor takes `trustedForwarder`; the deploy script reads it from the omnichain deployer, the same
+  on every chain.
+- [x] `FairLunch_InvalidConfig` split into specific errors that carry the offending value.
+- [x] `collect` emits `FeeReverted` with the reason when a fee payment or its lookup fails.
+- [x] Rule-by-rule check against `STYLE_GUIDE.md`: import group order, interface member order, `@return` on the
+  claims views, `onERC721Received` under external views, banners, NatSpec and named arguments in `Rehearse.s.sol`,
+  `lint.yml` and `test.yml` workflows.
+- Left, my call: `FairLunch_InvalidSuckers` and `FairLunch_HostMapsNoTokens` carry no value (two sites with no
+  shared context, before the project exists); fuzz runs stay 512 (fork tests); forge-std stays an npm dependency;
+  fork tests keep the pinned public RPCs; no slither workflow.
+- FairLunch runtime 24,269 bytes (307 spare).

@@ -15,6 +15,7 @@ import {JBRuleset} from "@bananapus/core-v6/src/structs/JBRuleset.sol";
 import {IJBOmnichainDeployer} from "@bananapus/omnichain-deployers-v6/src/interfaces/IJBOmnichainDeployer.sol";
 import {IJBSuckerRegistry} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerRegistry.sol";
 import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
@@ -37,6 +38,10 @@ import {FairLunch} from "../../src/FairLunch.sol";
 import {FairLunchClaims} from "../../src/FairLunchClaims.sol";
 import {FairLunchDataHook} from "../../src/FairLunchDataHook.sol";
 import {IFairLunch} from "../../src/interfaces/IFairLunch.sol";
+import {IJBRulesetDataHook} from "@bananapus/core-v6/src/interfaces/IJBRulesetDataHook.sol";
+import {IFairLunchDataHook} from "../../src/interfaces/IFairLunchDataHook.sol";
+import {IFairLunchPool} from "../../src/interfaces/IFairLunchPool.sol";
+import {IFairLunchClaims} from "../../src/interfaces/IFairLunchClaims.sol";
 import {PoolProbe} from "../PoolProbe.sol";
 import {FairLunchConfig} from "../../src/structs/FairLunchConfig.sol";
 import {FairLunchRecord} from "../../src/structs/FairLunchRecord.sol";
@@ -129,9 +134,10 @@ contract FairLunchLifecycle is Test {
             routerTerminalRegistry: ROUTER_REGISTRY,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
-            deployer: address(this)
+            deployer: address(this),
+            trustedForwarder: ERC2771Context(address(OMNI)).trustedForwarder()
         });
-        lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
+        lunch.setChainSpecificConstants({newPositionManager: POSITION_MANAGER, newOracleHook: ORACLE});
         deadline = uint48(block.timestamp + 7 days);
         vm.deal(alice, 10_000 ether);
         vm.deal(bob, 10_000 ether);
@@ -280,31 +286,31 @@ contract FairLunchLifecycle is Test {
 
         // The whole raise, which would leave nothing to open the pool with.
         FairLunchConfig memory config = _config(creator, 10 * TENTH, 0, 0);
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidKeepPercent.selector);
         lunch.createFor{value: fee}(config);
 
         config = _config(creator, 0, 0, 10 * TENTH);
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidTokenPercent.selector);
         lunch.createFor{value: fee}(config);
 
         config = _config(address(0), 0, 0, 0);
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectRevert(FairLunch.FairLunch_InvalidCreator.selector);
         lunch.createFor{value: fee}(config);
 
         config = _config(creator, 0, 0, 0);
         config.deadline = uint48(block.timestamp + 1);
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidDeadline.selector);
         lunch.createFor{value: fee}(config);
 
         // A fundraise longer than a ruleset can last.
         config = _config(creator, 0, 0, 0);
         config.deadline = uint48(block.timestamp + uint256(type(uint32).max) + 1);
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidDeadline.selector);
         lunch.createFor{value: fee}(config);
 
         config = _config(creator, 0, 0, 0);
         config.hostChainId = 0;
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectRevert(FairLunch.FairLunch_InvalidHostChain.selector);
         lunch.createFor{value: fee}(config);
     }
 
@@ -365,17 +371,17 @@ contract FairLunchLifecycle is Test {
         uint256 fee = PROJECTS.creationFee();
         FairLunchConfig memory config = _config(creator, 0, 0, 0);
         config.token = address(TOKENS.tokenOf(1));
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidToken.selector);
         lunch.createFor{value: fee}(config);
 
         config.token = address(0);
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidToken.selector);
         lunch.createFor{value: fee}(config);
 
         // More than 24 decimals.
         config.token = address(USDC);
         vm.mockCall(address(USDC), abi.encodeWithSignature("decimals()"), abi.encode(uint8(25)));
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidToken.selector);
         lunch.createFor{value: fee}(config);
     }
 
@@ -404,7 +410,7 @@ contract FairLunchLifecycle is Test {
 
     /// @notice The tokens `CLAIMS` holds for a lunch's list, which shares it with the creator's.
     function _heldForList(uint256 id) internal view returns (uint256) {
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         return _token(id).balanceOf(address(claims)) - (claims.creatorTokenCountOf(id) - claims.creatorClaimedOf(id));
     }
 
@@ -427,7 +433,7 @@ contract FairLunchLifecycle is Test {
     function test_claims_getTheirShareOfSupply() public {
         vm.deal(address(0xFEED), 10 ether);
         uint256 id = _servedWithClaims(TENTH, 6 * TENTH);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         uint256 supply = TOKENS.totalSupplyOf(id);
 
         assertApproxEqRel(claims.tokenCountOf(id), supply * 6 / 10, 1e9, "60% for the list");
@@ -447,7 +453,7 @@ contract FairLunchLifecycle is Test {
     function test_claims_onlyOnceAndOnlyAsListed() public {
         vm.deal(address(0xFEED), 10 ether);
         uint256 id = _servedWithClaims(0, 8 * TENTH);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         assertEq(claims.creatorTokenCountOf(id), 0, "no chef tokens");
 
         // More than listed, or someone unlisted.
@@ -476,7 +482,7 @@ contract FairLunchLifecycle is Test {
         _pay(id, address(0xFEED), 10 ether);
         vm.warp(deadline);
         lunch.serve(id);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         uint256 whole = claims.tokenCountOf(id) * 3 / 4;
 
         // Nothing has vested in the block it's served in.
@@ -505,7 +511,7 @@ contract FairLunchLifecycle is Test {
         _pay(id, address(0xFEED), 10 ether);
         vm.warp(deadline);
         lunch.serve(id);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         uint256 all = claims.tokenCountOf(id);
 
         vm.warp(uint256(deadline) + 13 weeks);
@@ -526,7 +532,7 @@ contract FairLunchLifecycle is Test {
         config.claimsPercent = 5 * TENTH;
         config.claimsRoot = _root(alice, 0.75e18, bob, 0.25e18);
         uint256 id = lunch.createFor{value: PROJECTS.creationFee()}(config);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         assertEq(claims.percentOf(id), 5 * TENTH);
 
         vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_NotServed.selector, id));
@@ -534,7 +540,7 @@ contract FairLunchLifecycle is Test {
     }
 
     function test_claims_onlyFairLunchSetsAndFunds() public {
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_Unauthorized.selector, address(this)));
         claims.setTermsOf(1, TENTH, bytes32(uint256(1)), 0);
         vm.expectRevert(abi.encodeWithSelector(FairLunchClaims.FairLunchClaims_Unauthorized.selector, address(this)));
@@ -548,24 +554,24 @@ contract FairLunchLifecycle is Test {
         FairLunchConfig memory config = _config(creator, 0, 0, 6 * TENTH);
         config.claimsPercent = 390_000_001;
         config.claimsRoot = bytes32(uint256(1));
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidTokenPercent.selector);
         lunch.createFor{value: fee}(config);
 
         // Vesting with nothing to vest.
         config = _config(creator, 0, 0, 0);
         config.claimsVestingDuration = 1;
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidClaims.selector);
         lunch.createFor{value: fee}(config);
 
         // A share with no list, and a list with no share.
         config = _config(creator, 0, 0, 0);
         config.claimsPercent = TENTH;
         config.claimsRoot = bytes32(0);
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidClaims.selector);
         lunch.createFor{value: fee}(config);
         config.claimsPercent = 0;
         config.claimsRoot = bytes32(uint256(1));
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidClaims.selector);
         lunch.createFor{value: fee}(config);
     }
 
@@ -585,7 +591,7 @@ contract FairLunchLifecycle is Test {
         vm.warp(deadline + 1);
         lunch.serve(id);
 
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         uint256 supply = TOKENS.totalSupplyOf(id);
         assertApproxEqRel(claims.tokenCountOf(id), supply * claimsPercent / 1e9, 1e12, "the list's percent");
         claims.claim(id, alice, aliceShares, _proof(bob, 1e18 - aliceShares));
@@ -678,9 +684,9 @@ contract FairLunchLifecycle is Test {
     }
 
     function test_unlockCallback_onlyPoolManager() public {
-        FairLunchPool pool = lunch.POOL();
+        IFairLunchPool pool = lunch.POOL();
         vm.expectRevert(abi.encodeWithSelector(FairLunchPool.FairLunchPool_Unauthorized.selector, address(this)));
-        pool.unlockCallback("");
+        FairLunchPool(payable(address(pool))).unlockCallback("");
     }
 
     //*********************************************************************//
@@ -759,7 +765,7 @@ contract FairLunchLifecycle is Test {
 
     function test_serve_creatorTokensVest() public {
         uint256 id = _served(0, 0, TENTH);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         IERC20 token = _token(id);
 
         // A tenth of the total supply, held for the creator from the serve on.
@@ -796,7 +802,7 @@ contract FairLunchLifecycle is Test {
         vm.warp(deadline);
         lunch.serve(id);
 
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         assertEq(claims.release(id), claims.creatorTokenCountOf(id));
         assertApproxEqAbs(_token(id).balanceOf(creator) * 10, TOKENS.totalSupplyOf(id), 1e6, "10% of supply");
     }
@@ -805,7 +811,7 @@ contract FairLunchLifecycle is Test {
     function test_release_andClaimsKeepToTheirOwn() public {
         vm.deal(address(0xFEED), 10 ether);
         uint256 id = _servedWithClaims(TENTH, 6 * TENTH);
-        FairLunchClaims claims = lunch.CLAIMS();
+        IFairLunchClaims claims = lunch.CLAIMS();
         uint256 creatorTokens = claims.creatorTokenCountOf(id);
 
         claims.claim(id, alice, 0.75e18, _proof(bob, 0.25e18));
@@ -979,7 +985,7 @@ contract FairLunchLifecycle is Test {
         vm.mockCall(address(BUYBACK.defaultHook()), abi.encodeWithSignature("oracleHook()"), abi.encode(address(0xBAD)));
         FairLunchConfig memory config = _config(creator, 0, 0, 0);
         uint256 fee = PROJECTS.creationFee();
-        vm.expectRevert(FairLunch.FairLunch_InvalidConfig.selector);
+        vm.expectPartialRevert(FairLunch.FairLunch_InvalidOracleHook.selector);
         lunch.createFor{value: fee}(config);
     }
 
@@ -1030,9 +1036,14 @@ contract FairLunchLifecycle is Test {
 
         // Someone parks JBP6 credits on the contract, then JBP6 pauses credit transfers.
         uint256 credits = 5e18;
-        stdstore.target(address(TOKENS)).sig("creditBalanceOf(address,uint256)").with_key(address(lunch))
-            .with_key(uint256(1)).checked_write(credits);
-        stdstore.target(address(TOKENS)).sig("totalCreditSupplyOf(uint256)").with_key(uint256(1))
+        stdstore.target(address(TOKENS))
+            .sig("creditBalanceOf(address,uint256)")
+            .with_key(address(lunch))
+            .with_key(uint256(1))
+            .checked_write(credits);
+        stdstore.target(address(TOKENS))
+            .sig("totalCreditSupplyOf(uint256)")
+            .with_key(uint256(1))
             .checked_write(TOKENS.totalCreditSupplyOf(1) + credits);
         vm.mockCallRevert(
             address(lunch.DIRECTORY().controllerOf(1)),
@@ -1094,6 +1105,144 @@ contract FairLunchLifecycle is Test {
 
         vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_NotServed.selector, 1));
         lunch.collect(1);
+    }
+
+    /// @notice Trade both ways through a served lunch's pool so its position earns fees on both sides.
+    function _earnPoolFees(uint256 id) internal {
+        PoolKey memory key = lunch.poolKeyOf(id);
+        vm.warp(_servedAt() + 30 minutes);
+        _pay(id, bob, 0.05 ether);
+        lunch.burn(id);
+        PoolProbe trader = new PoolProbe(POSITION_MANAGER, PERMIT2);
+        IERC20 token = _token(id);
+        vm.prank(alice);
+        token.transfer(address(trader), 100_000e18);
+        trader.swap(key, false, 100_000e18);
+    }
+
+    /// @notice Make a lunch that sells tokens for a number of days from now, to stand in for a partner project.
+    function _partner(uint48 daysOpen) internal returns (uint256) {
+        FairLunchConfig memory config = _config(creator, 0, 0, 0);
+        config.deadline = uint48(block.timestamp) + daysOpen * 1 days;
+        config.salt = "partner";
+        return lunch.createFor{value: PROJECTS.creationFee()}(config);
+    }
+
+    /// @notice Make an address JBP6's operator, as its revnet owner contract would report it.
+    function _asJbp6Operator(address operator) internal {
+        vm.mockCall(
+            PROJECTS.ownerOf(1), abi.encodeWithSignature("isOperatorOf(uint256,address)", 1, operator), abi.encode(true)
+        );
+    }
+
+    /// @notice Only JBP6's operator sets the project that shares pool fees, only once, and only to a real project.
+    function test_dataHook_supportsItsInterfaces() public view {
+        assertTrue(lunch.DATA_HOOK().supportsInterface(type(IFairLunchDataHook).interfaceId), "its own");
+        assertTrue(lunch.DATA_HOOK().supportsInterface(type(IJBRulesetDataHook).interfaceId), "the data hook's");
+        assertFalse(lunch.DATA_HOOK().supportsInterface(0xffffffff), "nothing else");
+    }
+
+    function test_setSplitProjectId_onlyJbp6OperatorOnce() public {
+        uint256 partner = _create(0, 0, 0);
+
+        vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));
+        lunch.setSplitProjectId(partner);
+
+        address operator = address(0x09E7A702);
+        _asJbp6Operator(operator);
+        vm.startPrank(operator);
+        uint256 beyond = PROJECTS.count() + 1;
+        for (uint256 i; i < 3; i++) {
+            vm.expectPartialRevert(FairLunch.FairLunch_InvalidSplitProject.selector);
+            lunch.setSplitProjectId(i == 2 ? beyond : i);
+        }
+
+        lunch.setSplitProjectId(partner);
+        assertEq(lunch.splitProjectId(), partner);
+
+        vm.expectRevert(FairLunch.FairLunch_AlreadyConfigured.selector);
+        lunch.setSplitProjectId(partner + 1);
+        vm.stopPrank();
+    }
+
+    /// @notice Once a project is set, it gets half of the money side of pool fees and JBP6 gets the other half. The
+    /// creator gets the tokens both payments mint.
+    function test_collect_splitsTheMoneyWithTheSetProject() public {
+        uint256 id = _served(0, 0, 0);
+
+        // The partner is a lunch that's still selling tokens, so it takes ETH in the same terminal.
+        uint256 partner = _partner(60);
+        address operator = address(0x09E7A702);
+        _asJbp6Operator(operator);
+        vm.prank(operator);
+        lunch.setSplitProjectId(partner);
+
+        _earnPoolFees(id);
+        uint256 jbp6Before = TOKENS.totalBalanceOf(creator, 1);
+        uint256 lunchBalance = _balance(id);
+        (, uint256 ethPaid) = lunch.collect(id);
+
+        assertApproxEqAbs(ethPaid, 0.0005 ether, 1e9, "ETH fees");
+        assertEq(_balance(partner), ethPaid / 2, "half went to the partner");
+        assertEq(TOKENS.totalBalanceOf(creator, partner), (ethPaid / 2) * 1_000_000, "creator got the partner's tokens");
+        assertGt(TOKENS.totalBalanceOf(creator, 1), jbp6Before, "creator earned JBP6 on the rest");
+        assertEq(_balance(id), lunchBalance, "nothing kept");
+        _assertHoldsNothing(id);
+    }
+
+    /// @notice A set project whose terminals break the lookup doesn't block `collect`: the lunch keeps that half.
+    function test_collect_survivesASetProjectWhoseLookupReverts() public {
+        uint256 id = _served(0, 0, 0);
+        uint256 partner = _partner(60);
+        address operator = address(0x09E7A702);
+        _asJbp6Operator(operator);
+        vm.prank(operator);
+        lunch.setSplitProjectId(partner);
+
+        _earnPoolFees(id);
+        vm.mockCallRevert(
+            address(lunch.DIRECTORY()),
+            abi.encodeWithSignature("primaryTerminalOf(uint256,address)", partner, JBConstants.NATIVE_TOKEN),
+            new bytes(500_000)
+        );
+        uint256 lunchBalance = _balance(id);
+        // The kept half is reported the way the terminal reports a fee it couldn't pay.
+        vm.expectEmit(true, true, true, false, address(lunch));
+        emit IFairLunch.FeeReverted(id, JBConstants.NATIVE_TOKEN, partner, 0, "", address(0));
+        uint256 gasBefore = gasleft();
+        (, uint256 ethPaid) = lunch.collect(id);
+
+        // Half a megabyte of revert data isn't copied or logged, which alone would cost over four million gas.
+        assertLt(gasBefore - gasleft(), 2_000_000, "the revert data wasn't copied");
+        assertEq(_balance(partner), 0, "partner took nothing");
+        assertEq(_balance(id), lunchBalance + ethPaid / 2, "the lunch kept the partner's half");
+        _assertHoldsNothing(id);
+    }
+
+    /// @notice If the set project won't take its half, the lunch's balance does, and JBP6 still gets its half.
+    function test_collect_keepsTheHalfTheSetProjectRefuses() public {
+        uint256 id = _served(0, 0, 0);
+
+        // A lunch nobody funded stops taking payments at its deadline.
+        uint256 partner = _partner(1);
+        address operator = address(0x09E7A702);
+        _asJbp6Operator(operator);
+        vm.prank(operator);
+        lunch.setSplitProjectId(partner);
+
+        _earnPoolFees(id);
+        vm.warp(block.timestamp + 30 days);
+        uint256 jbp6Before = TOKENS.totalBalanceOf(creator, 1);
+        uint256 lunchBalance = _balance(id);
+        // The kept half is reported the way the terminal reports a fee it couldn't pay.
+        vm.expectEmit(true, true, true, false, address(lunch));
+        emit IFairLunch.FeeReverted(id, JBConstants.NATIVE_TOKEN, partner, 0, "", address(0));
+        (, uint256 ethPaid) = lunch.collect(id);
+
+        assertEq(_balance(partner), 0, "partner took nothing");
+        assertEq(_balance(id), lunchBalance + ethPaid / 2, "the lunch kept the partner's half");
+        assertGt(TOKENS.totalBalanceOf(creator, 1), jbp6Before, "creator earned JBP6 on the rest");
+        _assertHoldsNothing(id);
     }
 
     //*********************************************************************//
@@ -1546,11 +1695,11 @@ contract FairLunchLifecycle is Test {
 
     function test_setChainSpecificConstants_onlyDeployerOnce() public {
         assertEq(
-            address(lunch.POOL().POOL_MANAGER()), address(POOL_MANAGER), "pool manager read from the position manager"
+            address(lunch.POOL().poolManager()), address(POOL_MANAGER), "pool manager read from the position manager"
         );
 
         vm.expectRevert(FairLunch.FairLunch_AlreadyConfigured.selector);
-        lunch.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
+        lunch.setChainSpecificConstants({newPositionManager: POSITION_MANAGER, newOracleHook: ORACLE});
 
         FairLunch fresh = new FairLunch({
             omnichainDeployer: OMNI,
@@ -1559,10 +1708,11 @@ contract FairLunchLifecycle is Test {
             routerTerminalRegistry: ROUTER_REGISTRY,
             suckerRegistry: REGISTRY,
             permit2: PERMIT2,
-            deployer: bob
+            deployer: bob,
+            trustedForwarder: ERC2771Context(address(OMNI)).trustedForwarder()
         });
         vm.expectRevert(abi.encodeWithSelector(FairLunch.FairLunch_Unauthorized.selector, address(this)));
-        fresh.setChainSpecificConstants({positionManager: POSITION_MANAGER, oracleHook: ORACLE});
+        fresh.setChainSpecificConstants({newPositionManager: POSITION_MANAGER, newOracleHook: ORACLE});
 
         // No lunches until this chain is configured.
         FairLunchConfig memory config = _config(creator, 0, 0, 0);
