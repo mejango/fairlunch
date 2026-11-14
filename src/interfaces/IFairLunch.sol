@@ -13,11 +13,11 @@ import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomean
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
-import {FairLunchConfig} from "../structs/FairLunchConfig.sol";
-import {FairLunchRecord} from "../structs/FairLunchRecord.sol";
 import {IFairLunchClaims} from "./IFairLunchClaims.sol";
 import {IFairLunchDataHook} from "./IFairLunchDataHook.sol";
 import {IFairLunchPool} from "./IFairLunchPool.sol";
+import {FairLunchConfig} from "../structs/FairLunchConfig.sol";
+import {FairLunchRecord} from "../structs/FairLunchRecord.sol";
 
 /// @notice A token launcher. A lunch raises ETH or an ERC-20 at a fixed price until a deadline, is then served into a
 /// locked Uniswap V4 pool by anyone, and from then on turns every payment it receives into a buyback and burn.
@@ -47,6 +47,23 @@ interface IFairLunch {
         uint256 indexed hostChainId,
         address indexed creator,
         uint256 deadline,
+        address caller
+    );
+
+    /// @notice Emitted when a payment of a lunch's pool fees into a project reverted and was kept in the lunch's
+    /// balance.
+    /// @param projectId The ID of the lunch's project.
+    /// @param token The lunch's money.
+    /// @param feeProjectId The ID of the project the payment was for.
+    /// @param amount The amount that was kept.
+    /// @param reason The revert reason.
+    /// @param caller The address that called the function.
+    event FeeReverted(
+        uint256 indexed projectId,
+        address indexed token,
+        uint256 indexed feeProjectId,
+        uint256 amount,
+        bytes reason,
         address caller
     );
 
@@ -102,9 +119,6 @@ interface IFairLunch {
     /// @notice The deployer every lunch is launched through, which wires up its suckers.
     function OMNICHAIN_DEPLOYER() external view returns (IJBOmnichainDeployer);
 
-    /// @notice The Uniswap V4 hook every lunch's pool uses, which records the price history buybacks are bounded by.
-    function oracleHook() external view returns (IGeomeanOracle);
-
     /// @notice The holder of every lunch's liquidity, which trades in its pool.
     function POOL() external view returns (IFairLunchPool);
 
@@ -136,6 +150,9 @@ interface IFairLunch {
     /// @notice The number of seconds of price history a burn's buy is bounded by, and the wait after serving before
     /// the first one.
     function TWAP_WINDOW() external view returns (uint32);
+
+    /// @notice The Uniswap V4 hook every lunch's pool uses, which records the price history buybacks are bounded by.
+    function oracleHook() external view returns (IGeomeanOracle);
 
     /// @notice The Uniswap V4 pool of a lunch.
     /// @param projectId The ID of the lunch's project.

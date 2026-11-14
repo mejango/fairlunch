@@ -95,8 +95,35 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @notice Thrown when a lunch's host sucker has no token mapped to send revenue home with.
     error FairLunch_HostMapsNoTokens();
 
-    /// @notice Thrown when a lunch's configuration, or a one-shot setter's argument, isn't allowed.
-    error FairLunch_InvalidConfig();
+    /// @notice Thrown when a lunch's claims aren't given as a share, a list and a vesting duration that go together.
+    error FairLunch_InvalidClaims(uint256 claimsPercent, bytes32 claimsRoot, uint256 claimsVestingDuration);
+
+    /// @notice Thrown when a lunch has no creator.
+    error FairLunch_InvalidCreator();
+
+    /// @notice Thrown when a lunch's deadline has passed on its host chain, or is too far away.
+    error FairLunch_InvalidDeadline(uint256 deadline);
+
+    /// @notice Thrown when a lunch has no host chain.
+    error FairLunch_InvalidHostChain();
+
+    /// @notice Thrown when a lunch's creator would keep the whole raise.
+    error FairLunch_InvalidKeepPercent(uint256 keepPercent);
+
+    /// @notice Thrown when a lunch's buyback hook prices with another Uniswap V4 hook than this contract's.
+    error FairLunch_InvalidOracleHook(IHooks hook);
+
+    /// @notice Thrown when the project to share pool fees with is JBP6 or doesn't exist.
+    error FairLunch_InvalidSplitProject(uint256 projectId);
+
+    /// @notice Thrown when a lunch's suckers name a peer, or its host sucker doesn't map the lunch's money home.
+    error FairLunch_InvalidSuckers();
+
+    /// @notice Thrown when a lunch's money isn't a token a lunch can raise on this chain.
+    error FairLunch_InvalidToken(address token);
+
+    /// @notice Thrown when the creator and the claims would get more than `MAX_GRANTED_PERCENT` together.
+    error FairLunch_InvalidTokenPercent(uint256 grantedPercent);
 
     /// @notice Thrown when a lunch has no sucker to its host chain.
     error FairLunch_NoHostSucker(uint256 projectId, uint256 hostChainId);
@@ -121,6 +148,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
     /// @notice Thrown when the caller isn't allowed to make the call.
     error FairLunch_Unauthorized(address caller);
+
+    /// @notice Thrown when a one-shot setter is given the zero address.
+    error FairLunch_ZeroAddress();
 
     //*********************************************************************//
     // ------------------------- public constants ------------------------ //
@@ -246,8 +276,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     // -------------------------- constructor ---------------------------- //
     //*********************************************************************//
 
-    /// @dev Every argument is the same address on every supported chain. The trusted forwarder is the one the
-    /// omnichain deployer trusts, so relayed creations resolve the signer instead of the forwarder.
+    /// @dev Every argument is the same address on every supported chain, so this contract's address is too.
     /// @param omnichainDeployer The deployer every lunch is launched through.
     /// @param buybackRegistry The registry of the buyback hook.
     /// @param terminal The terminal every lunch holds its money in.
@@ -255,6 +284,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// @param suckerRegistry The registry of every lunch's suckers.
     /// @param permit2 The Permit2 contract the position manager pulls tokens through.
     /// @param deployer The address allowed to set the chain-specific constants, once.
+    /// @param trustedForwarder The trusted forwarder for the ERC2771Context.
     constructor(
         IJBOmnichainDeployer omnichainDeployer,
         IJBBuybackHookRegistry buybackRegistry,
@@ -262,9 +292,10 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         IJBTerminal routerTerminalRegistry,
         IJBSuckerRegistry suckerRegistry,
         IAllowanceTransfer permit2,
-        address deployer
+        address deployer,
+        address trustedForwarder
     )
-        ERC2771Context(ERC2771Context(address(omnichainDeployer)).trustedForwarder())
+        ERC2771Context(trustedForwarder)
     {
         OMNICHAIN_DEPLOYER = omnichainDeployer;
         BUYBACK_REGISTRY = buybackRegistry;
@@ -373,11 +404,19 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
             // What neither project takes goes into the lunch's balance.
             uint256 kept = _payFeeTo({
-                projectId: _FEE_PROJECT_ID, token: token, amount: paid - shared, beneficiary: record.creator
+                projectId: projectId,
+                feeProjectId: _FEE_PROJECT_ID,
+                token: token,
+                amount: paid - shared,
+                beneficiary: record.creator
             });
             if (shared != 0) {
                 kept += _payFeeTo({
-                    projectId: splitProjectId, token: token, amount: shared, beneficiary: record.creator
+                    projectId: projectId,
+                    feeProjectId: splitProjectId,
+                    token: token,
+                    amount: shared,
+                    beneficiary: record.creator
                 });
             }
             if (kept != 0) _addToBalanceOf({projectId: projectId, token: token, amount: kept});
@@ -402,24 +441,48 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             if (mappings.length != 0) token = mappings[0].localToken;
         }
 
+        // A lunch needs a creator and a host chain.
+        if (config.creator == address(0)) revert FairLunch_InvalidCreator();
+        if (config.hostChainId == 0) revert FairLunch_InvalidHostChain();
+
         // Only the host sells tokens, so only the host needs time left to sell them: two seconds at least, since
         // `serve` can't queue its ruleset in the second after the launch's two. A copy on another chain can be
         // made after the deadline: its terms, deadline included, must match the host's to pair with it.
-        // A creator can't keep the whole raise: `serve` needs something to open the pool with, and without it the raise
-        // would be stuck.
+        if ((isHost && config.deadline <= block.timestamp + 1) || config.deadline > block.timestamp + type(uint32).max)
+        {
+            revert FairLunch_InvalidDeadline(config.deadline);
+        }
+
         // A lunch that raises ETH takes ETH everywhere, and one that raises an ERC-20 takes ERC-20s everywhere. None
         // takes JBP6: this contract passes on all the JBP6 it holds as fee proceeds.
         if (
-            config.creator == address(0) || config.hostChainId == 0
-                || (isHost && config.deadline <= block.timestamp + 1)
-                || config.deadline > block.timestamp + type(uint32).max || config.token == address(0)
+            config.token == address(0)
                 || (config.token == JBConstants.NATIVE_TOKEN) != (token == JBConstants.NATIVE_TOKEN)
                 || token == address(TOKENS.tokenOf(_FEE_PROJECT_ID))
-                || config.keepPercent >= JBConstants.SPLITS_TOTAL_PERCENT
-                || uint256(config.tokenPercent) + config.claimsPercent > MAX_GRANTED_PERCENT
-                || (config.claimsPercent == 0) != (config.claimsRoot == bytes32(0))
+        ) revert FairLunch_InvalidToken(token);
+
+        // A creator can't keep the whole raise: `serve` needs something to open the pool with, and without it the raise
+        // would be stuck.
+        if (config.keepPercent >= JBConstants.SPLITS_TOTAL_PERCENT) {
+            revert FairLunch_InvalidKeepPercent(config.keepPercent);
+        }
+
+        // Payers and the pool need a share of the supply too.
+        if (uint256(config.tokenPercent) + config.claimsPercent > MAX_GRANTED_PERCENT) {
+            revert FairLunch_InvalidTokenPercent(uint256(config.tokenPercent) + config.claimsPercent);
+        }
+
+        // Claims come with a list, and only claims vest.
+        if (
+            (config.claimsPercent == 0) != (config.claimsRoot == bytes32(0))
                 || (config.claimsPercent == 0 && config.claimsVestingDuration != 0)
-        ) revert FairLunch_InvalidConfig();
+        ) {
+            revert FairLunch_InvalidClaims({
+                claimsPercent: config.claimsPercent,
+                claimsRoot: config.claimsRoot,
+                claimsVestingDuration: config.claimsVestingDuration
+            });
+        }
 
         // A lunch needs this chain's Uniswap addresses.
         if (address(oracleHook) == address(0)) revert FairLunch_NotConfigured();
@@ -453,7 +516,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         for (uint256 i; i < suckerDeploymentConfiguration.deployerConfigurations.length; i++) {
             // A lunch's suckers only ever pair with the same lunch's suckers on other chains, never a chosen peer.
             if (suckerDeploymentConfiguration.deployerConfigurations[i].peer != bytes32(0)) {
-                revert FairLunch_InvalidConfig();
+                revert FairLunch_InvalidSuckers();
             }
 
             // The host's suckers start with nothing mapped, so the raise can't be bridged away.
@@ -496,7 +559,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         });
 
         // A token priced in smaller pieces than the lunch's token can't be pooled at a million per unit.
-        if (accountingContexts[0].decimals > 24) revert FairLunch_InvalidConfig();
+        if (accountingContexts[0].decimals > 24) revert FairLunch_InvalidToken(token);
         JBTerminalConfig[] memory terminalConfigurations = new JBTerminalConfig[](2);
         terminalConfigurations[0] = JBTerminalConfig({
             terminal: IJBTerminal(address(TERMINAL)), accountingContextsToAccept: accountingContexts
@@ -530,17 +593,16 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                     address(_hostSuckerOf({projectId: projectId, hostChainId: config.hostChainId}))
                 ).remoteTokenFor(token);
             if (enabled == 0 || minGas != _SUCKER_MIN_GAS || remoteToken != uint160(config.token)) {
-                revert FairLunch_InvalidConfig();
+                revert FairLunch_InvalidSuckers();
             }
         }
 
         // The host's buyback hook has to price with the same oracle the lunch's pool uses, or `serve` couldn't register
         // the pool and the raise would be stuck.
-        if (
-            isHost
-                && IBuybackOracle(address(BUYBACK_REGISTRY.hookOf(projectId))).oracleHook()
-                    != IHooks(address(oracleHook))
-        ) revert FairLunch_InvalidConfig();
+        if (isHost) {
+            IHooks hook = IBuybackOracle(address(BUYBACK_REGISTRY.hookOf(projectId))).oracleHook();
+            if (hook != IHooks(address(oracleHook))) revert FairLunch_InvalidOracleHook(hook);
+        }
 
         // Deploy the token up front so payers hold a real ERC-20 from their first payment.
         // slither-disable-next-line unused-return
@@ -572,24 +634,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             deadline: config.deadline,
             caller: _msgSender()
         });
-    }
-
-    /// @notice Accept only a lunch's project NFT.
-    /// @dev Part of `IERC721Receiver`.
-    /// @return selector The selector that accepts the NFT.
-    function onERC721Received(
-        address,
-        address,
-        uint256,
-        bytes calldata
-    )
-        external
-        view
-        override
-        returns (bytes4 selector)
-    {
-        if (msg.sender != address(CONTROLLER.PROJECTS())) revert FairLunch_Unauthorized(msg.sender);
-        return IERC721Receiver.onERC721Received.selector;
     }
 
     /// @notice Send this chain's revenue to the lunch's host chain.
@@ -808,7 +852,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
         // Both addresses are needed.
         if (address(newPositionManager) == address(0) || address(newOracleHook) == address(0)) {
-            revert FairLunch_InvalidConfig();
+            revert FairLunch_ZeroAddress();
         }
 
         POOL.setChainSpecificConstants({newPositionManager: newPositionManager, newOracleHook: newOracleHook});
@@ -831,7 +875,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         if (splitProjectId != 0) revert FairLunch_AlreadyConfigured();
 
         // Only a project that exists and isn't JBP6 itself.
-        if (projectId <= _FEE_PROJECT_ID || projectId > projects.count()) revert FairLunch_InvalidConfig();
+        if (projectId <= _FEE_PROJECT_ID || projectId > projects.count()) {
+            revert FairLunch_InvalidSplitProject(projectId);
+        }
 
         splitProjectId = projectId;
 
@@ -841,6 +887,24 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     //*********************************************************************//
     // ----------------------- external views ---------------------------- //
     //*********************************************************************//
+
+    /// @notice Accept only a lunch's project NFT.
+    /// @dev Part of `IERC721Receiver`.
+    /// @return selector The selector that accepts the NFT.
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    )
+        external
+        view
+        override
+        returns (bytes4 selector)
+    {
+        if (msg.sender != address(CONTROLLER.PROJECTS())) revert FairLunch_Unauthorized(msg.sender);
+        return IERC721Receiver.onERC721Received.selector;
+    }
 
     /// @notice What Fair Lunch remembers about a lunch.
     /// @param projectId The ID of the lunch's project.
@@ -920,13 +984,15 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     }
 
     /// @notice Pay an amount of a lunch's pool fees into a project, if it takes the money in this contract's terminal.
-    /// @param projectId The ID of the project to pay.
+    /// @param projectId The ID of the lunch's project.
+    /// @param feeProjectId The ID of the project to pay.
     /// @param token The lunch's money.
     /// @param amount The amount to pay.
     /// @param beneficiary The address that gets the tokens the payment mints.
     /// @return kept The amount the project didn't take: all of it or none of it.
     function _payFeeTo(
         uint256 projectId,
+        uint256 feeProjectId,
         address token,
         uint256 amount,
         address beneficiary
@@ -936,18 +1002,26 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     {
         // The lookup is in a try because it asks the paid project's terminals whether they take the token, and that
         // is code the project chooses.
-        try DIRECTORY.primaryTerminalOf({projectId: projectId, token: token}) returns (IJBTerminal terminal) {
+        try DIRECTORY.primaryTerminalOf({projectId: feeProjectId, token: token}) returns (IJBTerminal terminal) {
             // Only pay through this contract's terminal.
             if (terminal != IJBTerminal(address(TERMINAL))) return amount;
-        } catch {
+        } catch (bytes memory reason) {
             // The lookup reverted, so the lunch keeps the amount.
+            emit FeeReverted({
+                projectId: projectId,
+                token: token,
+                feeProjectId: feeProjectId,
+                amount: amount,
+                reason: reason,
+                caller: _msgSender()
+            });
             return amount;
         }
 
         // The payment runs the paid project's hooks, so it's in a try too.
         // slither-disable-next-line unused-return
         try TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: amount})}({
-            projectId: projectId,
+            projectId: feeProjectId,
             token: token,
             amount: amount,
             beneficiary: beneficiary,
@@ -955,8 +1029,16 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             memo: "",
             metadata: ""
         }) {}
-        catch {
+        catch (bytes memory reason) {
             // The project didn't take it, so the lunch keeps the amount.
+            emit FeeReverted({
+                projectId: projectId,
+                token: token,
+                feeProjectId: feeProjectId,
+                amount: amount,
+                reason: reason,
+                caller: _msgSender()
+            });
             kept = amount;
         }
     }

@@ -58,46 +58,57 @@ interface IFairLunchClaims {
     /// @notice The number of a lunch's tokens an address has been sent from its claims.
     /// @param projectId The ID of the lunch's project.
     /// @param account The address.
+    /// @return The number of tokens the address has been sent.
     function claimedOf(uint256 projectId, address account) external view returns (uint256);
 
     /// @notice The number of a lunch's tokens its creator has been sent.
     /// @param projectId The ID of the lunch's project.
+    /// @return The number of tokens the creator has been sent.
     function creatorClaimedOf(uint256 projectId) external view returns (uint256);
 
     /// @notice The address a lunch's creator tokens go to. Fixed when the lunch is served.
     /// @param projectId The ID of the lunch's project.
+    /// @return The creator's address.
     function creatorOf(uint256 projectId) external view returns (address);
 
     /// @notice The number of tokens minted for a lunch's creator when it was served.
     /// @param projectId The ID of the lunch's project.
+    /// @return The number of tokens minted for the creator.
     function creatorTokenCountOf(uint256 projectId) external view returns (uint256);
 
     /// @notice The number of seconds over which a lunch's creator tokens vest. Zero if they're all sent at once.
     /// @param projectId The ID of the lunch's project.
+    /// @return The vesting duration, in seconds.
     function creatorVestingDurationOf(uint256 projectId) external view returns (uint32);
 
     /// @notice The share of a lunch's total token supply its claims get, out of `JBConstants.SPLITS_TOTAL_PERCENT`.
     /// @param projectId The ID of the lunch's project.
+    /// @return The claims' share of the supply.
     function percentOf(uint256 projectId) external view returns (uint32);
 
     /// @notice The merkle root of a lunch's list.
     /// @param projectId The ID of the lunch's project.
+    /// @return The merkle root.
     function rootOf(uint256 projectId) external view returns (bytes32);
 
     /// @notice The number of tokens minted for a lunch's claims when it was served.
     /// @param projectId The ID of the lunch's project.
+    /// @return The number of tokens minted for the claims.
     function tokenCountOf(uint256 projectId) external view returns (uint256);
 
     /// @notice A lunch's token. Zero until the lunch is served.
     /// @param projectId The ID of the lunch's project.
+    /// @return The lunch's token.
     function tokenOf(uint256 projectId) external view returns (IERC20);
 
     /// @notice The number of tokens a lunch's claims have sent out so far.
     /// @param projectId The ID of the lunch's project.
+    /// @return The number of tokens sent out.
     function totalClaimedOf(uint256 projectId) external view returns (uint256);
 
     /// @notice The number of seconds over which a lunch's claims vest. Zero if they're all claimable at once.
     /// @param projectId The ID of the lunch's project.
+    /// @return The vesting duration, in seconds.
     function vestingDurationOf(uint256 projectId) external view returns (uint32);
 
     /// @notice Send a listed address the part of a served lunch's claims that has vested for it.

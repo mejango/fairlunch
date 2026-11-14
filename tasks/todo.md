@@ -610,5 +610,14 @@ jango: "do we need OpenZepplins vesting wallet here? is it over complicated?" th
 - [x] `setSplitProjectId` uses `_msgSender()`; `SetSplitProjectId` indexes the project.
 - [x] Claims: `claimedBy` is now `claimedOf`, `LUNCH` is `FAIR_LUNCH`, `Fund` and `SetTerms` carry the caller.
 - [x] Full suite: 131 passed, 0 failed. FairLunch runtime 23,703 bytes (873 spare).
-- Skipped, my call: splitting `FairLunch_InvalidConfig` and revert events in `_payFeeTo` (bytecode), a forwarder
-  constructor argument (address parity).
+- [x] The constructor takes `trustedForwarder`; the deploy script reads it from the omnichain deployer, the same
+  on every chain.
+- [x] `FairLunch_InvalidConfig` split into specific errors that carry the offending value.
+- [x] `collect` emits `FeeReverted` with the reason when a fee payment or its lookup fails.
+- [x] Rule-by-rule check against `STYLE_GUIDE.md`: import group order, interface member order, `@return` on the
+  claims views, `onERC721Received` under external views, banners, NatSpec and named arguments in `Rehearse.s.sol`,
+  `lint.yml` and `test.yml` workflows.
+- Left, my call: `FairLunch_InvalidSuckers` and `FairLunch_HostMapsNoTokens` carry no value (two sites with no
+  shared context, before the project exists); fuzz runs stay 512 (fork tests); forge-std stays an npm dependency;
+  fork tests keep the pinned public RPCs; no slither workflow.
+- FairLunch runtime 24,269 bytes (307 spare).

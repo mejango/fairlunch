@@ -7,6 +7,7 @@ import {IJBTerminal} from "@bananapus/core-v6/src/interfaces/IJBTerminal.sol";
 import {IJBOmnichainDeployer} from "@bananapus/omnichain-deployers-v6/src/interfaces/IJBOmnichainDeployer.sol";
 import {IJBSuckerRegistry} from "@bananapus/suckers-v6/src/interfaces/IJBSuckerRegistry.sol";
 import {IGeomeanOracle} from "@bananapus/univ4-router-v6/src/interfaces/IGeomeanOracle.sol";
+import {ERC2771Context} from "@openzeppelin/contracts/metatx/ERC2771Context.sol";
 import {Sphinx} from "@sphinx-labs/contracts/contracts/foundry/SphinxPlugin.sol";
 import {IAllowanceTransfer} from "@uniswap/permit2/src/interfaces/IAllowanceTransfer.sol";
 import {IPositionManager} from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
@@ -66,10 +67,12 @@ contract Deploy is Script, Sphinx {
     function _deploy(address configurator) internal returns (FairLunch lunch) {
         string memory chain = _chainName();
 
+        // The omnichain deployer knows the forwarder every Juicebox V6 contract trusts, the same on every chain.
+        address omnichainDeployer =
+            _deployed({package: "omnichain-deployers-v6", chain: chain, name: "JBOmnichainDeployer"});
+
         lunch = new FairLunch{salt: _SALT}({
-            omnichainDeployer: IJBOmnichainDeployer(
-                _deployed({package: "omnichain-deployers-v6", chain: chain, name: "JBOmnichainDeployer"})
-            ),
+            omnichainDeployer: IJBOmnichainDeployer(omnichainDeployer),
             buybackRegistry: IJBBuybackHookRegistry(
                 _deployed({package: "buyback-hook-v6", chain: chain, name: "JBBuybackHookRegistry"})
             ),
@@ -79,7 +82,8 @@ contract Deploy is Script, Sphinx {
                 _deployed({package: "suckers-v6", chain: chain, name: "JBSuckerRegistry"})
             ),
             permit2: _PERMIT2,
-            deployer: configurator
+            deployer: configurator,
+            trustedForwarder: ERC2771Context(omnichainDeployer).trustedForwarder()
         });
 
         lunch.setChainSpecificConstants({

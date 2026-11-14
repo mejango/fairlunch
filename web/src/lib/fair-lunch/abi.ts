@@ -37,6 +37,11 @@ export const fairLunchAbi = [
         "name": "deployer",
         "type": "address",
         "internalType": "address"
+      },
+      {
+        "name": "trustedForwarder",
+        "type": "address",
+        "internalType": "address"
       }
     ],
     "stateMutability": "nonpayable"
@@ -850,6 +855,49 @@ export const fairLunchAbi = [
   },
   {
     "type": "event",
+    "name": "FeeReverted",
+    "inputs": [
+      {
+        "name": "projectId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "feeProjectId",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "reason",
+        "type": "bytes",
+        "indexed": false,
+        "internalType": "bytes"
+      },
+      {
+        "name": "caller",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "SendHome",
     "inputs": [
       {
@@ -975,8 +1023,105 @@ export const fairLunchAbi = [
   },
   {
     "type": "error",
-    "name": "FairLunch_InvalidConfig",
+    "name": "FairLunch_InvalidClaims",
+    "inputs": [
+      {
+        "name": "claimsPercent",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "claimsRoot",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "claimsVestingDuration",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FairLunch_InvalidCreator",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FairLunch_InvalidDeadline",
+    "inputs": [
+      {
+        "name": "deadline",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FairLunch_InvalidHostChain",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FairLunch_InvalidKeepPercent",
+    "inputs": [
+      {
+        "name": "keepPercent",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FairLunch_InvalidOracleHook",
+    "inputs": [
+      {
+        "name": "hook",
+        "type": "address",
+        "internalType": "contract IHooks"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FairLunch_InvalidSplitProject",
+    "inputs": [
+      {
+        "name": "projectId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FairLunch_InvalidSuckers",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FairLunch_InvalidToken",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FairLunch_InvalidTokenPercent",
+    "inputs": [
+      {
+        "name": "grantedPercent",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
@@ -1074,6 +1219,11 @@ export const fairLunchAbi = [
         "internalType": "address"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "FairLunch_ZeroAddress",
+    "inputs": []
   },
   {
     "type": "error",

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-/// @notice What Fair Lunch remembers about a lunch. All but the last two members are written once at creation,
-/// and those two once when the lunch is served. Nothing can change them afterwards.
+/// @notice What Fair Lunch remembers about a lunch. All but the last member are written once at creation, and that
+/// one once when the lunch is served. Nothing can change them afterwards.
 /// @custom:member hostChainId The ID of the chain the lunch takes place on.
 /// @custom:member token The money this chain's project takes: `JBConstants.NATIVE_TOKEN` for ETH, or an ERC-20.
 /// @custom:member creator The address that receives the kept money, the JBP6 minted by fees, and the vested tokens.

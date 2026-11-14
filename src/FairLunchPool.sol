@@ -50,7 +50,7 @@ contract FairLunchPool is IFairLunchPool, IUnlockCallback, IERC721Receiver {
     //*********************************************************************//
 
     /// @notice Thrown when the amounts on hand make no liquidity at the pool's price.
-    error FairLunchPool_NoLiquidity();
+    error FairLunchPool_NoLiquidity(uint256 amount0, uint256 amount1);
 
     /// @notice Thrown when the caller isn't the one contract a function takes calls from.
     error FairLunchPool_Unauthorized(address caller);
@@ -183,24 +183,6 @@ contract FairLunchPool is IFairLunchPool, IUnlockCallback, IERC721Receiver {
         positionManager.modifyLiquidities({unlockData: abi.encode(actions, params), deadline: block.timestamp});
     }
 
-    /// @notice Accept only liquidity positions.
-    /// @dev Part of `IERC721Receiver`.
-    /// @return selector The selector that marks the position as accepted.
-    function onERC721Received(
-        address,
-        address,
-        uint256,
-        bytes calldata
-    )
-        external
-        view
-        override
-        returns (bytes4 selector)
-    {
-        if (msg.sender != address(positionManager)) revert FairLunchPool_Unauthorized(msg.sender);
-        return IERC721Receiver.onERC721Received.selector;
-    }
-
     /// @notice Put the money and the tokens this contract was given into a lunch's pool as one full-range position.
     /// @dev The fundraise's price is `tokens` per `money`. Anyone can create the pool, or add liquidity to it, before
     /// the lunch is served. So before adding liquidity, this trades toward the fundraise's price. An empty pool moves
@@ -292,7 +274,7 @@ contract FairLunchPool is IFairLunchPool, IUnlockCallback, IERC721Receiver {
         });
 
         // Someone traded one whole side away at a better-than-fundraise price. Arbitrage will clear that; try again.
-        if (liquidity == 0) revert FairLunchPool_NoLiquidity();
+        if (liquidity == 0) revert FairLunchPool_NoLiquidity({amount0: amount0, amount1: amount1});
 
         // Let the position manager pull each side through Permit2, for this call only. ETH is sent with the call.
         _approve({currency: key.currency0, amount: amount0});
@@ -388,6 +370,28 @@ contract FairLunchPool is IFairLunchPool, IUnlockCallback, IERC721Receiver {
         }
 
         return abi.encode(spent, received);
+    }
+
+    //*********************************************************************//
+    // ----------------------- external views ---------------------------- //
+    //*********************************************************************//
+
+    /// @notice Accept only liquidity positions.
+    /// @dev Part of `IERC721Receiver`.
+    /// @return selector The selector that marks the position as accepted.
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    )
+        external
+        view
+        override
+        returns (bytes4 selector)
+    {
+        if (msg.sender != address(positionManager)) revert FairLunchPool_Unauthorized(msg.sender);
+        return IERC721Receiver.onERC721Received.selector;
     }
 
     //*********************************************************************//
