@@ -1198,14 +1198,17 @@ contract FairLunchLifecycle is Test {
         vm.mockCallRevert(
             address(lunch.DIRECTORY()),
             abi.encodeWithSignature("primaryTerminalOf(uint256,address)", partner, JBConstants.NATIVE_TOKEN),
-            "broken"
+            new bytes(500_000)
         );
         uint256 lunchBalance = _balance(id);
         // The kept half is reported the way the terminal reports a fee it couldn't pay.
         vm.expectEmit(true, true, true, false, address(lunch));
         emit IFairLunch.FeeReverted(id, JBConstants.NATIVE_TOKEN, partner, 0, "", address(0));
+        uint256 gasBefore = gasleft();
         (, uint256 ethPaid) = lunch.collect(id);
 
+        // Half a megabyte of revert data isn't copied or logged, which alone would cost over four million gas.
+        assertLt(gasBefore - gasleft(), 2_000_000, "the revert data wasn't copied");
         assertEq(_balance(partner), 0, "partner took nothing");
         assertEq(_balance(id), lunchBalance + ethPaid / 2, "the lunch kept the partner's half");
         _assertHoldsNothing(id);

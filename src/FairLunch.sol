@@ -1005,14 +1005,15 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         try DIRECTORY.primaryTerminalOf({projectId: feeProjectId, token: token}) returns (IJBTerminal terminal) {
             // Only pay through this contract's terminal.
             if (terminal != IJBTerminal(address(TERMINAL))) return amount;
-        } catch (bytes memory reason) {
-            // The lookup reverted, so the lunch keeps the amount.
+        } catch {
+            // The lookup reverted, so the lunch keeps the amount. The reason is left out: copying it would let the
+            // project block `collect` by reverting with more data than the gas left can copy.
             emit FeeReverted({
                 projectId: projectId,
                 token: token,
                 feeProjectId: feeProjectId,
                 amount: amount,
-                reason: reason,
+                reason: "",
                 caller: _msgSender()
             });
             return amount;
@@ -1029,14 +1030,14 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             memo: "",
             metadata: ""
         }) {}
-        catch (bytes memory reason) {
-            // The project didn't take it, so the lunch keeps the amount.
+        catch {
+            // The project didn't take it, so the lunch keeps the amount. The reason is left out here too.
             emit FeeReverted({
                 projectId: projectId,
                 token: token,
                 feeProjectId: feeProjectId,
                 amount: amount,
-                reason: reason,
+                reason: "",
                 caller: _msgSender()
             });
             kept = amount;

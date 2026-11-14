@@ -56,7 +56,7 @@ interface IFairLunch {
     /// @param token The lunch's money.
     /// @param feeProjectId The ID of the project the payment was for.
     /// @param amount The amount that was kept.
-    /// @param reason The revert reason.
+    /// @param reason Always empty. Kept so the event has the same shape as the terminal's.
     /// @param caller The address that called the function.
     event FeeReverted(
         uint256 indexed projectId,
