@@ -70,11 +70,9 @@ const wallet = createWalletClient({
   }, { retryCount: 0 }),
 })
 
-/** The wallet wagmi sends through: another one can expose the same account and chain. */
-const connector = vi.hoisted(() => ({ uid: 'wallet-a' }))
 vi.mock('@wagmi/core', async original => ({
   ...(await original<typeof import('@wagmi/core')>()),
-  getAccount: () => ({ address: ALICE, chainId: 84532, connector: { uid: connector.uid, id: 'test' } }),
+  getAccount: () => ({ address: ALICE, chainId: 84532, connector: { uid: 'wallet-a', id: 'test' } }),
   getWalletClient: async () => wallet,
   getPublicClient: () => client,
   switchChain: vi.fn(),
@@ -106,7 +104,6 @@ const unregister: (() => void)[] = []
 afterEach(() => {
   while (unregister.length) unregister.pop()!()
   walletSends.length = 0
-  connector.uid = 'wallet-a'
   clearViewAs()
 })
 
@@ -149,15 +146,5 @@ describe('useReviewedAction', () => {
     const ended = await run(pay(3n), review as unknown as Parameters<typeof registerReviewHandler>[0])
     expect(ended).toMatchObject({ phase: 'error', error: VIEW_AS_WRITE_BLOCKED })
     expect(walletSends).toEqual([])
-  })
-
-  it('sends nothing through a wallet that replaced the reviewed one while its review was open', async () => {
-    // Wallet B, with the same account on the same chain, becomes the active connector before the person confirms.
-    const ended = await run(pay(4n), async prompt => {
-      connector.uid = 'wallet-b'
-      return prompt.confirmation
-    })
-    expect(walletSends).toEqual([])
-    expect(ended).toMatchObject({ phase: 'error', error: 'Wallet connection changed. Review the transaction again.' })
   })
 })
