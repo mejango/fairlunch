@@ -192,9 +192,6 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// of the balance.
     uint256 internal constant _SEND_HOME_MULTIPLE = 1_000_000;
 
-    /// @notice The gas a sucker reserves on the remote chain for a claim.
-    uint32 internal constant _SUCKER_MIN_GAS = 200_000;
-
     //*********************************************************************//
     // --------------- public immutable stored properties ---------------- //
     //*********************************************************************//
@@ -586,14 +583,13 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
         // Everywhere but the host, payments only ever leave through the bridge home. Without one that's ready to carry
         // this chain's money they'd be stuck, so there's no lunch. A mapping that was set and then switched off
-        // doesn't count, nor does one with any gas but `_SUCKER_MIN_GAS`: set too high, it could never send. Nor does
-        // one that arrives as anything but the lunch's money: the host takes nothing else.
+        // doesn't count, nor does one with any gas but the lunch's own `suckerMinGas`: set too high, it could never
+        // send. Nor does one that arrives as anything but the lunch's money: the host takes nothing else.
         if (!isHost) {
             (uint256 enabled,, uint256 minGas, uint256 remoteToken) = ISuckerRoute(
                     address(_hostSuckerOf({projectId: projectId, hostChainId: config.hostChainId}))
-                )
-                .remoteTokenFor(token);
-            if (enabled == 0 || minGas != _SUCKER_MIN_GAS || remoteToken != uint160(config.token)) {
+                ).remoteTokenFor(token);
+            if (enabled == 0 || minGas != config.suckerMinGas || remoteToken != uint160(config.token)) {
                 revert FairLunch_InvalidSuckers();
             }
         }
@@ -614,6 +610,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         record.token = token;
         record.creator = config.creator;
         record.keepPercent = config.keepPercent;
+        record.suckerMinGas = config.suckerMinGas;
         record.keepCap = config.keepCap;
         record.tokenPercent = config.tokenPercent;
         record.vestingDuration = config.vestingDuration;
@@ -771,12 +768,12 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         // From here on the buyback hook routes the lunch's payments and cash outs through that pool.
         IJBBuybackHook(address(BUYBACK_REGISTRY.hookOf(projectId)))
             .setPoolFor({
-                projectId: projectId,
-                fee: POOL_FEE,
-                tickSpacing: TICK_SPACING,
-                twapWindow: TWAP_WINDOW,
-                terminalToken: token
-            });
+            projectId: projectId,
+            fee: POOL_FEE,
+            tickSpacing: TICK_SPACING,
+            twapWindow: TWAP_WINDOW,
+            terminalToken: token
+        });
 
         // Whatever the pool's price didn't take: burn the tokens, and leave the money in the balance for the burn.
         // slither-disable-next-line unused-return
@@ -818,8 +815,10 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
                 IJBSucker(suckers[i])
                     .mapToken(
                         JBTokenMapping({
-                            localToken: token, minGas: _SUCKER_MIN_GAS, remoteToken: bytes32(uint256(uint160(token)))
-                        })
+                        localToken: token,
+                        minGas: _recordOf[projectId].suckerMinGas,
+                        remoteToken: bytes32(uint256(uint160(token)))
+                    })
                     );
             }
         }
@@ -867,9 +866,8 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     function setSplitProjectId(uint256 projectId) external override {
         // Only JBP6's operator: JBP6 is a revnet, and its owner knows who operates it.
         IJBProjects projects = CONTROLLER.PROJECTS();
-        if (!IRevnetOperator(projects.ownerOf(_FEE_PROJECT_ID)).isOperatorOf({
-                revnetId: _FEE_PROJECT_ID, addr: _msgSender()
-            })) {
+        if (!IRevnetOperator(projects.ownerOf(_FEE_PROJECT_ID))
+                .isOperatorOf({revnetId: _FEE_PROJECT_ID, addr: _msgSender()})) {
             revert FairLunch_Unauthorized(_msgSender());
         }
 
@@ -1002,28 +1000,16 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         internal
         returns (uint256 kept)
     {
-        // The lookup is in a try because it asks the paid project's terminals whether they take the token, and that
-        // is code the project chooses.
-        try DIRECTORY.primaryTerminalOf({projectId: feeProjectId, token: token}) returns (IJBTerminal terminal) {
-            // Only pay through this contract's terminal.
-            if (terminal != IJBTerminal(address(TERMINAL))) return amount;
-        } catch {
-            // The lookup reverted, so the lunch keeps the amount. The reason is left out: copying it would let the
-            // project block `collect` by reverting with more data than the gas left can copy.
-            emit FeeReverted({
-                projectId: projectId,
-                token: token,
-                feeProjectId: feeProjectId,
-                amount: amount,
-                reason: "",
-                caller: _msgSender()
-            });
-            return amount;
-        }
+        // A fee project that takes the token through another terminal, or not at all, is a deterministic fact: the
+        // lunch keeps the amount. A lookup or payment that reverts propagates instead of being swallowed: whether a
+        // call reverts can depend on the gas the caller chose, and `collect` is permissionless, so a swallowed
+        // failure would let any caller keep the fee in the lunch. The collected fees stay in the position until a
+        // later `collect` succeeds.
+        IJBTerminal terminal = DIRECTORY.primaryTerminalOf({projectId: feeProjectId, token: token});
+        if (terminal != IJBTerminal(address(TERMINAL))) return amount;
 
-        // The payment runs the paid project's hooks, so it's in a try too.
         // slither-disable-next-line unused-return
-        try TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: amount})}({
+        TERMINAL.pay{value: _handTo({to: address(TERMINAL), token: token, amount: amount})}({
             projectId: feeProjectId,
             token: token,
             amount: amount,
@@ -1031,19 +1017,7 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             minReturnedTokens: 0,
             memo: "",
             metadata: ""
-        }) {}
-        catch {
-            // The project didn't take it, so the lunch keeps the amount. The reason is left out here too.
-            emit FeeReverted({
-                projectId: projectId,
-                token: token,
-                feeProjectId: feeProjectId,
-                amount: amount,
-                reason: "",
-                caller: _msgSender()
-            });
-            kept = amount;
-        }
+        });
     }
 
     /// @notice Queue the ruleset a lunch keeps forever, set up to pay its whole raise out once.

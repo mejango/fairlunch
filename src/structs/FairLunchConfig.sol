@@ -19,6 +19,8 @@ import {JBSuckerDeploymentConfig} from "@bananapus/omnichain-deployers-v6/src/st
 /// being.
 /// @custom:member tokenPercent The creator's share of the total token supply at launch, out of
 /// `JBConstants.SPLITS_TOTAL_PERCENT`.
+/// @custom:member suckerMinGas The gas the lunch's suckers reserve on the remote chain for a claim of the token. The
+/// lunch's own number: the protocol imposes no floor, since any floor is tuned to one set of gas rules.
 /// @custom:member vestingDuration The number of seconds over which the creator's tokens vest linearly, starting when
 /// the lunch is served.
 /// @custom:member claimsPercent The share of the total token supply at launch that goes to a list of addresses, out
@@ -41,6 +43,7 @@ struct FairLunchConfig {
     uint32 keepPercent;
     uint104 keepCap;
     uint32 tokenPercent;
+    uint32 suckerMinGas;
     uint32 vestingDuration;
     uint32 claimsPercent;
     bytes32 claimsRoot;
