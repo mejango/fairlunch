@@ -28,7 +28,21 @@ type Row = { chainId: number; projectId: number; name: string | null; tokenSymbo
 /** ponytail: the newest 200 projects Fair Lunch owns, copies included. Page through the index when there are more.
  * Every lunch on its host chain, newest first. The index finds the projects Fair Lunch owns; the contract says which
  * chain hosts each and where it is in its life. */
-export async function listLunches(network: 'mainnet' | 'testnet'): Promise<ListedLunch[]> {
+export function listLunches(network: 'mainnet' | 'testnet'): Promise<ListedLunch[]> {
+  const kept = lists.get(network)
+  if (kept && Date.now() - kept.at < LIST_KEPT_MS) return kept.list
+  const list = readList(network)
+  lists.set(network, { at: Date.now(), list })
+  // A list that failed is read again by the next visit.
+  list.catch(() => { if (lists.get(network)?.list === list) lists.delete(network) })
+  return list
+}
+
+/** How long the server answers every visit with one read of the list. The home page has no poll on top of it. */
+const LIST_KEPT_MS = 30_000
+const lists = new Map<string, { at: number; list: Promise<ListedLunch[]> }>()
+
+async function readList(network: 'mainnet' | 'testnet'): Promise<ListedLunch[]> {
   const chains = (network === 'mainnet' ? PRODUCTION_CHAINS : TESTNET_CHAINS).filter(chain => deploymentOn(chain.id))
   const owners = [...new Set(chains.map(chain => deploymentOn(chain.id)!.address.toLowerCase()))]
   if (!owners.length) return []
@@ -49,27 +63,20 @@ export async function listLunches(network: 'mainnet' | 'testnet'): Promise<Liste
   return listed.filter(lunch => lunch !== null)
 }
 
-const BURNS = `query FairLunchBurns($chainId: Int!, $projectId: Int!, $from: String!) {
+const PAGE = `query FairLunchPage($chainId: Int!, $projectId: Int!, $from: String!) {
+  projects(where: { chainId: $chainId, projectId: $projectId, version: 6 }, limit: 1) { items { logoUri } }
   burnEvents(where: { chainId: $chainId, projectId: $projectId, version: 6, from: $from }, orderBy: "timestamp", orderDirection: "desc", limit: 500) {
     items { timestamp amount txHash }
   }
 }`
 
-/** The burns Fair Lunch made of a lunch's token, newest first: the chart's 🔥 marks and the burned total.
- * ponytail: the newest 500. A lunch with more needs a summed field in the index. */
-export async function burnsOf(chainId: number, projectId: number): Promise<{ time: number; amount: string; txHash: string }[]> {
+/** What the index adds to a lunch's page, in one request: its logo, and the burns Fair Lunch made of its token, newest
+ * first, for the chart's 🔥 marks and the burned total.
+ * ponytail: the newest 500 burns. A lunch with more needs a summed field in the index. */
+export async function indexedOf(chainId: number, projectId: number): Promise<{ logoUri: string | null; burns: { time: number; amount: string; txHash: string }[] }> {
   const deployment = deploymentOn(chainId)
-  if (!deployment) return []
-  const { burnEvents } = await bendystraw<{ burnEvents: { items: { timestamp: number; amount: string; txHash: string }[] } }>(
-    BURNS, { chainId, projectId, from: deployment.address.toLowerCase() }, { chainId, policy: 'no-store' })
-  return burnEvents.items.map(({ timestamp, amount, txHash }) => ({ time: Number(timestamp), amount, txHash }))
-}
-
-const LOGO = `query FairLunchLogo($chainId: Int!, $projectId: Int!) {
-  projects(where: { chainId: $chainId, projectId: $projectId, version: 6 }, limit: 1) { items { logoUri } }
-}`
-
-export async function logoOf(chainId: number, projectId: number): Promise<string | null> {
-  const { projects } = await bendystraw<{ projects: { items: { logoUri: string | null }[] } }>(LOGO, { chainId, projectId }, { chainId, policy: 'no-store' })
-  return projects.items[0]?.logoUri ?? null
+  if (!deployment) return { logoUri: null, burns: [] }
+  const { projects, burnEvents } = await bendystraw<{ projects: { items: { logoUri: string | null }[] }; burnEvents: { items: { timestamp: number; amount: string; txHash: string }[] } }>(
+    PAGE, { chainId, projectId, from: deployment.address.toLowerCase() }, { chainId, policy: 'no-store' })
+  return { logoUri: projects.items[0]?.logoUri ?? null, burns: burnEvents.items.map(({ timestamp, amount, txHash }) => ({ time: Number(timestamp), amount, txHash })) }
 }

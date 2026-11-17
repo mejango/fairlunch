@@ -3,14 +3,18 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { formatChange, formatPrice, formatTokens } from '@/lib/format'
-import { readPriceHistory, type Lunch } from '@/lib/fair-lunch/reads'
+import { readPriceHistory, type Lunch, type PriceHistory } from '@/lib/fair-lunch/reads'
 import { RAISE_PRICE } from '@/lib/fair-lunch/split'
+import { POLL_MS } from '@/lib/query-defaults'
 
 export type Burn = { time: number; amount: string; txHash: string }
 
 const RANGES = [['1H', 3600], ['1D', 86400], ['1W', 604800], ['1M', 2592000], ['All', 0]] as const
 const POINTS = 120
 const W = 800, H = 320, PAD = 8
+
+/** The seconds each of a history's points averages over. */
+const pointWidth = (history?: PriceHistory) => (history && history.points.length > 1 ? history.points[1].time - history.points[0].time : 0)
 
 const clock = (time: number, long: boolean) => new Date(time * 1000).toLocaleString('en-US',
   long ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { hour: 'numeric', minute: '2-digit' })
@@ -23,7 +27,9 @@ export function PriceChart({ lunch, burns }: { lunch: Lunch; burns: readonly Bur
   const { data, isError } = useQuery({
     queryKey: ['fair-lunch', 'prices', lunch.chainId, lunch.projectId, range[0]],
     queryFn: ({ signal }) => readPriceHistory(lunch, seconds, POINTS, signal),
-    refetchInterval: 15_000,
+    // Each point is an average over its width of time, so the history changes no faster than that. The live price
+    // closes the line in between.
+    refetchInterval: ({ state }) => Math.max(POLL_MS, pointWidth(state.data) * 1000),
   })
   // The live price closes the line, so the chart moves with the pool between reads of its history.
   const points = useMemo(() => {

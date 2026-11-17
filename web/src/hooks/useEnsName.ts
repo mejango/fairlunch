@@ -13,6 +13,5 @@ export function useEnsName(address: string | undefined, chainId: number) {
     enabled: !!address && isAddress(address) && ensAvailable(chainId),
     staleTime: Infinity,
     gcTime: 30 * 60_000,
-    retry: 1,
   })
 }

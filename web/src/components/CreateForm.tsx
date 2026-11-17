@@ -18,6 +18,7 @@ import { projectedCapOf, tokensFor } from '@/lib/fair-lunch/split'
 import { createTx, madeOn, type LunchTerms } from '@/lib/fair-lunch/writes'
 import { formatEth } from '@/lib/format'
 import { jbCenterBaseUrl } from '@/lib/jbcenter-config'
+import { POLL_MS } from '@/lib/query-defaults'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { chainName, projectPath } from '@/lib/urn'
 
@@ -78,7 +79,7 @@ export function CreateForm() {
     queryKey: ['fair-lunch', 'made', terms?.salt, unmade.join()],
     queryFn: ({ signal }) => Promise.all(unmade.map(async chainId => [chainId, await madeOn(terms!, chainId, signal).catch(() => null)] as const)),
     enabled: restored && unmade.length > 0,
-    refetchInterval: 15_000,
+    refetchInterval: POLL_MS,
   })
   useEffect(() => {
     for (const [chainId, projectId] of found ?? []) {

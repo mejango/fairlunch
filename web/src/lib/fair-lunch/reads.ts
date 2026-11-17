@@ -85,7 +85,7 @@ export async function readClock(chainId: number, projectId: number, signal?: Abo
 }
 
 /** The Juicebox contracts a chain's Fair Lunch was deployed with. They never change. */
-const wiring = new Map<number, Promise<{ lunch: Address; terminal: Address; store: Address; tokens: Address; controller: Address; buyback: Address; router: Address; claims: Address }>>()
+const wiring = new Map<number, Promise<{ lunch: Address; terminal: Address; store: Address; tokens: Address; /** What every project token is a clone of. */ tokenImplementation: Address; controller: Address; buyback: Address; router: Address; claims: Address }>>()
 export function wiringOn(chainId: number) {
   const known = wiring.get(chainId)
   if (known) return known
@@ -96,8 +96,11 @@ export function wiringOn(chainId: number) {
   const read = (async () => {
     const [terminal, tokens, controller, buyback, router, claims] = await Promise.all((['TERMINAL', 'TOKENS', 'CONTROLLER', 'BUYBACK_REGISTRY', 'ROUTER_TERMINAL_REGISTRY', 'CLAIMS'] as const).map(functionName =>
       client.readContract({ address: lunch, abi: fairLunchAbi, functionName })))
-    const store = await client.readContract({ address: terminal, abi: jbMultiTerminalAbi, functionName: 'STORE' })
-    return { lunch, terminal, store, tokens, controller, buyback, router, claims }
+    const [store, tokenImplementation] = await Promise.all([
+      client.readContract({ address: terminal, abi: jbMultiTerminalAbi, functionName: 'STORE' }),
+      client.readContract({ address: tokens, abi: parseAbi(['function TOKEN() view returns (address)']), functionName: 'TOKEN' }),
+    ])
+    return { lunch, terminal, store, tokens, tokenImplementation, controller, buyback, router, claims }
   })()
   wiring.set(chainId, read)
   read.catch(() => wiring.delete(chainId))
@@ -277,9 +280,8 @@ export function tokenAddressOf(terms: MadeTerms, on: { lunch: Address; controlle
  * through, whatever this browser remembers of it.
  */
 export async function findMade(terms: MadeTerms, chainId: number, signal?: AbortSignal): Promise<number | null> {
-  const { lunch, tokens, controller } = await wiringOn(chainId)
+  const { lunch, tokens, controller, tokenImplementation: implementation } = await wiringOn(chainId)
   const client = jbCenterPublicClient(chainId, signal)
-  const implementation = await client.readContract({ address: tokens, abi: parseAbi(['function TOKEN() view returns (address)']), functionName: 'TOKEN' })
   const token = tokenAddressOf(terms, { lunch, controller, tokens, implementation })
   const projectId = await client.readContract({ address: tokens, abi: jbTokensAbi, functionName: 'projectIdOf', args: [token] })
   return projectId ? Number(projectId) : null
