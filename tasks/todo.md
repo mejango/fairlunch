@@ -1,3 +1,38 @@
+# Lean network reads in the web client (2026-11-16, branch perf/lean-network)
+
+## Plan refinement
+
+- **Objective:** Cut redundant RPC, indexer and Center requests from the Fair Lunch web client so a page loads once, refreshes about every 30 seconds or on a user action, and never polls hidden; only `web/` and its tests change, no contract, deployment or SDK bump, and no read that protects money is removed or weakened.
+- **System fit:** Reads are owned by `web/src/lib/fair-lunch/reads.ts` and `indexed.ts`, paced by the SDK's Center limiter, and consumed by `LunchView`, `PriceChart`, `CreateForm` and the server pages; the prepare step of every `TxAction` reads the chain itself and is untouched, so evidence before a wallet prompt, authority and Safe handling, proofs and results are unaffected, and only display refresh cadence changes.
+- **Reuse and simplicity:** Reuse TanStack Query's own interval, focus and retry options and the SDK's `isRateLimited`; one new module holds the query defaults and the 30 s pace so every poll shares it, and the only other new code is a debounce hook for typed quotes and a 30 s in-memory keep of the server's list.
+- **Evidence and unknowns:** Source at origin/main 8590478 with installed `@bananapus/nana-sdk-core` 2.41.3 and `@tanstack/react-query` 5.101.4; request counts are estimates from reading the code and viem's multicall batching, not measured against live Center, and the cost of the copies read depends on each sucker's history.
+- **Verification:** Each behavior change gets a vitest test that fails without it (poll pace, hidden pause and refetch on return, 429 not retried while one-off errors are, chart pace, quote debounce, airdrop reads only when open, fee watch pause, list keep, one indexer request per lunch page), then `npm run check` in `web/` until it exits 0.
+- **Resource budget:** One pass: audit by reading, smallest diff per item, one commit per item, full gate once at the end; replan only if a test shows a consumer of a slowed read needs a faster answer before an action.
+
+Ranked audit (requests per minute per open tab, estimated):
+
+1. Price chart history, 15 s: block + coverage + observe, about 12.
+2. Lunch read, 15 s: two batched calls, about 8.
+3. Create page's "already made" check, 15 s, unbounded while an attempt is saved: 2 per chain per poll, about 8 per chain.
+4. Copies, 60 s: at least 7 per copy, more with bridge history (SDK log scan).
+5. Typed swap quote, 15 s plus one to four per keystroke: 4 to 16.
+6. Held balance, 15 s: 4.
+7. Pool fees, vesting, airdrop claimed, 60 s: 3.
+8. Server: home list reads the indexer twice and Center about 5 times per lunch on every view; a lunch page reads the indexer twice per view and per refresh.
+9. Hidden tab: polls pause, nothing refetches on return; the fee review's 4 s block watch keeps running hidden.
+10. A 429 is retried once by every query.
+
+- [ ] One home for query defaults: 30 s pace, refetch on return, one retry except a 429; move the 15 s polls to it.
+- [ ] Chart history refreshes at one point's width, never under 30 s.
+- [ ] Typed quotes wait for typing to pause.
+- [ ] Airdrop claimed amounts read only while the list is open.
+- [ ] The token implementation is read once per chain, not per poll.
+- [ ] Fee review block watch pauses while hidden, checks again on return.
+- [ ] Server: keep the home list 30 s; logo and burns in one indexer request.
+- [ ] `npm run check` exits 0.
+
+---
+
 # Fair Lunch implementation plan
 
 > **For agentic workers:** execute task by task (superpowers:executing-plans, native, in the main session). Steps use checkbox syntax. Read the spec first; this plan argues from it.
