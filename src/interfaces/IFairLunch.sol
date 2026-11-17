@@ -177,7 +177,8 @@ interface IFairLunch {
 
     /// @notice Send this chain's revenue to the lunch's host chain.
     /// @param projectId The ID of the lunch's project on this chain.
-    function sendHome(uint256 projectId) external payable;
+    /// @param messagingGasLimit The destination gas limit the sucker requests from the bridge.
+    function sendHome(uint256 projectId, uint256 messagingGasLimit) external payable;
 
     /// @notice Serve a lunch once its deadline has passed.
     /// @param projectId The ID of the lunch's project.

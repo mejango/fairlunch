@@ -634,7 +634,9 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     /// `_SEND_HOME_MULTIPLE` times the supply, which carries all but a sliver. The tokens are minted to this contract
     /// on the host chain, where the next `burn` burns them.
     /// @param projectId The ID of the lunch's project on this chain.
-    function sendHome(uint256 projectId) external payable override nonReentrant {
+    /// @param messagingGasLimit The destination gas limit the sucker requests from the bridge. There is no protocol
+    /// default; size it by simulating the host chain's `fromRemote`.
+    function sendHome(uint256 projectId, uint256 messagingGasLimit) external payable override nonReentrant {
         uint256 hostChainId = _recordOf[projectId].hostChainId;
         address token = _recordOf[projectId].token;
 
@@ -667,15 +669,10 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             token: token,
             metadata: bytes32(0)
         });
-        sucker.toRemote{value: msg.value}(token);
-
-        // The sucker's fee bought JBP6 for this contract. It belongs to the caller who paid it. If the fee couldn't be
-        // paid, the sucker kept it for this contract to take back.
-        _sendFeeTokensTo(_msgSender());
-        try IJBSuckerExtended(address(sucker)).claimRetainedToRemoteFee(payable(address(this))) {}
-            catch {
-            // Nothing was kept, or this sucker can't keep any.
-        }
+        // The sucker's fee buys JBP6 for the caller who paid it, now or when a retained fee is paid later.
+        sucker.toRemote{value: msg.value}({
+            token: token, messagingGasLimit: messagingGasLimit, feeBeneficiary: _msgSender()
+        });
 
         // The sucker refunds whatever the bridge didn't need. Pass it on to the caller who paid.
         uint256 refund = address(this).balance - ethBefore;
@@ -804,14 +801,16 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
         if (token == JBConstants.NATIVE_TOKEN) {
             address[] memory suckers = SUCKER_REGISTRY.suckersOf(projectId);
             for (uint256 i; i < suckers.length; i++) {
+                // Enabling a mapping sends no message, so the destination gas limit is unused here.
                 IJBSucker(suckers[i])
-                    .mapToken(
-                        JBTokenMapping({
-                        localToken: token,
-                        minGas: _recordOf[projectId].suckerMinGas,
-                        remoteToken: bytes32(uint256(uint160(token)))
-                    })
-                    );
+                    .mapToken({
+                    map: JBTokenMapping({
+                    localToken: token,
+                    minGas: _recordOf[projectId].suckerMinGas,
+                    remoteToken: bytes32(uint256(uint160(token)))
+                }),
+                    messagingGasLimit: 0
+                });
             }
         }
 
