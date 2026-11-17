@@ -22,14 +22,21 @@ Ranked audit (requests per minute per open tab, estimated):
 9. Hidden tab: polls pause, nothing refetches on return; the fee review's 4 s block watch keeps running hidden.
 10. A 429 is retried once by every query.
 
-- [ ] One home for query defaults: 30 s pace, refetch on return, one retry except a 429; move the 15 s polls to it.
-- [ ] Chart history refreshes at one point's width, never under 30 s.
-- [ ] Typed quotes wait for typing to pause.
-- [ ] Airdrop claimed amounts read only while the list is open.
-- [ ] The token implementation is read once per chain, not per poll.
-- [ ] Fee review block watch pauses while hidden, checks again on return.
-- [ ] Server: keep the home list 30 s; logo and burns in one indexer request.
-- [ ] `npm run check` exits 0.
+- [x] One home for query defaults: 30 s pace, refetch on return, one retry except a 429; move the 15 s polls to it.
+- [x] Chart history refreshes at one point's width, never under 30 s.
+- [x] Typed quotes wait for typing to pause.
+- [x] Airdrop claimed amounts read only while the list is open.
+- [x] The token implementation is read once per chain, not per poll.
+- [x] Fee review block watch pauses while hidden, checks again on return.
+- [x] Server: keep the home list 30 s; logo and burns in one indexer request.
+- [x] `npm run check` exits 0.
+
+Review (2026-11-16):
+
+- Done as listed. Tests: `web/test/lean-reads.test.tsx`, `web/test/fee-watch.test.tsx`, `web/test/server-reads.test.ts`; each failed against the source at origin/main and passes now. `npm run check` exits 0: audit 0 high, lint clean, types clean, 37 tests in 7 files, build clean.
+- Kept as they are: the fee review's 4 s block watch and its check at confirm, every `prepare` read before a wallet prompt, the 15 s follow of a held write and the receipt wait after a send, and the 60 s reads of pool fees, vesting and copies.
+- Not reduced: the copies read scans bridge logs through the SDK on every poll, so its cost grows with a sucker's history. Asking less needs an indexed movement list or an SDK scan that starts where the last one ended.
+- Request counts are estimates from the code. Nothing was measured against live Center or Bendystraw, and nothing was rendered against live data.
 
 ---
 
