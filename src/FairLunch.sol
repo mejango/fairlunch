@@ -401,19 +401,11 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
 
             // What neither project takes goes into the lunch's balance.
             uint256 kept = _payFeeTo({
-                projectId: projectId,
-                feeProjectId: _FEE_PROJECT_ID,
-                token: token,
-                amount: paid - shared,
-                beneficiary: record.creator
+                feeProjectId: _FEE_PROJECT_ID, token: token, amount: paid - shared, beneficiary: record.creator
             });
             if (shared != 0) {
                 kept += _payFeeTo({
-                    projectId: projectId,
-                    feeProjectId: splitProjectId,
-                    token: token,
-                    amount: shared,
-                    beneficiary: record.creator
+                    feeProjectId: splitProjectId, token: token, amount: shared, beneficiary: record.creator
                 });
             }
             if (kept != 0) _addToBalanceOf({projectId: projectId, token: token, amount: kept});
@@ -984,14 +976,12 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
     }
 
     /// @notice Pay an amount of a lunch's pool fees into a project, if it takes the money in this contract's terminal.
-    /// @param projectId The ID of the lunch's project.
     /// @param feeProjectId The ID of the project to pay.
     /// @param token The lunch's money.
     /// @param amount The amount to pay.
     /// @param beneficiary The address that gets the tokens the payment mints.
     /// @return kept The amount the project didn't take: all of it or none of it.
     function _payFeeTo(
-        uint256 projectId,
         uint256 feeProjectId,
         address token,
         uint256 amount,
