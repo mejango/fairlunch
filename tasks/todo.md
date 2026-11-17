@@ -1,3 +1,24 @@
+# Web client onto nana-sdk-core 6.10.2 (2026-11-17, branch chore/sdk-6-10-2)
+
+## Plan refinement
+
+- **Objective:** Move `web/` from `@bananapus/nana-sdk-core` 2.41.3 to 6.10.2 so every send, review, hold and poll runs on the SDK path jbm, revnet and Sticky run; only `web/` and `tasks/` change, contracts and their two open PRs are untouched, the client stays on the same contract versions, and user-visible behavior and copy stay the same except where the SDK's shared behavior differs, each difference listed in the review below.
+- **System fit:** The send chain is `TxAction` (prepare reads the chain, confirm rows) then `useSafeTx` (2.x `submitReviewedContractWrite` under `useHeldSend`, boolean review handler) then the wallet; 4.0.0 removed that boolean review API, so the owner becomes the SDK's `useReviewedRun` with core's minted confirmation (`registerReviewHandler`), `viemWalletAdapter` and the write hold, and the site keeps only the dialog UI and its wagmi deps; reads (`reads.ts`, `indexed.ts`, `bendystraw.ts`, JB Center RPC) keep their owners and only adapt to renamed or narrowed exports.
+- **Reuse and simplicity:** Fair Lunch's send files are Sticky's at its 2.41.3 commit (82f6e3d) with five-line deltas, so each is replaced by Sticky's current 6.x file with the same deltas re-applied and everything Fair Lunch never uses left out (multi-step sequences, legacy hold keys, Signa refusal, funding-chain rows stay only where the shared dialog needs them); deleted outright: `contract-write.ts`, the local Safe queue lookup, gas headroom, receipt watcher, `followDetached` and `assertReviewedWallet`, all of which 6.x does itself; no shim for the old API and no new layer.
+- **Evidence and unknowns:** npm lists 2.41.3 (2026-10-18) and 6.10.2 (2026-11-17) as one package line four majors apart, with the breaks in its CHANGELOG (3.0.0 direct-pay removed, 4.0.0 boolean review API removed and `useReviewedRun` added, 5.0.0 receipt status, 6.0.0 renamed address generations); the type checker against the installed 6.10.2 is the authority for every other export, and what stays unverified is a real wallet signature and a Safe proposal, since no wallet signs in this run.
+- **Verification:** `npm run check` in `web/` exits 0 (audit, lint, types, tests, build) on Node 26 and npm 12; one new vitest drives `TxAction` through the real 6.10.2 engine with a fake wallet (review opens, confirm sends the exact prepared bytes once, a declined review sends nothing, view-as refuses before the wallet); then the built site is rendered against testnet data at desktop and 390 px for home, a lunch page and a pay review up to the wallet prompt, with screenshots read.
+- **Resource budget:** One pass: bump and let `tsc` list the breaks, port the send path file by file from Sticky, run the gate once per commit group, render once at the end; stop and report instead of guessing if a flow needs a redesign, a product decision, or a different contract version.
+
+- [ ] Bump to 6.10.2 with Node 26 and npm 12; list what `tsc` breaks.
+- [ ] Send path: `useReviewedAction` over `useReviewedRun`, wallet adapter, review provider and dialog on core's `ReviewModel`; delete what the SDK now owns.
+- [ ] Reads and builders: adapt renamed or narrowed exports.
+- [ ] Test: `TxAction` through the real engine.
+- [ ] `npm run check` exits 0.
+- [ ] Render home, a lunch, a pay review at desktop and 390 px; read the screenshots.
+- [ ] Review section: user-visible differences, what is not verified.
+
+---
+
 # Lean network reads in the web client (2026-11-16, branch perf/lean-network)
 
 ## Plan refinement
