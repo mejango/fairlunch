@@ -50,23 +50,6 @@ interface IFairLunch {
         address caller
     );
 
-    /// @notice Emitted when a payment of a lunch's pool fees into a project reverted and was kept in the lunch's
-    /// balance.
-    /// @param projectId The ID of the lunch's project.
-    /// @param token The lunch's money.
-    /// @param feeProjectId The ID of the project the payment was for.
-    /// @param amount The amount that was kept.
-    /// @param reason Always empty. Kept so the event has the same shape as the terminal's.
-    /// @param caller The address that called the function.
-    event FeeReverted(
-        uint256 indexed projectId,
-        address indexed token,
-        uint256 indexed feeProjectId,
-        uint256 amount,
-        bytes reason,
-        address caller
-    );
-
     /// @notice Emitted when a chain's revenue is sent to the lunch's host chain.
     /// @param projectId The ID of the lunch's project on this chain.
     /// @param sucker The sucker the revenue was sent through.

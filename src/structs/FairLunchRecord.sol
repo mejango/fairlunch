@@ -10,6 +10,8 @@ pragma solidity ^0.8.0;
 /// @custom:member keepCap The most the creator can keep, in the money's smallest unit.
 /// @custom:member tokenPercent The creator's share of the total token supply at launch, out of
 /// `JBConstants.SPLITS_TOTAL_PERCENT`.
+/// @custom:member suckerMinGas The gas the lunch's suckers reserve on the remote chain for a claim of the token. The
+/// lunch's own number: the protocol imposes no floor, since any floor is tuned to one set of gas rules.
 /// @custom:member vestingDuration The number of seconds over which the creator's tokens vest.
 /// @custom:member positionId The ID of the lunch's Uniswap V4 liquidity position, which `FairLunchPool` holds forever.
 struct FairLunchRecord {
@@ -19,6 +21,7 @@ struct FairLunchRecord {
     uint32 keepPercent;
     uint104 keepCap;
     uint32 tokenPercent;
+    uint32 suckerMinGas;
     uint32 vestingDuration;
     uint256 positionId;
 }
