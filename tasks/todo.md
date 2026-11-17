@@ -9,13 +9,23 @@
 - **Verification:** `npm run check` in `web/` exits 0 (audit, lint, types, tests, build) on Node 26 and npm 12; one new vitest drives `TxAction` through the real 6.10.2 engine with a fake wallet (review opens, confirm sends the exact prepared bytes once, a declined review sends nothing, view-as refuses before the wallet); then the built site is rendered against testnet data at desktop and 390 px for home, a lunch page and a pay review up to the wallet prompt, with screenshots read.
 - **Resource budget:** One pass: bump and let `tsc` list the breaks, port the send path file by file from Sticky, run the gate once per commit group, render once at the end; stop and report instead of guessing if a flow needs a redesign, a product decision, or a different contract version.
 
-- [ ] Bump to 6.10.2 with Node 26 and npm 12; list what `tsc` breaks.
-- [ ] Send path: `useReviewedAction` over `useReviewedRun`, wallet adapter, review provider and dialog on core's `ReviewModel`; delete what the SDK now owns.
-- [ ] Reads and builders: adapt renamed or narrowed exports.
-- [ ] Test: `TxAction` through the real engine.
-- [ ] `npm run check` exits 0.
-- [ ] Render home, a lunch, a pay review at desktop and 390 px; read the screenshots.
-- [ ] Review section: user-visible differences, what is not verified.
+- [x] Bump to 6.10.2 with Node 26 and npm 12; list what `tsc` breaks.
+- [x] Send path: `useReviewedAction` over `useReviewedRun`, wallet adapter, review provider and dialog on core's `ReviewModel`; delete what the SDK now owns.
+- [x] Reads and builders: adapt renamed or narrowed exports.
+- [x] Test: `TxAction` through the real engine.
+- [x] `npm run check` exits 0.
+- [x] Render home, a lunch, a pay review at desktop and 390 px; read the screenshots.
+- [x] Review section: user-visible differences, what is not verified.
+
+Review (2026-11-17):
+
+- The gap was real: 2.41.3 and 6.10.2 are the same package, four majors apart. Only the review API broke the types (4.0.0 removed the boolean review handler). Every protocol output the site depends on is byte-identical between the two versions (the six ABIs, pay and cash out metadata, the bridge claim call, sucker deployers, CCIP values, V4 state view addresses and pool ids), and terminal, router and buyback addresses still come from the FairLunch contract, so the client stays on the same contract versions.
+- Send path: `useSafeTx.ts` became `useReviewedAction.ts` over the SDK's `useReviewedRun`; `wallet-core.ts`, `review-engine.ts`, the review provider and dialog are Sticky's 6.x files. Deleted: `contract-write.ts`, the local Safe queue lookup, gas headroom, the receipt watcher, `followDetached`, `assertReviewedWallet`, the local fee return review and its test.
+- User-visible differences, all the SDK's shared behavior: the wait after sending reads "Confirming your transaction." (was "Waiting for confirmation…"); the review dialog is drawn from core's review model (roles, token amounts, warnings, the simulation's result in the review); a failure shows the SDK's own line or its network line, never a node's text; a held write is followed at the SDK's pace (was every 15 s) and a hidden tab asks nothing at the slow pace; a success that landed while the form was away is offered as "Send it again" instead of being sent twice.
+- One step back: the fee return review's 4 s block watch no longer pauses while the tab is hidden. That pause was local code (#3); the SDK's `useFeeBuybackReview` has none. It runs only while a review of a fee-paying call is open. The fix belongs in the SDK, for every client.
+- Checks: `npm run check` exits 0 on Node 26.7.0 and npm 12.0.1: audit 0 high, lint clean, types clean, 39 tests in 7 files, build clean. `test/reviewed-action.test.ts` drives the hook through the real engine.
+- Rendered the built site against live testnet data (Arbitrum Sepolia lunch 22) at 1280 and 390 px: home, the lunch page, connect, the confirm, the decoded review, and the wallet's `eth_sendTransaction` carrying the reviewed bytes. The wallet was a stand-in that refuses every send. No horizontal overflow and no console errors.
+- Not verified: a real wallet signature and a mined transaction, a Safe proposal, WalletConnect, a held write across a reload, the cooking-lunch Fund, Refund, Claim, Deliver and Bring in buttons (no cooking lunch or copy is live), `scripts/copy-check.mjs` and `scripts/testnet-walk.mjs`, and a side by side with the deployed site (fairlun.ch did not resolve from this machine). The price chart of lunch 22 stayed on its loading block with every read answered; `PriceChart.tsx` and its reads did not change here, so this looks like the existing empty-history state, not confirmed against the old build.
 
 ---
 
