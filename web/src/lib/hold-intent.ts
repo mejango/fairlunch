@@ -1,6 +1,6 @@
 import { payIntent } from '@bananapus/nana-sdk-core/review'
 import type { Address } from 'viem'
-import type { TxRequest } from '@/hooks/useSafeTx'
+import type { TxRequest } from '@/hooks/useReviewedAction'
 
 /** A write's hold key, from the SDK's intent builders. A pay is keyed by project and beneficiary; every other Fair
  * Lunch write (create, serve, burn, collect, send home) is held by its exact call. */

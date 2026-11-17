@@ -7,7 +7,7 @@ import type { Address, Hex } from 'viem'
 import { TxConfirmDialog, type TxConfirmRow } from '@/components/ui/TxConfirmDialog'
 import { TxError } from '@/components/ui/TxError'
 import { confirmAction, sendingStatus, stepsIntro, ViewTransactionLink } from '@/components/ui/TxProgress'
-import { useSafeTx, type TxRequest } from '@/hooks/useSafeTx'
+import { useReviewedAction, type TxRequest } from '@/hooks/useReviewedAction'
 import { useWallet } from '@/hooks/useWallet'
 import { chainName } from '@/lib/urn'
 import { getViewAs, VIEW_AS_WRITE_BLOCKED } from '@/lib/viewAs'
@@ -32,7 +32,7 @@ export function TxAction({ chainId, label, title, doneTitle, prepare, onDone, di
   className?: string
 }) {
   const { address, isConnected, openSignIn } = useWallet()
-  const tx = useSafeTx(chainId)
+  const tx = useReviewedAction()
   const client = useQueryClient()
   const router = useRouter()
   const [review, setReview] = useState<Review | null>(null)
@@ -94,7 +94,7 @@ export function TxAction({ chainId, label, title, doneTitle, prepare, onDone, di
           settled={tx.phase === 'submitted'}
           busy={sending}
           action={confirmAction(tx.phase, tx.phase === 'error' ? 'Retry' : 'Confirm')}
-          onConfirm={() => { if (current.plan && !sending) void tx.send(current.plan, { reviewedAccount: current.account }) }}
+          onConfirm={() => { if (current.plan && !sending) void tx.run(current.plan, current.account) }}
           status={complete ? <ViewTransactionLink chainId={chainId} hash={tx.hash} /> : !current.plan ? 'Getting it ready…' : (sendingStatus(tx) ?? undefined)}
           error={tx.error}
         />

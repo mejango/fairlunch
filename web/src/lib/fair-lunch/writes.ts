@@ -2,7 +2,7 @@ import { jbDirectoryAbi, jbMultiTerminalAbi, jbProjectsAbi, jbTerminalStoreAbi, 
 import { quoteUniswapV4ExactInputSingle } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
 import { buildBridgeClaimTx, buildBuybackCashOutMetadata, buildBuybackPayMetadata, CCIP_SUCKER_TRANSPORT_VALUES, findSuckerTransportValue, type JBClaim } from '@bananapus/nana-sdk-core/v6'
 import { erc20Abi, isAddressEqual, pad, zeroHash, type Abi, type Address, type Hex } from 'viem'
-import type { TxRequest } from '@/hooks/useSafeTx'
+import type { TxRequest } from '@/hooks/useReviewedAction'
 import { jbCenterPublicClient } from '@/lib/jbcenter-rpc'
 import { fairLunchAbi } from './abi'
 import type { Copy, Lunch } from './reads'
