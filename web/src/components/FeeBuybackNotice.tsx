@@ -32,7 +32,7 @@ export function useFeeBuybackReview(calls: readonly Call[]) {
   useEffect(() => {
     if (!enabled) return
     let alive = true
-    const stops: (() => void)[] = []
+    let stops: (() => void)[] = []
     // Every fee-paying call is simulated alone on its own chain.
     const checked = calls.filter(isFeePayingCall).map(call => {
       try {
@@ -71,10 +71,9 @@ export function useFeeBuybackReview(calls: readonly Call[]) {
     checked.forEach(({ call, context }, index) => {
       if (context) chains.set(call.chainId, [...(chains.get(call.chainId) ?? []), index])
     })
-    for (const indexes of chains.values()) {
-      const context = checked[indexes[0]].context!
-      stops.push(
-        context.client.watchBlockNumber({
+    const watch = () => {
+      stops = [...chains.values()].map(indexes =>
+        checked[indexes[0]].context!.client.watchBlockNumber({
           pollingInterval: 4000,
           onBlockNumber: () => {
             for (const index of indexes) void monitors[index].refresh()
@@ -86,10 +85,24 @@ export function useFeeBuybackReview(calls: readonly Call[]) {
         }),
       )
     }
+    const unwatch = () => {
+      for (const stop of stops) stop()
+      stops = []
+    }
+    // Blocks are watched while the review can be seen. Looked at again, every call is checked at once, then watched.
+    const seen = () => {
+      unwatch()
+      if (document.visibilityState === 'hidden') return
+      for (const monitor of monitors) void monitor.refresh()
+      watch()
+    }
+    if (document.visibilityState !== 'hidden') watch()
+    document.addEventListener('visibilitychange', seen)
     return () => {
       alive = false
+      document.removeEventListener('visibilitychange', seen)
       for (const monitor of monitors) monitor.stop()
-      for (const stop of stops) stop()
+      unwatch()
       watches.current = []
     }
   }, [calls, enabled])
