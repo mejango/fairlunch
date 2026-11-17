@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { getAccount } from '@wagmi/core'
 import { encodeFunctionData, type Abi, type Address, type Hex } from 'viem'
 import {
   HELD_CONFIRMING_LINE,
@@ -25,8 +24,6 @@ import { wagmiConfig } from '@/providers/Providers'
 
 /** A run whose button left the page before the wallet's prompt: nothing is sent. */
 const REVIEW_CLOSED_LINE = 'This review closed. Open the action again before sending.'
-/** Another wallet became the connected one after the review opened, with the same account and chain or not. */
-const WALLET_CHANGED_LINE = 'Wallet connection changed. Review the transaction again.'
 
 export type TxPhase =
   | 'idle'
@@ -139,9 +136,6 @@ export function useReviewedAction() {
     setExitError(null)
     const viaSafe = isSafeConnection(wagmiConfig)
     const epoch = accountEpoch.current
-    // The wallet the review is for. The SDK's adapter binds the connector only from the send on, so one that
-    // replaced it while the review was open, with the same account and chain, is refused here.
-    const connectorUid = getAccount(wagmiConfig).connector?.uid
     const abort = new AbortController()
     aborts.current.add(abort)
     try {
@@ -158,7 +152,6 @@ export function useReviewedAction() {
         assertWriteState: () => {
           if (!open.current) throw new ReviewLineError(REVIEW_CLOSED_LINE)
           if (accountEpoch.current !== epoch) throw new ReviewLineError(REVIEWED_ACCOUNT_CHANGED_LINE)
-          if (getAccount(wagmiConfig).connector?.uid !== connectorUid) throw new ReviewLineError(WALLET_CHANGED_LINE)
         },
         onSubmitted: (_call, _step, hash, how) => { if (!how.safe) setSubmitted(hash) },
       })
