@@ -669,12 +669,10 @@ contract FairLunch is ERC2771Context, ReentrancyGuardTransient, IFairLunch, IJBP
             token: token,
             metadata: bytes32(0)
         });
-        sucker.toRemote{value: msg.value}({token: token, messagingGasLimit: messagingGasLimit});
-
-        // The sucker's fee bought JBP6 for this contract. It belongs to the caller who paid it. If the fee couldn't be
-        // paid, the sucker keeps it for the fee project, not for a refund: anyone can pay it later, and the JBP6 that
-        // mints then lands on this contract with no caller left to attribute it to.
-        _sendFeeTokensTo(_msgSender());
+        // The sucker's fee buys JBP6 for the caller who paid it, now or when a retained fee is paid later.
+        sucker.toRemote{value: msg.value}({
+            token: token, messagingGasLimit: messagingGasLimit, feeBeneficiary: _msgSender()
+        });
 
         // The sucker refunds whatever the bridge didn't need. Pass it on to the caller who paid.
         uint256 refund = address(this).balance - ethBefore;
