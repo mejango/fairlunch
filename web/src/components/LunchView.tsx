@@ -3,10 +3,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
 import { formatUnits, isAddressEqual, parseUnits, type Abi } from 'viem'
+import { useDebounced } from '@/hooks/useDebounced'
 import { useWallet } from '@/hooks/useWallet'
 import { ChainIcon } from '@/components/ChainIcon'
 import { PriceChart, type Burn } from '@/components/PriceChart'
 import { TxAction } from '@/components/TxAction'
+import { POLL_MS } from '@/lib/query-defaults'
 import { assetUrl, formatEth, formatPrice, formatTokens } from '@/lib/format'
 import { countdown, PHASE_LABEL, phaseOf, REST_SECONDS, type Phase } from '@/lib/fair-lunch/phase'
 import { uniswapV4PoolId } from '@bananapus/nana-sdk-core/v6/uniswap-v4'
@@ -19,6 +21,9 @@ import { chainName, projectPath } from '@/lib/urn'
 
 /** Refuse a buy that returns more than this much less than quoted. */
 const SLIPPAGE_BPS = 200n
+
+/** How long typing has to pause before the pool is asked for a quote. */
+const QUOTE_PAUSE_MS = 300
 
 function useNow(): number {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
@@ -104,7 +109,7 @@ function PayCard({ lunch, status }: { lunch: Lunch; status: ReactNode }) {
     queryKey: ['fair-lunch', 'held', lunch.chainId, lunch.projectId, address],
     queryFn: ({ signal }) => readHeld(lunch, address!, signal),
     enabled: Boolean(address),
-    refetchInterval: 15_000,
+    refetchInterval: POLL_MS,
   })
   return (
     <section className="card space-y-3 p-4">
@@ -170,19 +175,23 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
   // What's paid is the token when selling and money when buying. What's got is the other.
   const decimalsOf = (side: 'pay' | 'get') => ((side === 'pay') === selling ? 18 : lunch.money.decimals)
   const amount = amountOf(typed.text, decimalsOf(typed.side))
+  // The pool is asked once the typing pauses, not for every digit on the way.
+  const asked = useDebounced(amount, QUOTE_PAUSE_MS)
   const [from, to] = selling ? [lunch.symbol, money] : [money, lunch.symbol]
   const format = (wei: bigint, side: 'pay' | 'get') => ((side === 'pay') === selling ? `${formatTokens(wei)} ${lunch.symbol}` : moneyText(lunch, wei))
   const quote = useQuery({
-    queryKey: ['fair-lunch', 'quote', lunch.chainId, lunch.projectId, selling, typed.side, amount.toString()],
+    queryKey: ['fair-lunch', 'quote', lunch.chainId, lunch.projectId, selling, typed.side, asked.toString()],
     queryFn: async () => typed.side === 'pay'
-      ? { pay: amount, get: await quoteSwap(lunch, amount, selling) }
-      : { pay: await quoteSwapFor(lunch, amount, selling), get: amount },
-    enabled: amount > 0n,
-    refetchInterval: 15_000,
+      ? { pay: asked, get: await quoteSwap(lunch, asked, selling) }
+      : { pay: await quoteSwapFor(lunch, asked, selling), get: asked },
+    enabled: asked > 0n && asked === amount,
+    refetchInterval: POLL_MS,
   })
-  const other = (side: 'pay' | 'get') => (amount > 0n && quote.data ? inputText(quote.data[side], decimalsOf(side)) : '')
+  // The quote for what is typed now. One for an amount typed before says nothing about this one.
+  const quoted = amount > 0n && asked === amount ? quote.data : undefined
+  const other = (side: 'pay' | 'get') => (quoted ? inputText(quoted[side], decimalsOf(side)) : '')
   // A buy sized by what it gets may need a little more money than the quote by the time it lands.
-  const paying = selling ? 0n : typed.side === 'pay' ? amount : ((quote.data?.pay ?? 0n) * 101n) / 100n
+  const paying = selling ? 0n : typed.side === 'pay' ? amount : ((quoted?.pay ?? 0n) * 101n) / 100n
   const short = useShort(lunch, paying)
   const verb = `${selling ? 'Sell' : 'Buy'} ${lunch.symbol}`
   const side = (which: 'pay' | 'get', label: string, unit: string) => (
@@ -203,7 +212,7 @@ function SwapCard({ lunch }: { lunch: Lunch }) {
           className="relative z-10 mx-auto -my-3 flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-card text-lg hover:border-ink">↓</button>
         {side('get', 'Buy', to)}
       </div>
-      {amount > 0n && !quote.data ? <p className="text-sm text-muted">{quote.isError ? 'No quote right now.' : 'Getting a quote…'}</p> : null}
+      {amount > 0n && !quoted ? <p className="text-sm text-muted">{quote.isError && asked === amount ? 'No quote right now.' : 'Getting a quote…'}</p> : null}
       <div className="flex flex-col items-end gap-2">
         {short > 0n ? <Allow lunch={lunch} amount={short} /> : <TxAction chainId={lunch.chainId} label={verb} title={verb} doneTitle="Done" onDone={() => setTyped({ side: 'pay', text: '' })}
           prepare={async account => {
@@ -292,6 +301,7 @@ const RECIPIENTS_SHOWN = 20
 function Airdrop({ lunch, tokens, now }: { lunch: Lunch; tokens: bigint; now: number }) {
   const { address } = useWallet()
   const [find, setFind] = useState('')
+  const [open, setOpen] = useState(false)
   const { data: entries } = useQuery({
     queryKey: ['fair-lunch', 'claim-list', lunch.chainId, lunch.projectId],
     queryFn: ({ signal }) => readClaimList(lunch, assetUrl, signal),
@@ -307,12 +317,12 @@ function Airdrop({ lunch, tokens, now }: { lunch: Lunch; tokens: bigint; now: nu
   const { data: claimed } = useQuery({
     queryKey: ['fair-lunch', 'claimed', lunch.chainId, lunch.projectId, shown.map(({ account }) => account)],
     queryFn: ({ signal }) => readClaimed(lunch, shown.map(({ account }) => account), signal),
-    enabled: !!lunch.servedAt && shown.length > 0,
+    enabled: open && !!lunch.servedAt && shown.length > 0,
     refetchInterval: 60_000,
   })
   if (!lunch.claimsPercent) return null
   return (
-    <details className="mt-4 border-t border-line/50 pt-3">
+    <details className="mt-4 border-t border-line/50 pt-3" onToggle={event => setOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer">
         <span className="text-sm text-muted">Airdrop{entries ? ` to ${entries.length.toLocaleString()} ${entries.length === 1 ? 'address' : 'addresses'}` : ''}{lunch.claimsVestingDuration ? `, unlocking over ${Math.round(lunch.claimsVestingDuration / 604800)} weeks` : ''}</span>
         <span className="block text-xl font-bold tabular-nums">{tokens ? `${formatTokens(tokens)} ${lunch.symbol}` : percent(lunch.claimsPercent)}</span>
@@ -495,7 +505,7 @@ export function LunchView({ chainId, projectId, burns, logoUri }: { chainId: num
   const { data: lunch, isError, isPending } = useQuery({
     queryKey: ['fair-lunch', 'lunch', chainId, projectId],
     queryFn: ({ signal }) => readLunch(chainId, projectId, signal),
-    refetchInterval: 15_000,
+    refetchInterval: POLL_MS,
   })
   if (isPending) return <div className="card h-64 animate-pulse" aria-busy="true" />
   if (isError) return <p className="card p-6">This lunch couldn&apos;t load. It&apos;ll try again.</p>

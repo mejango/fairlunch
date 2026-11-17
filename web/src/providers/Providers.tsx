@@ -6,6 +6,7 @@ import { createConfig, injected, WagmiProvider } from 'wagmi'
 import { TransactionReviewProvider } from '@/components/TransactionReviewProvider'
 import { SUPPORTED_CHAINS } from '@/lib/chains'
 import { jbCenterRpcTransport } from '@/lib/jbcenter-rpc'
+import { QUERY_DEFAULTS } from '@/lib/query-defaults'
 import { installQueryPersistence } from '@/lib/query-persist'
 import { watchSafeWalletPeer } from '@/lib/safe-wallet-peer'
 import { WalletAuthContext } from './WalletAuthContext'
@@ -29,9 +30,7 @@ export const wagmiConfig = createConfig({ chains: SUPPORTED_CHAINS, transports,
   multiInjectedProviderDiscovery: !IS_DETERMINISTIC_BROWSER, ssr: true })
 
 export function Providers({ children }: PropsWithChildren) {
-  const [queryClient] = useState(() => new QueryClient({ defaultOptions: { queries: {
-    staleTime: 30_000, gcTime: 10 * 60_000, retry: 1, refetchOnWindowFocus: false,
-  } } }))
+  const [queryClient] = useState(() => new QueryClient({ defaultOptions: { queries: QUERY_DEFAULTS } }))
   // What the browser kept of earlier visits is restored at once. Its reads go through useKeptQuery, which renders what
   // the server rendered until the component has hydrated, whatever the cache holds, and the kept copy right after.
   useEffect(() => installQueryPersistence(queryClient), [queryClient])
