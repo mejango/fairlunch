@@ -318,6 +318,8 @@ function Airdrop({ lunch, tokens, now }: { lunch: Lunch; tokens: bigint; now: nu
     queryKey: ['fair-lunch', 'claimed', lunch.chainId, lunch.projectId, shown.map(({ account }) => account)],
     queryFn: ({ signal }) => readClaimed(lunch, shown.map(({ account }) => account), signal),
     enabled: open && !!lunch.servedAt && shown.length > 0,
+    // Read again each time the list is opened: a claim is reviewed against these amounts.
+    staleTime: 0,
     refetchInterval: 60_000,
   })
   if (!lunch.claimsPercent) return null
